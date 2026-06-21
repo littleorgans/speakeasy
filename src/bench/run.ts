@@ -12,7 +12,13 @@ const DEFAULT_FRAME_MS = 20;
 const PASS_THRESHOLD_MS = 200;
 const SOFT_THRESHOLD_MS = 300;
 const SESSION_TIMEOUT_MS = 30_000;
-const SPEECH_THRESHOLD = 0.01;
+const EXPECTED_JFK_TRANSCRIPT = "and so my fellow americans";
+const RMS_WINDOW_MS = 20;
+const RMS_HANGOVER_MS = 650;
+const RMS_PEAK_RATIO = 0.04;
+const RMS_NOISE_MULTIPLIER = 8;
+const RMS_MIN_THRESHOLD = 0.016;
+const RMS_TAIL_NOISE_MS = 500;
 const SHERPA_SWEEP: Required<EndpointConfig>[] = [
   { mode: "eager", minTrailingSilenceMs: 80, minUtteranceMs: 20_000 },
   { mode: "eager", minTrailingSilenceMs: 120, minUtteranceMs: 20_000 },
@@ -39,6 +45,15 @@ type SpeechProfile = {
   endMs: number;
   frameIndex: number;
   offsetWithinFrameMs: number;
+  threshold: number;
+  windowMs: number;
+  hangoverMs: number;
+};
+
+type FinalObservation = {
+  endpointAt: number;
+  finalAt: number;
+  text: string;
 };
 
 type RunResult = {
@@ -50,6 +65,7 @@ type RunResult = {
   wallMs: number;
   finalText: string;
   finalizedAfterSpeechEnd: boolean;
+  textCorrect: boolean;
 };
 
 type Summary = {
@@ -59,6 +75,9 @@ type Summary = {
   endpointToFinalMedian: number;
   speechEndToFinalMedian: number;
   firstPartialMedian?: number;
+  firstPartialColdMs?: number;
+  firstPartialWarmMedian?: number;
+  textCorrect: boolean;
   passFail: "PASS" | "FAIL";
   ok: boolean;
 };
@@ -77,6 +96,12 @@ console.log(
   `audio=${audio.durationMs.toFixed(0)}ms speech-end=${speech.endMs.toFixed(0)}ms trailing-silence=${(audio.durationMs - speech.endMs).toFixed(0)}ms`,
 );
 console.log(
+  `speech-end-detector=rms-window window=${speech.windowMs}ms hangover=${speech.hangoverMs}ms threshold=${speech.threshold.toFixed(4)}`,
+);
+console.log(
+  `expected=${JSON.stringify(EXPECTED_JFK_TRANSCRIPT)} comparison=case/punct-insensitive-exact`,
+);
+console.log(
   `format=${audio.sampleRate}Hz mono ${audio.bitsPerSample}-bit cadence=${options.frameMs}ms/frame frames=${audio.frames.length} runs=${options.runs}`,
 );
 console.log(
@@ -93,10 +118,10 @@ for (const summary of summaries) {
   printSummary(summary);
 }
 
-const best = selectBestSummary(summaries);
-if (summaries.length > 1 && best) {
+const selected = selectBestSummary(summaries) ?? selectLowestMeasuredSummary(summaries);
+if (summaries.length > 1 && selected) {
   console.log(
-    `best=${formatEndpoint(best.endpoint)} endpoint->final=${formatMs(best.speechEndToFinalMedian)} event->final=${formatMs(best.endpointToFinalMedian)} first-partial=${formatOptionalMs(best.firstPartialMedian)}`,
+    `selected=${formatEndpoint(selected.endpoint)} endpoint->final=${formatMs(selected.speechEndToFinalMedian)} event->final=${formatMs(selected.endpointToFinalMedian)} text-correct=${formatBoolean(selected.textCorrect)} first-partial-warm=${formatOptionalMs(selected.firstPartialWarmMedian)}`,
   );
 }
 
@@ -124,15 +149,16 @@ async function runEngineSummary(
   const results: RunResult[] = [];
 
   for (let run = 1; run <= cli.runs; run += 1) {
-    const result = await runOnce({
-      run,
-      engine,
-      endpoint,
-      audio: wav,
-      speech: speechProfile,
-      frameMs: cli.frameMs,
-    });
-    results.push(result);
+    results.push(
+      await runOnce({
+        run,
+        engine,
+        endpoint,
+        audio: wav,
+        speech: speechProfile,
+        frameMs: cli.frameMs,
+      }),
+    );
   }
 
   const endpointToFinalMedian = median(
@@ -144,8 +170,13 @@ async function runEngineSummary(
   const firstPartialMedian = medianOptional(
     results.map((result) => result.firstPartialMs),
   );
+  const firstPartialColdMs = results[0]?.firstPartialMs;
+  const firstPartialWarmMedian = medianOptional(
+    results.slice(1).map((result) => result.firstPartialMs),
+  );
+  const textCorrect = results.every((result) => result.textCorrect);
   const ok = results.every(
-    (result) => result.finalizedAfterSpeechEnd && result.finalText.length > 0,
+    (result) => result.finalizedAfterSpeechEnd && result.textCorrect,
   );
 
   return {
@@ -155,6 +186,9 @@ async function runEngineSummary(
     endpointToFinalMedian,
     speechEndToFinalMedian,
     firstPartialMedian,
+    firstPartialColdMs,
+    firstPartialWarmMedian,
+    textCorrect,
     passFail:
       ok && speechEndToFinalMedian < PASS_THRESHOLD_MS ? "PASS" : "FAIL",
     ok,
@@ -186,12 +220,18 @@ async function runOnce(input: {
     await delay(input.frameMs);
   }
 
-  const endPromise = session.end();
-  const final = await withTimeout(state.final, SESSION_TIMEOUT_MS);
-  await endPromise;
+  await withTimeout(session.end(), SESSION_TIMEOUT_MS);
+  state.throwIfError();
+
   const wallMs = performance.now() - start;
   const observedSpeechEndAt = speechEndAt ?? start + input.speech.endMs;
+  const final = chooseFinal(state.finals, observedSpeechEndAt) ?? {
+    endpointAt: performance.now(),
+    finalAt: performance.now(),
+    text: "",
+  };
   const speechEndToFinalMs = final.finalAt - observedSpeechEndAt;
+  const textCorrect = isExpectedTranscript(final.text);
 
   return {
     run: input.run,
@@ -204,57 +244,70 @@ async function runOnce(input: {
     wallMs,
     finalText: final.text,
     finalizedAfterSpeechEnd: speechEndToFinalMs >= 0,
+    textCorrect,
   };
 }
 
 function attachSessionObservers(session: STTSession): {
   firstPartialAt?: number;
-  final: Promise<{ endpointAt: number; finalAt: number; text: string }>;
+  finals: FinalObservation[];
+  throwIfError: () => void;
 } {
-  const state: {
-    firstPartialAt?: number;
-    endpointAt?: number;
-    finalResolve?: (value: {
-      endpointAt: number;
-      finalAt: number;
-      text: string;
-    }) => void;
-    finalReject?: (error: unknown) => void;
-  } = {};
-
-  const final = new Promise<{
-    endpointAt: number;
-    finalAt: number;
-    text: string;
-  }>((resolve, reject) => {
-    state.finalResolve = resolve;
-    state.finalReject = reject;
-  });
+  const endpointEvents: number[] = [];
+  const finalTexts: string[] = [];
+  const finals: FinalObservation[] = [];
+  const state: { firstPartialAt?: number; error?: unknown } = {};
 
   session.on("partial", () => {
     state.firstPartialAt ??= performance.now();
   });
   session.on("endpoint", () => {
-    state.endpointAt = performance.now();
+    endpointEvents.push(performance.now());
   });
   session.on("final", ({ text }: { text: string }) => {
     const finalAt = performance.now();
-    state.finalResolve?.({
-      endpointAt: state.endpointAt ?? finalAt,
+    const trimmed = text.trim();
+    if (trimmed) {
+      finalTexts.push(trimmed);
+    }
+    finals.push({
+      endpointAt: lastEndpointBefore(endpointEvents, finalAt) ?? finalAt,
       finalAt,
-      text,
+      text: finalTexts.join(" ").trim(),
     });
   });
   session.on("error", ({ err }: { err: unknown }) => {
-    state.finalReject?.(err);
+    state.error = err;
   });
 
   return {
     get firstPartialAt() {
       return state.firstPartialAt;
     },
-    final,
+    finals,
+    throwIfError() {
+      if (state.error) {
+        throw state.error;
+      }
+    },
   };
+}
+
+function chooseFinal(
+  finals: FinalObservation[],
+  speechEndAt: number,
+): FinalObservation | undefined {
+  return (
+    finals.find((final) => final.finalAt >= speechEndAt && final.text) ??
+    finals.findLast((final) => final.text)
+  );
+}
+
+function lastEndpointBefore(
+  endpoints: number[],
+  finalAt: number,
+): number | undefined {
+  return endpoints.findLast((endpointAt) => endpointAt <= finalAt);
 }
 
 function createEngine(name: EngineName): BenchEngine {
@@ -330,36 +383,86 @@ function parsePositiveInteger(flag: string, value: string): number {
 }
 
 function detectSpeechProfile(audio: WavAudio, frameMs: number): SpeechProfile {
-  let lastSpeechSample = -1;
-  for (let index = 0; index < audio.samples.length; index += 1) {
-    if (Math.abs(audio.samples[index]!) >= SPEECH_THRESHOLD) {
-      lastSpeechSample = index;
-    }
-  }
-  if (lastSpeechSample < 0) {
+  const windowSamples = Math.round((audio.sampleRate * RMS_WINDOW_MS) / 1_000);
+  const windows = buildRmsWindows(audio.samples, audio.sampleRate, windowSamples);
+  const peakRms = Math.max(...windows.map((window) => window.rms));
+  const tailNoise = median(
+    windows
+      .filter((window) => window.endMs >= audio.durationMs - RMS_TAIL_NOISE_MS)
+      .map((window) => window.rms),
+  );
+  const threshold = Math.max(
+    RMS_MIN_THRESHOLD,
+    peakRms * RMS_PEAK_RATIO,
+    tailNoise * RMS_NOISE_MULTIPLIER,
+  );
+  const lastSpeechWindow = windows.findLast((window) => window.rms >= threshold);
+  if (!lastSpeechWindow) {
     throw new Error("WAV does not contain detectable speech");
   }
 
+  const endMs = Math.min(
+    audio.durationMs,
+    lastSpeechWindow.endMs + RMS_HANGOVER_MS,
+  );
   const samplesPerFrame = Math.round((audio.sampleRate * frameMs) / 1_000);
-  const endMs = (lastSpeechSample / audio.sampleRate) * 1_000;
-  const frameIndex = Math.floor(lastSpeechSample / samplesPerFrame);
-  const sampleOffset = lastSpeechSample % samplesPerFrame;
+  const endSample = Math.round((endMs / 1_000) * audio.sampleRate);
+  const frameIndex = Math.floor(endSample / samplesPerFrame);
+  const sampleOffset = endSample % samplesPerFrame;
   const offsetWithinFrameMs = (sampleOffset / audio.sampleRate) * 1_000;
 
-  return { endMs, frameIndex, offsetWithinFrameMs };
+  return {
+    endMs,
+    frameIndex,
+    offsetWithinFrameMs,
+    threshold,
+    windowMs: RMS_WINDOW_MS,
+    hangoverMs: RMS_HANGOVER_MS,
+  };
+}
+
+function buildRmsWindows(
+  samples: Float32Array,
+  sampleRate: number,
+  windowSamples: number,
+): Array<{ endMs: number; rms: number }> {
+  const windows: Array<{ endMs: number; rms: number }> = [];
+  for (let start = 0; start < samples.length; start += windowSamples) {
+    let sumSquares = 0;
+    const end = Math.min(samples.length, start + windowSamples);
+    for (let index = start; index < end; index += 1) {
+      const sample = samples[index]!;
+      sumSquares += sample * sample;
+    }
+    windows.push({
+      endMs: (end / sampleRate) * 1_000,
+      rms: Math.sqrt(sumSquares / Math.max(1, end - start)),
+    });
+  }
+  return windows;
 }
 
 function selectBestSummary(summaries: Summary[]): Summary | undefined {
   return summaries
     .filter((summary) => summary.ok)
-    .sort((left, right) => {
-      const trailingDelta =
-        (left.endpoint?.minTrailingSilenceMs ?? Number.POSITIVE_INFINITY) -
-        (right.endpoint?.minTrailingSilenceMs ?? Number.POSITIVE_INFINITY);
-      return trailingDelta === 0
-        ? left.speechEndToFinalMedian - right.speechEndToFinalMedian
-        : trailingDelta;
-    })[0];
+    .sort(compareEndpointSummaries)[0];
+}
+
+function selectLowestMeasuredSummary(summaries: Summary[]): Summary | undefined {
+  return summaries
+    .filter((summary) =>
+      summary.results.every((result) => result.finalizedAfterSpeechEnd),
+    )
+    .sort(compareEndpointSummaries)[0] ?? summaries[0];
+}
+
+function compareEndpointSummaries(left: Summary, right: Summary): number {
+  const trailingDelta =
+    (left.endpoint?.minTrailingSilenceMs ?? Number.POSITIVE_INFINITY) -
+    (right.endpoint?.minTrailingSilenceMs ?? Number.POSITIVE_INFINITY);
+  return trailingDelta === 0
+    ? left.speechEndToFinalMedian - right.speechEndToFinalMedian
+    : trailingDelta;
 }
 
 function printSummary(summary: Summary): void {
@@ -370,7 +473,7 @@ function printSummary(summary: Summary): void {
     console.log(formatRun(result));
   }
   console.log(
-    `median endpoint->final=${formatMs(summary.speechEndToFinalMedian)} event->final=${formatMs(summary.endpointToFinalMedian)} first-partial=${formatOptionalMs(summary.firstPartialMedian)} ${summary.passFail} threshold=${PASS_THRESHOLD_MS}ms soft=${SOFT_THRESHOLD_MS}ms ok=${summary.ok}`,
+    `median endpoint->final=${formatMs(summary.speechEndToFinalMedian)} event->final=${formatMs(summary.endpointToFinalMedian)} first-partial-cold=${formatOptionalMs(summary.firstPartialColdMs)} first-partial-warm=${formatOptionalMs(summary.firstPartialWarmMedian)} text-correct=${formatBoolean(summary.textCorrect)} ${summary.passFail} threshold=${PASS_THRESHOLD_MS}ms soft=${SOFT_THRESHOLD_MS}ms ok=${summary.ok}`,
   );
 }
 
@@ -418,9 +521,22 @@ function formatRun(result: RunResult): string {
     `event->final=${formatMs(result.endpointToFinalMs)}`,
     `first-partial=${formatOptionalMs(result.firstPartialMs)}`,
     `wall=${formatMs(result.wallMs)}`,
-    `ok=${result.finalizedAfterSpeechEnd && result.finalText.length > 0}`,
+    `text-correct=${formatBoolean(result.textCorrect)}`,
+    `ok=${formatBoolean(result.finalizedAfterSpeechEnd && result.textCorrect)}`,
     `text=${JSON.stringify(result.finalText)}`,
   ].join(" ");
+}
+
+function isExpectedTranscript(text: string): boolean {
+  return normalizeTranscript(text) === normalizeTranscript(EXPECTED_JFK_TRANSCRIPT);
+}
+
+function normalizeTranscript(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
 }
 
 function formatEndpoint(endpoint: EndpointConfig | undefined): string {
@@ -436,4 +552,8 @@ function formatMs(value: number): string {
 
 function formatOptionalMs(value: number | undefined): string {
   return value === undefined ? "n/a" : formatMs(value);
+}
+
+function formatBoolean(value: boolean): "y" | "n" {
+  return value ? "y" : "n";
 }
