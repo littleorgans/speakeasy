@@ -1,5 +1,6 @@
-import { setTimeout as delay } from "node:timers/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
+import { setTimeout as delay } from "node:timers/promises";
 import type { EndpointConfig, STTSession, VoiceToText } from "../contract.ts";
 import { StubEngine } from "../engines/stub.ts";
 import { MoonshineEngine } from "../engines/moonshine.ts";
@@ -19,6 +20,8 @@ const RMS_PEAK_RATIO = 0.04;
 const RMS_NOISE_MULTIPLIER = 8;
 const RMS_MIN_THRESHOLD = 0.016;
 const RMS_TAIL_NOISE_MS = 500;
+const SHERPA_SWEEP_PATH = "results/sherpa-sweep.txt";
+const PARTIAL_ROOTCAUSE = "model-right-context";
 const SHERPA_SWEEP: Required<EndpointConfig>[] = [
   { mode: "eager", minTrailingSilenceMs: 80, minUtteranceMs: 20_000 },
   { mode: "eager", minTrailingSilenceMs: 120, minUtteranceMs: 20_000 },
@@ -121,8 +124,57 @@ for (const summary of summaries) {
 const selected = selectBestSummary(summaries) ?? selectLowestMeasuredSummary(summaries);
 if (summaries.length > 1 && selected) {
   console.log(
-    `selected=${formatEndpoint(selected.endpoint)} endpoint->final=${formatMs(selected.speechEndToFinalMedian)} event->final=${formatMs(selected.endpointToFinalMedian)} text-correct=${formatBoolean(selected.textCorrect)} first-partial-warm=${formatOptionalMs(selected.firstPartialWarmMedian)}`,
+    `selected=${formatEndpoint(selected.endpoint)} endpoint->final=${formatMs(selected.speechEndToFinalMedian)} event->final=${formatMs(selected.endpointToFinalMedian)} text-correct=${formatBoolean(selected.textCorrect)} first-partial-warm=${formatOptionalMs(selected.firstPartialWarmMedian)} partial-rootcause=${PARTIAL_ROOTCAUSE}`,
   );
+}
+
+if (options.engine === "sherpa") {
+  await writeSherpaSweep(SHERPA_SWEEP_PATH, summaries, selected, speech);
+  console.log(`file=${SHERPA_SWEEP_PATH}`);
+}
+
+async function writeSherpaSweep(
+  path: string,
+  summaries: Summary[],
+  selected: Summary | undefined,
+  speechProfile: SpeechProfile,
+): Promise<void> {
+  await mkdir("results", { recursive: true });
+  const knee = selectBestSummary(summaries);
+  const rows = summaries.map((summary) =>
+    [
+      formatEndpoint(summary.endpoint),
+      formatMs(summary.speechEndToFinalMedian),
+      formatBoolean(summary.textCorrect),
+      JSON.stringify(mostCommonFinalText(summary.results)),
+    ].join(" | "),
+  );
+
+  const content = [
+    "# sherpa endpoint sweep",
+    "",
+    `engine: ${summaries[0]?.engineLabel ?? "unknown"}`,
+    `speech-end-reference: rms-window ${speechProfile.windowMs}ms + ${speechProfile.hangoverMs}ms hangover, threshold=${speechProfile.threshold.toFixed(4)}, end=${speechProfile.endMs.toFixed(1)}ms`,
+    `expected: ${JSON.stringify(EXPECTED_JFK_TRANSCRIPT)} (case/punct-insensitive exact)`,
+    `knee: ${knee ? formatEndpoint(knee.endpoint) : "none"}`,
+    `selected: ${selected ? formatEndpoint(selected.endpoint) : "none"}`,
+    `partial-rootcause: ${PARTIAL_ROOTCAUSE}; decode is called whenever sherpa reports readiness per pushed frame, but this model emits no non-empty result until its chunk/right-context is satisfied`,
+    "",
+    "config | perceived endpoint->final median | text-correct | finalText",
+    "--- | ---: | :---: | ---",
+    ...rows,
+    "",
+  ].join("\n");
+
+  await writeFile(path, content);
+}
+
+function mostCommonFinalText(results: RunResult[]): string {
+  const counts = new Map<string, number>();
+  for (const result of results) {
+    counts.set(result.finalText, (counts.get(result.finalText) ?? 0) + 1);
+  }
+  return [...counts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] ?? "";
 }
 
 async function runSherpaSweep(

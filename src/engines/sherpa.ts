@@ -20,23 +20,24 @@ import { downloadFile, extractTarBz2, hasNonEmptyFile } from "./assets.ts";
 /**
  * SherpaEngine: primary streaming STT engine for the benchmark spike.
  *
- * Uses sherpa-onnx-node's native N-API addon with the tiny English streaming
+ * Uses sherpa-onnx-node's native N-API addon with the English streaming
  * Zipformer transducer. The model streams partials, uses sherpa's built-in
  * endpoint detector, and keeps all inference in-process for Electron main.
  */
 
 const SAMPLE_RATE = 16_000;
 const FEATURE_DIM = 80;
-const MODEL_NAME = "sherpa-onnx-streaming-zipformer-en-20M-2023-02-17";
+const MODEL_NAME = "sherpa-onnx-streaming-zipformer-en-2023-06-26";
 const MODEL_URL =
   `https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${MODEL_NAME}.tar.bz2`;
 const SHERPA_ROOT = join(process.cwd(), "models", "sherpa");
 const MODEL_DIR = join(SHERPA_ROOT, MODEL_NAME);
 const MODEL_ARCHIVE = join(SHERPA_ROOT, `${MODEL_NAME}.tar.bz2`);
-const ENCODER = "encoder-epoch-99-avg-1.int8.onnx";
-const DECODER = "decoder-epoch-99-avg-1.int8.onnx";
-const JOINER = "joiner-epoch-99-avg-1.int8.onnx";
+const ENCODER = "encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx";
+const DECODER = "decoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx";
+const JOINER = "joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx";
 const TOKENS = "tokens.txt";
+const BPE_MODEL = "bpe.model";
 const DEFAULT_ENDPOINT: Required<EndpointConfig> = {
   mode: "eager",
   minTrailingSilenceMs: 200,
@@ -47,7 +48,7 @@ const sherpa = require("sherpa-onnx-node") as typeof import("sherpa-onnx-node");
 
 export class SherpaEngine implements VoiceToText {
   get label(): string {
-    return `sherpa-onnx-node-${sherpa.version}`;
+    return `sherpa-onnx-node-${sherpa.version}:${MODEL_NAME}:int8`;
   }
 
   async prepare(): Promise<void> {
@@ -187,7 +188,8 @@ function createRecognizerConfig(
       numThreads: 2,
       provider: "cpu",
       debug: 0,
-      modelType: "zipformer",
+      modelingUnit: "bpe",
+      bpeVocab: join(MODEL_DIR, BPE_MODEL),
     },
     decodingMethod: "greedy_search",
     maxActivePaths: 4,

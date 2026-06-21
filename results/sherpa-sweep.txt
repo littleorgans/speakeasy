@@ -1,0 +1,16 @@
+# sherpa endpoint sweep
+
+engine: sherpa-onnx-node-1.13.3:sherpa-onnx-streaming-zipformer-en-2023-06-26:int8
+speech-end-reference: rms-window 20ms + 650ms hangover, threshold=0.0160, end=2790.0ms
+expected: "and so my fellow americans" (case/punct-insensitive exact)
+knee: none
+selected: eager:trail=80ms:minutt=20000ms
+partial-rootcause: model-right-context; decode is called whenever sherpa reports readiness per pushed frame, but this model emits no non-empty result until its chunk/right-context is satisfied
+
+config | perceived endpoint->final median | text-correct | finalText
+--- | ---: | :---: | ---
+eager:trail=80ms:minutt=20000ms | 252.8ms | n | "AND SAW MY FELL OW A MERICANS"
+eager:trail=120ms:minutt=20000ms | 602.8ms | n | "AND SAW MY FELLOW A MERICANS"
+eager:trail=160ms:minutt=20000ms | 599.9ms | n | "AND SAW MY FELLOW A MERICANS"
+eager:trail=200ms:minutt=20000ms | 599.3ms | n | "AND SAW MY FELLOW AMERICANS"
+eager:trail=300ms:minutt=20000ms | 604.0ms | n | "AND SAW MY FELLOW AMERICANS"
