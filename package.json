@@ -1,0 +1,23 @@
+{
+  "name": "speak-easy",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Standalone streaming voice-to-text (STT) capability. Audio in, text out. Local-first, sub-200ms finalization.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "scripts": {
+    "bench": "node src/bench/run.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "llama-tokenizer-js": "1.2.2",
+    "onnxruntime-node": "1.27.0",
+    "sherpa-onnx-node": "1.13.3"
+  }
+}
