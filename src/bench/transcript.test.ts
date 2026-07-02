@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   isExactTranscript,
   isWordTolerantTranscript,
+  wordErrorAlignment,
   wordErrorCount,
 } from "./transcript.ts";
 
@@ -35,4 +36,27 @@ test("empty and unrelated text fail", () => {
 test("one missing word passes, two fail", () => {
   assert.equal(isWordTolerantTranscript("and so my fellow", EXPECTED), true);
   assert.equal(isWordTolerantTranscript("and so my", EXPECTED), false);
+});
+
+test("alignment reports the substitution pair", () => {
+  const alignment = wordErrorAlignment("AND SAW MY FELLOW AMERICANS", EXPECTED);
+  assert.equal(alignment.errors, 1);
+  assert.equal(alignment.referenceWords, 5);
+  assert.deepEqual(alignment.substitutions, [{ expected: "so", actual: "saw" }]);
+  assert.deepEqual(alignment.insertions, []);
+  assert.deepEqual(alignment.deletions, []);
+});
+
+test("alignment reports insertions and deletions", () => {
+  const missing = wordErrorAlignment("and so my fellow", EXPECTED);
+  assert.deepEqual(missing.deletions, ["americans"]);
+  assert.equal(missing.errors, 1);
+
+  const extra = wordErrorAlignment("and so so my fellow americans", EXPECTED);
+  assert.deepEqual(extra.insertions, ["so"]);
+  assert.equal(extra.errors, 1);
+
+  const empty = wordErrorAlignment("", EXPECTED);
+  assert.equal(empty.errors, 5);
+  assert.deepEqual(empty.deletions, EXPECTED.split(" "));
 });

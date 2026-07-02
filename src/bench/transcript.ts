@@ -31,30 +31,112 @@ export function isWordTolerantTranscript(
   return wordErrorCount(text, expected) <= maxWordErrors;
 }
 
+export type WordSubstitution = { expected: string; actual: string };
+
+export type WordAlignment = {
+  /** Word-level Levenshtein distance (substitutions + insertions + deletions). */
+  errors: number;
+  /** Word count of the normalized reference; the WER denominator. */
+  referenceWords: number;
+  substitutions: WordSubstitution[];
+  /** Hypothesis words with no reference counterpart. */
+  insertions: string[];
+  /** Reference words missing from the hypothesis. */
+  deletions: string[];
+};
+
 /**
  * Word-level Levenshtein distance between the normalized transcripts:
  * the minimum number of word substitutions, insertions, and deletions
  * needed to turn `text` into `expected`.
  */
 export function wordErrorCount(text: string, expected: string): number {
+  return wordErrorAlignment(text, expected).errors;
+}
+
+/**
+ * Full word-level Levenshtein alignment: the distance plus the edits
+ * themselves, backtracked from the DP matrix. Feeds per-utterance WER and
+ * the corpus-wide worst-substitutions list.
+ */
+export function wordErrorAlignment(
+  text: string,
+  expected: string,
+): WordAlignment {
   const actual = toWords(text);
   const reference = toWords(expected);
-  let previous = Array.from({ length: actual.length + 1 }, (_, col) => col);
+  const matrix = buildDistanceMatrix(actual, reference);
+  return {
+    errors: matrix[reference.length]![actual.length]!,
+    referenceWords: reference.length,
+    ...backtrackEdits(matrix, actual, reference),
+  };
+}
 
+/** matrix[row][col] = distance between reference[0..row) and actual[0..col). */
+function buildDistanceMatrix(
+  actual: string[],
+  reference: string[],
+): number[][] {
+  const matrix: number[][] = [
+    Array.from({ length: actual.length + 1 }, (_, col) => col),
+  ];
   for (let row = 1; row <= reference.length; row += 1) {
     const current: number[] = [row];
     for (let col = 1; col <= actual.length; col += 1) {
       const substitution =
-        previous[col - 1]! +
+        matrix[row - 1]![col - 1]! +
         (reference[row - 1] === actual[col - 1] ? 0 : 1);
       current.push(
-        Math.min(substitution, previous[col]! + 1, current[col - 1]! + 1),
+        Math.min(substitution, matrix[row - 1]![col]! + 1, current[col - 1]! + 1),
       );
     }
-    previous = current;
+    matrix.push(current);
+  }
+  return matrix;
+}
+
+function backtrackEdits(
+  matrix: number[][],
+  actual: string[],
+  reference: string[],
+): Pick<WordAlignment, "substitutions" | "insertions" | "deletions"> {
+  const substitutions: WordSubstitution[] = [];
+  const insertions: string[] = [];
+  const deletions: string[] = [];
+  let row = reference.length;
+  let col = actual.length;
+
+  while (row > 0 || col > 0) {
+    const cost = matrix[row]![col]!;
+    if (
+      row > 0 &&
+      col > 0 &&
+      reference[row - 1] === actual[col - 1] &&
+      cost === matrix[row - 1]![col - 1]!
+    ) {
+      row -= 1;
+      col -= 1;
+    } else if (row > 0 && col > 0 && cost === matrix[row - 1]![col - 1]! + 1) {
+      substitutions.push({
+        expected: reference[row - 1]!,
+        actual: actual[col - 1]!,
+      });
+      row -= 1;
+      col -= 1;
+    } else if (col > 0 && cost === matrix[row]![col - 1]! + 1) {
+      insertions.push(actual[col - 1]!);
+      col -= 1;
+    } else {
+      deletions.push(reference[row - 1]!);
+      row -= 1;
+    }
   }
 
-  return previous[actual.length]!;
+  substitutions.reverse();
+  insertions.reverse();
+  deletions.reverse();
+  return { substitutions, insertions, deletions };
 }
 
 function toWords(text: string): string[] {

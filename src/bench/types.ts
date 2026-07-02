@@ -22,6 +22,8 @@ export type BenchEngine = VoiceToText & {
 export type CliOptions = {
   engine: EngineName;
   wav?: string;
+  /** Corpus directory of wav + json sidecar pairs; enables the WER scorer. */
+  corpus?: string;
   runs: number;
   frameMs: number;
   mode: BenchMode;

@@ -1,15 +1,11 @@
 import { performance } from "node:perf_hooks";
 import { setTimeout as delay } from "node:timers/promises";
-import type { EndpointConfig, STTSession, VoiceToText } from "../contract.ts";
-import { StubEngine } from "../engines/stub.ts";
-import { MoonshineEngine } from "../engines/moonshine.ts";
-import { SherpaEngine } from "../engines/sherpa.ts";
+import type { EndpointConfig, VoiceToText } from "../contract.ts";
 import {
   DEFAULT_ENGINE,
   DEFAULT_FRAME_MS,
   DEFAULT_RUNS,
   EXPECTED_JFK_TRANSCRIPT,
-  FLUSH_FINAL_TIMEOUT_MS,
   PARTIAL_ROOTCAUSE,
   PASS_THRESHOLD_MS,
   PTT_MIN_RUNS,
@@ -18,23 +14,27 @@ import {
   SHERPA_SWEEP_PATH,
   SOFT_THRESHOLD_MS,
 } from "./config.ts";
+import { runCorpusBench } from "./corpus.ts";
 import {
   formatBoolean,
   formatEndpoint,
   formatMs,
   formatOptionalMs,
 } from "./format.ts";
+import {
+  attachSessionObservers,
+  createEngine,
+  runPttOnce,
+  withTimeout,
+} from "./harness.ts";
 import { writePttReport, writeSherpaSweep } from "./report.ts";
 import { detectSpeechProfile, type SpeechProfile } from "./speech.ts";
 import { median, medianOptional } from "./stats.ts";
 import {
   DEFAULT_MAX_WORD_ERRORS,
   isExactTranscript,
-  isWordTolerantTranscript,
-  wordErrorCount,
 } from "./transcript.ts";
 import type {
-  BenchEngine,
   BenchMode,
   CliOptions,
   EngineName,
@@ -47,66 +47,79 @@ import type {
 } from "./types.ts";
 import { readWavFrames, type WavAudio } from "./wav.ts";
 
+const USAGE = [
+  "usage: pnpm bench --wav <path> [--engine stub|moonshine|sherpa] [--mode sweep|ptt] [--runs <n>] [--frame-ms <n>]",
+  "       pnpm bench --corpus <dir> [--engine stub|moonshine|sherpa] [--frame-ms <n>]  (WER scorer over labeled demo recordings)",
+].join("\n");
+
 const options = parseArgs(process.argv.slice(2));
-if (!options.wav) {
-  throw new Error("Missing required --wav <path> argument");
-}
-if (options.mode === "ptt") {
-  options.runs = Math.max(options.runs, PTT_MIN_RUNS);
-}
-
-const audio = await readWavFrames(options.wav, options.frameMs);
-const speech = detectSpeechProfile(audio, options.frameMs);
-
-console.log("speak-easy latency benchmark");
-console.log(`wav=${options.wav} mode=${options.mode}`);
-console.log(
-  `audio=${audio.durationMs.toFixed(0)}ms speech-end=${speech.endMs.toFixed(0)}ms trailing-silence=${(audio.durationMs - speech.endMs).toFixed(0)}ms`,
-);
-console.log(
-  `speech-end-detector=rms-window window=${speech.windowMs}ms hangover=${speech.hangoverMs}ms threshold=${speech.threshold.toFixed(4)}`,
-);
-console.log(
-  options.mode === "ptt"
-    ? `expected=${JSON.stringify(EXPECTED_JFK_TRANSCRIPT)} comparison=word-tolerant(word-errors<=${DEFAULT_MAX_WORD_ERRORS})`
-    : `expected=${JSON.stringify(EXPECTED_JFK_TRANSCRIPT)} comparison=case/punct-insensitive-exact`,
-);
-console.log(
-  `format=${audio.sampleRate}Hz mono ${audio.bitsPerSample}-bit cadence=${options.frameMs}ms/frame frames=${audio.frames.length} runs=${options.runs}`,
-);
-console.log(describeFeedStrategy(options));
-
-if (options.mode === "ptt") {
-  const summaries: PttSummary[] = [];
-  for (const variant of ["strict", "loose"] as const) {
-    const summary = await runPttSummary(options, audio, speech, variant);
-    printPttSummary(summary);
-    summaries.push(summary);
-  }
-  if (options.engine === "sherpa") {
-    await writePttReport(SHERPA_SWEEP_PATH, summaries, speech);
-    console.log(`file=${SHERPA_SWEEP_PATH}`);
-  }
+if (options.corpus) {
+  await runCorpusBench(options);
 } else {
-  const summaries = options.engine === "sherpa"
-    ? await runSherpaSweep(options, audio, speech)
-    : [await runEngineSummary(options, audio, speech, undefined)];
+  await runWavBench(options);
+}
 
-  for (const summary of summaries) {
-    printSummary(summary);
+async function runWavBench(options: CliOptions): Promise<void> {
+  if (!options.wav) {
+    throw new Error(`Missing required --wav <path> argument\n${USAGE}`);
+  }
+  if (options.mode === "ptt") {
+    options.runs = Math.max(options.runs, PTT_MIN_RUNS);
   }
 
-  const knee = selectBestSummary(summaries);
-  const selected = knee ?? selectLowestMeasuredSummary(summaries);
-  if (summaries.length > 1 && selected) {
-    console.log(
-      `selected=${formatEndpoint(selected.endpoint)} endpoint->final=${formatMs(selected.speechEndToFinalMedian)} event->final=${formatMs(selected.endpointToFinalMedian)} text-correct=${formatBoolean(selected.textCorrect)} first-partial-warm=${formatOptionalMs(selected.firstPartialWarmMedian)} partial-rootcause=${PARTIAL_ROOTCAUSE}`,
-    );
-  }
+  const audio = await readWavFrames(options.wav, options.frameMs);
+  const speech = detectSpeechProfile(audio, options.frameMs);
 
-  if (options.engine === "sherpa") {
-    await writeSherpaSweep(SHERPA_SWEEP_PATH, summaries, knee, selected, speech);
-    console.log(`file=${SHERPA_SWEEP_PATH}`);
+  console.log("speak-easy latency benchmark");
+  console.log(`wav=${options.wav} mode=${options.mode}`);
+  console.log(
+    `audio=${audio.durationMs.toFixed(0)}ms speech-end=${speech.endMs.toFixed(0)}ms trailing-silence=${(audio.durationMs - speech.endMs).toFixed(0)}ms`,
+  );
+  console.log(
+    `speech-end-detector=rms-window window=${speech.windowMs}ms hangover=${speech.hangoverMs}ms threshold=${speech.threshold.toFixed(4)}`,
+  );
+  console.log(
+    options.mode === "ptt"
+      ? `expected=${JSON.stringify(EXPECTED_JFK_TRANSCRIPT)} comparison=word-tolerant(word-errors<=${DEFAULT_MAX_WORD_ERRORS})`
+      : `expected=${JSON.stringify(EXPECTED_JFK_TRANSCRIPT)} comparison=case/punct-insensitive-exact`,
+  );
+  console.log(
+    `format=${audio.sampleRate}Hz mono ${audio.bitsPerSample}-bit cadence=${options.frameMs}ms/frame frames=${audio.frames.length} runs=${options.runs}`,
+  );
+  console.log(describeFeedStrategy(options));
+
+  if (options.mode === "ptt") {
+    const summaries: PttSummary[] = [];
+    for (const variant of ["strict", "loose"] as const) {
+      const summary = await runPttSummary(options, audio, speech, variant);
+      printPttSummary(summary);
+      summaries.push(summary);
+    }
+    if (options.engine === "sherpa") {
+      await writePttReport(SHERPA_SWEEP_PATH, summaries, speech);
+      console.log(`file=${SHERPA_SWEEP_PATH}`);
+    }
+  } else {
+    const summaries = options.engine === "sherpa"
+      ? await runSherpaSweep(options, audio, speech)
+      : [await runEngineSummary(options, audio, speech, undefined)];
+
+    for (const summary of summaries) {
+      printSummary(summary);
+    }
+
+    const knee = selectBestSummary(summaries);
+    const selected = knee ?? selectLowestMeasuredSummary(summaries);
+    if (summaries.length > 1 && selected) {
+      console.log(
+        `selected=${formatEndpoint(selected.endpoint)} endpoint->final=${formatMs(selected.speechEndToFinalMedian)} event->final=${formatMs(selected.endpointToFinalMedian)} text-correct=${formatBoolean(selected.textCorrect)} first-partial-warm=${formatOptionalMs(selected.firstPartialWarmMedian)} partial-rootcause=${PARTIAL_ROOTCAUSE}`,
+      );
+    }
+
+    if (options.engine === "sherpa") {
+      await writeSherpaSweep(SHERPA_SWEEP_PATH, summaries, knee, selected, speech);
+      console.log(`file=${SHERPA_SWEEP_PATH}`);
+    }
   }
 }
 
@@ -269,6 +282,7 @@ async function runPttSummary(
         audio: wav,
         releaseFrame,
         frameMs: cli.frameMs,
+        expected: EXPECTED_JFK_TRANSCRIPT,
       }),
     );
   }
@@ -297,54 +311,6 @@ async function runPttSummary(
   };
 }
 
-async function runPttOnce(input: {
-  run: number;
-  engine: VoiceToText;
-  audio: WavAudio;
-  releaseFrame: number;
-  frameMs: number;
-}): Promise<PttRunResult> {
-  // Push-to-talk: the consumer finalizes externally (button release), so the
-  // engine's own silence endpointing is disabled and flush() is the commit
-  // path. The final is awaited as an EVENT because the contract makes no
-  // synchrony guarantee for flush(): sherpa commits synchronously, moonshine
-  // commits from an async task.
-  const session = await input.engine.open({
-    sampleRate: input.audio.sampleRate,
-    endpoint: { mode: "manual" },
-  });
-  const state = attachSessionObservers(session);
-  const start = performance.now();
-
-  for (let index = 0; index <= input.releaseFrame; index += 1) {
-    session.pushAudio(input.audio.frames[index]!);
-    if (index < input.releaseFrame) {
-      await delay(input.frameMs);
-    }
-  }
-
-  const finalsBefore = state.finals.length;
-  const flushAt = performance.now();
-  session.flush();
-  const final = await state.finalAtIndex(finalsBefore, FLUSH_FINAL_TIMEOUT_MS);
-  const flushToFinalMs = final ? final.finalAt - flushAt : Number.NaN;
-  const finalText = final?.text ?? "";
-
-  await withTimeout(session.end(), SESSION_TIMEOUT_MS);
-  state.throwIfError();
-
-  return {
-    run: input.run,
-    flushToFinalMs,
-    firstPartialMs: state.firstPartialAt
-      ? state.firstPartialAt - start
-      : undefined,
-    wordErrors: wordErrorCount(finalText, EXPECTED_JFK_TRANSCRIPT),
-    finalText,
-    textCorrect: isWordTolerantTranscript(finalText, EXPECTED_JFK_TRANSCRIPT),
-  };
-}
-
 function printPttSummary(summary: PttSummary): void {
   console.log(
     `engine=${summary.engineLabel} mode=ptt variant=${summary.variant} release=${formatMs(summary.releaseMs)} endpoint=manual`,
@@ -366,76 +332,6 @@ function printPttSummary(summary: PttSummary): void {
   );
 }
 
-function attachSessionObservers(session: STTSession): {
-  firstPartialAt?: number;
-  finals: FinalObservation[];
-  finalAtIndex: (
-    index: number,
-    timeoutMs: number,
-  ) => Promise<FinalObservation | undefined>;
-  throwIfError: () => void;
-} {
-  const endpointEvents: number[] = [];
-  const finalTexts: string[] = [];
-  const finals: FinalObservation[] = [];
-  const finalWaiters: Array<() => void> = [];
-  const state: { firstPartialAt?: number; error?: unknown } = {};
-
-  session.on("partial", () => {
-    state.firstPartialAt ??= performance.now();
-  });
-  session.on("endpoint", () => {
-    endpointEvents.push(performance.now());
-  });
-  session.on("final", ({ text }: { text: string }) => {
-    const finalAt = performance.now();
-    const trimmed = text.trim();
-    if (trimmed) {
-      finalTexts.push(trimmed);
-    }
-    finals.push({
-      endpointAt: lastEndpointBefore(endpointEvents, finalAt) ?? finalAt,
-      finalAt,
-      text: finalTexts.join(" ").trim(),
-    });
-    for (const notify of finalWaiters.splice(0)) {
-      notify();
-    }
-  });
-  session.on("error", ({ err }: { err: unknown }) => {
-    state.error = err;
-  });
-
-  return {
-    get firstPartialAt() {
-      return state.firstPartialAt;
-    },
-    finals,
-    // Resolves with finals[index] as soon as it exists (immediately if the
-    // engine committed synchronously, on the event if it commits async),
-    // or undefined after timeoutMs.
-    finalAtIndex(index, timeoutMs) {
-      if (finals.length > index) {
-        return Promise.resolve(finals[index]);
-      }
-      return new Promise((resolve) => {
-        const timer = setTimeout(() => {
-          resolve(undefined);
-        }, timeoutMs);
-        finalWaiters.push(() => {
-          clearTimeout(timer);
-          resolve(finals[index]);
-        });
-      });
-    },
-    throwIfError() {
-      if (state.error) {
-        throw state.error;
-      }
-    },
-  };
-}
-
 function chooseFinal(
   finals: FinalObservation[],
   speechEndAt: number,
@@ -444,26 +340,6 @@ function chooseFinal(
     finals.find((final) => final.finalAt >= speechEndAt && final.text) ??
     finals.findLast((final) => final.text)
   );
-}
-
-function lastEndpointBefore(
-  endpoints: number[],
-  finalAt: number,
-): number | undefined {
-  return endpoints.findLast((endpointAt) => endpointAt <= finalAt);
-}
-
-function createEngine(name: EngineName): BenchEngine {
-  if (name === "stub") {
-    return new StubEngine();
-  }
-  if (name === "moonshine") {
-    return new MoonshineEngine();
-  }
-  if (name === "sherpa") {
-    return new SherpaEngine();
-  }
-  throw new Error(`Unsupported engine ${name}`);
 }
 
 function parseArgs(args: string[]): CliOptions {
@@ -494,9 +370,16 @@ function parseArgs(args: string[]): CliOptions {
     } else if (arg === "--mode") {
       options.mode = parseMode(requireValue(args, index));
       index += 1;
+    } else if (arg === "--corpus") {
+      options.corpus = requireValue(args, index);
+      index += 1;
     } else {
-      throw new Error(`Unknown argument ${arg}`);
+      throw new Error(`Unknown argument ${arg}\n${USAGE}`);
     }
+  }
+
+  if (options.corpus && options.wav) {
+    throw new Error(`Use --wav or --corpus, not both\n${USAGE}`);
   }
 
   if (options.runs < DEFAULT_RUNS) {
@@ -569,25 +452,6 @@ function printSummary(summary: Summary): void {
   console.log(
     `median endpoint->final=${formatMs(summary.speechEndToFinalMedian)} event->final=${formatMs(summary.endpointToFinalMedian)} first-partial-cold=${formatOptionalMs(summary.firstPartialColdMs)} first-partial-warm=${formatOptionalMs(summary.firstPartialWarmMedian)} text-correct=${formatBoolean(summary.textCorrect)} ${summary.passFail} threshold=${PASS_THRESHOLD_MS}ms soft=${SOFT_THRESHOLD_MS}ms ok=${summary.ok}`,
   );
-}
-
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error(`Session timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (error: unknown) => {
-        clearTimeout(timer);
-        reject(error);
-      },
-    );
-  });
 }
 
 function formatRun(result: RunResult): string {

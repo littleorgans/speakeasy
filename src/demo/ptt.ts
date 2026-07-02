@@ -1,3 +1,4 @@
+import { createInterface } from "node:readline/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { formatMs } from "../bench/format.ts";
 import { readWavFrames, type WavAudio } from "../bench/wav.ts";
@@ -10,6 +11,11 @@ import {
   type MicCapture,
 } from "../capture/ffmpeg.ts";
 import type { FinalEvent, PartialEvent, STTSession } from "../contract.ts";
+import {
+  DEFAULT_CORPUS_DIR,
+  saveCorpusPair,
+  type CorpusSidecarMeta,
+} from "../corpus/store.ts";
 import { SherpaEngine } from "../engines/sherpa.ts";
 
 /**
@@ -22,6 +28,10 @@ import { SherpaEngine } from "../engines/sherpa.ts";
  * Audio source is the microphone (ffmpeg capture helper) or, with --wav, a
  * recorded file replayed at real-time cadence from the top of each utterance.
  * --script drives the Enter presses deterministically for unattended runs.
+ *
+ * --save turns the demo into a labeled-corpus collector: each kept utterance
+ * is written as a wav + json sidecar pair (see src/corpus/store.ts) that
+ * `pnpm bench --corpus <dir>` scores for WER.
  */
 
 const FINAL_TIMEOUT_MS = 2_000;
@@ -30,7 +40,9 @@ const LEVEL_RENDER_INTERVAL_MS = 100;
 const LEVEL_BAR_CELLS = 10;
 const SCRIPT_EVENT_PATTERN = /^(start|release)@(\d+(?:\.\d+)?)ms?$/;
 const USAGE =
-  'usage: pnpm demo [--wav <path>] [--script "start@0ms,release@2200ms,..."] [--device <index>] [--list-devices]';
+  'usage: pnpm demo [--wav <path>] [--script "start@0ms,release@2200ms,..."] [--device <index>] [--list-devices] [--save [dir]] [--save-all]\n' +
+  `  --save [dir]  arm corpus collection (default dir: ${DEFAULT_CORPUS_DIR}/): after each final, s = save wav+json pair and label it, any other key = discard\n` +
+  "  --save-all    save every utterance without prompting (expected=null; label the sidecars by hand)";
 
 type ScriptAction = "start" | "release";
 type ScriptEvent = { action: ScriptAction; atMs: number };
@@ -39,6 +51,8 @@ type DemoOptions = {
   script?: ScriptEvent[];
   device?: string;
   listDevices?: boolean;
+  saveDir?: string;
+  saveAll?: boolean;
 };
 
 type FinalObservation = { text: string; at: number };
@@ -58,6 +72,16 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (
+    options.saveDir &&
+    !options.saveAll &&
+    (options.script || !process.stdin.isTTY)
+  ) {
+    throw new Error(
+      "--save prompts for keep/label after each utterance; unattended runs (--script or piped stdin) need --save-all",
+    );
+  }
+
   const wav = options.wavPath
     ? await readWavFrames(options.wavPath, CAPTURE_FRAME_MS)
     : undefined;
@@ -69,7 +93,7 @@ async function main(): Promise<void> {
     endpoint: { mode: "manual" },
   });
 
-  const demo = new PttDemo(session, wav, options);
+  const demo = new PttDemo(session, wav, options, engine.label);
   await demo.run();
 }
 
@@ -77,6 +101,7 @@ class PttDemo {
   readonly #session: STTSession;
   readonly #wav: WavAudio | undefined;
   readonly #options: DemoOptions;
+  readonly #engineLabel: string;
   #capture: MicCapture | undefined;
   #sourceLabel = "";
   #talking = false;
@@ -85,19 +110,24 @@ class PttDemo {
   #lastPartial = "";
   #framePeaks: number[] = [];
   #utterancePeak = 0;
+  #utteranceFrames: Float32Array[] = [];
   #levelTimer: NodeJS.Timeout | undefined;
   #wavFeed: Promise<void> = Promise.resolve();
   #fatal: Error | undefined;
   #fatalNotify: (() => void) | undefined;
+  #keyWaiter: ((byte: number) => void) | undefined;
+  #lineInputActive = false;
 
   constructor(
     session: STTSession,
     wav: WavAudio | undefined,
     options: DemoOptions,
+    engineLabel: string,
   ) {
     this.#session = session;
     this.#wav = wav;
     this.#options = options;
+    this.#engineLabel = engineLabel;
     session.on("partial", (event: PartialEvent) => {
       if (this.#talking) {
         this.#lastPartial = event.text;
@@ -194,15 +224,26 @@ class PttDemo {
           if (byte === 0x03 || byte === 0x04) {
             // Ctrl+C / Ctrl+D: quit IMMEDIATELY, never behind the queue (a
             // stuck release must not make the demo unkillable). A second
-            // press hard-exits.
+            // press hard-exits. A pending save prompt is answered with the
+            // interrupt byte so the queued release discards and completes.
             if (this.#quitting) {
               process.exit(130);
             }
             this.#quitting = true;
             this.#clearLiveLine();
             console.log("quitting...");
+            this.#answerKeyWaiter(byte);
             resolve();
             return;
+          }
+          if (this.#keyWaiter) {
+            // A save prompt owns the next keystroke; nothing else sees it.
+            this.#answerKeyWaiter(byte);
+            continue;
+          }
+          if (this.#lineInputActive) {
+            // readline owns the stream during the expected-label prompt.
+            continue;
           }
           if (byte === 0x0d || byte === 0x0a) {
             enqueue(async () => {
@@ -229,6 +270,7 @@ class PttDemo {
     this.#lastPartial = "";
     this.#framePeaks = [];
     this.#utterancePeak = 0;
+    this.#utteranceFrames = [];
     console.log(`utterance ${this.#utterance}: talking (Enter to release)`);
     if (process.stdout.isTTY) {
       this.#levelTimer = setInterval(() => {
@@ -261,11 +303,116 @@ class PttDemo {
       console.log(
         `utterance ${this.#utterance}: final=${JSON.stringify(final.text)} release->final=${formatMs(final.at - releaseAt)}`,
       );
+      if (this.#options.saveDir && !this.#quitting) {
+        await this.#saveUtterance(final, releaseAt);
+      }
     } else {
       console.log(
         `utterance ${this.#utterance}: no speech committed (peak level ${this.#utterancePeak.toFixed(3)} on ${this.#sourceLabel}). If the level stays at 0, check mic permission or pick another input with --list-devices / --device <index>.`,
       );
+      if (this.#options.saveDir) {
+        console.log(`utterance ${this.#utterance}: nothing to save`);
+      }
     }
+    this.#utteranceFrames = [];
+  }
+
+  /**
+   * Corpus collection: with --save-all every utterance is written unlabeled
+   * (expected=null, for hand labeling); otherwise a single raw keystroke
+   * decides (s = save, anything else = discard) and the expected transcript
+   * is accepted or corrected on one line.
+   */
+  async #saveUtterance(
+    final: FinalObservation,
+    releaseAt: number,
+  ): Promise<void> {
+    const frames = this.#utteranceFrames;
+    this.#utteranceFrames = [];
+    if (frames.length === 0) {
+      console.log(`utterance ${this.#utterance}: nothing to save (no frames)`);
+      return;
+    }
+
+    let expected: string | null = null;
+    if (!this.#options.saveAll) {
+      const key = await this.#promptKey(
+        "  save? [s = save, any other key = discard] ",
+      );
+      if (key !== "s") {
+        console.log(`utterance ${this.#utterance}: discarded`);
+        return;
+      }
+      expected = await this.#promptExpected(final.text);
+    }
+
+    const meta: CorpusSidecarMeta = {
+      recordedAt: new Date().toISOString(),
+      hypothesis: final.text,
+      expected,
+      engineLabel: this.#engineLabel,
+      endpoint: "manual",
+      flushToFinalMs: roundMs(final.at - releaseAt),
+      device: this.#deviceSpec(),
+      peakLevel: Number(this.#utterancePeak.toFixed(4)),
+    };
+    const saved = await saveCorpusPair(
+      this.#options.saveDir!,
+      frames,
+      CAPTURE_SAMPLE_RATE,
+      meta,
+    );
+    console.log(
+      `utterance ${this.#utterance}: saved ${saved.wavPath} + sidecar${expected === null ? " (expected=null; label by hand before scoring)" : ""}`,
+    );
+  }
+
+  /** Resolve with the next raw keystroke; the stdin handler routes it here. */
+  #promptKey(prompt: string): Promise<string> {
+    process.stdout.write(prompt);
+    return new Promise((resolve) => {
+      this.#keyWaiter = (byte) => {
+        process.stdout.write("\n");
+        resolve(String.fromCharCode(byte).toLowerCase());
+      };
+    });
+  }
+
+  #answerKeyWaiter(byte: number): void {
+    const waiter = this.#keyWaiter;
+    this.#keyWaiter = undefined;
+    waiter?.(byte);
+  }
+
+  /** Line input needs cooked mode; restore raw mode afterwards. */
+  async #promptExpected(hypothesis: string): Promise<string> {
+    process.stdin.setRawMode(false);
+    this.#lineInputActive = true;
+    const readlinePrompt = createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    try {
+      const answer = (
+        await readlinePrompt.question(
+          "  expected [Enter = transcript is correct]: ",
+        )
+      ).trim();
+      return answer || hypothesis;
+    } finally {
+      readlinePrompt.close();
+      this.#lineInputActive = false;
+      if (process.stdin.isTTY) {
+        process.stdin.setRawMode(true);
+        process.stdin.resume();
+      }
+    }
+  }
+
+  #deviceSpec(): string {
+    return this.#wav
+      ? `wav:${this.#options.wavPath}`
+      : (this.#options.device ?? DEFAULT_MIC_DEVICE);
   }
 
   /** Never rejects; failures surface through #fatal at the next checkpoint. */
@@ -308,6 +455,9 @@ class PttDemo {
     }
     if (peak > this.#utterancePeak) {
       this.#utterancePeak = peak;
+    }
+    if (this.#options.saveDir) {
+      this.#utteranceFrames.push(frame);
     }
     this.#session.pushAudio(frame);
   }
@@ -431,9 +581,25 @@ function parseArgs(argv: string[]): DemoOptions {
       case "--list-devices":
         options.listDevices = true;
         break;
+      case "--save": {
+        const value = argv[index + 1];
+        if (value !== undefined && !value.startsWith("--")) {
+          options.saveDir = value;
+          index += 1;
+        } else {
+          options.saveDir = DEFAULT_CORPUS_DIR;
+        }
+        break;
+      }
+      case "--save-all":
+        options.saveAll = true;
+        break;
       default:
         throw new Error(`Unknown argument ${arg}\n${USAGE}`);
     }
+  }
+  if (options.saveAll) {
+    options.saveDir ??= DEFAULT_CORPUS_DIR;
   }
   return options;
 }
@@ -461,6 +627,11 @@ function parseScript(spec: string): ScriptEvent[] {
 
 function toError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
+}
+
+/** Keep sidecar numbers plain: one decimal of milliseconds. */
+function roundMs(value: number): number {
+  return Number(value.toFixed(1));
 }
 
 main()
