@@ -4,6 +4,8 @@ import { readWavFrames, type WavAudio } from "../bench/wav.ts";
 import {
   CAPTURE_FRAME_MS,
   CAPTURE_SAMPLE_RATE,
+  DEFAULT_MIC_DEVICE,
+  listAudioDevices,
   startMicCapture,
   type MicCapture,
 } from "../capture/ffmpeg.ts";
@@ -12,9 +14,10 @@ import { SherpaEngine } from "../engines/sherpa.ts";
 
 /**
  * Live push-to-talk demo: Enter starts an utterance (frames flow to the
- * session, partials render live), Enter again releases (flush() commits, the
- * final prints with release->final latency). The SAME session serves every
- * utterance, which is the point: flush() commits without closing the session.
+ * session, partials render live with an input level meter), Enter again
+ * releases (flush() commits, the final prints with release->final latency).
+ * The SAME session serves every utterance, which is the point: flush()
+ * commits without closing the session.
  *
  * Audio source is the microphone (ffmpeg capture helper) or, with --wav, a
  * recorded file replayed at real-time cadence from the top of each utterance.
@@ -22,9 +25,12 @@ import { SherpaEngine } from "../engines/sherpa.ts";
  */
 
 const FINAL_TIMEOUT_MS = 2_000;
+const LEVEL_WINDOW_FRAMES = 25; // 500ms rolling peak
+const LEVEL_RENDER_INTERVAL_MS = 100;
+const LEVEL_BAR_CELLS = 10;
 const SCRIPT_EVENT_PATTERN = /^(start|release)@(\d+(?:\.\d+)?)ms?$/;
 const USAGE =
-  'usage: pnpm demo [--wav <path>] [--script "start@0ms,release@2200ms,..."] [--device <avfoundation-input>]';
+  'usage: pnpm demo [--wav <path>] [--script "start@0ms,release@2200ms,..."] [--device <index>] [--list-devices]';
 
 type ScriptAction = "start" | "release";
 type ScriptEvent = { action: ScriptAction; atMs: number };
@@ -32,12 +38,26 @@ type DemoOptions = {
   wavPath?: string;
   script?: ScriptEvent[];
   device?: string;
+  listDevices?: boolean;
 };
 
 type FinalObservation = { text: string; at: number };
 
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
+
+  if (options.listDevices) {
+    const devices = await listAudioDevices();
+    console.log("audio input devices (ffmpeg avfoundation):");
+    for (const device of devices) {
+      console.log(`  [${device.index}] ${device.name}`);
+    }
+    console.log(
+      `select with --device <index>; default is the system default input (${DEFAULT_MIC_DEVICE})`,
+    );
+    return;
+  }
+
   const wav = options.wavPath
     ? await readWavFrames(options.wavPath, CAPTURE_FRAME_MS)
     : undefined;
@@ -58,9 +78,14 @@ class PttDemo {
   readonly #wav: WavAudio | undefined;
   readonly #options: DemoOptions;
   #capture: MicCapture | undefined;
+  #sourceLabel = "";
   #talking = false;
+  #quitting = false;
   #utterance = 0;
   #lastPartial = "";
+  #framePeaks: number[] = [];
+  #utterancePeak = 0;
+  #levelTimer: NodeJS.Timeout | undefined;
   #wavFeed: Promise<void> = Promise.resolve();
   #fatal: Error | undefined;
   #fatalNotify: (() => void) | undefined;
@@ -74,7 +99,10 @@ class PttDemo {
     this.#wav = wav;
     this.#options = options;
     session.on("partial", (event: PartialEvent) => {
-      this.#renderPartial(event.text);
+      if (this.#talking) {
+        this.#lastPartial = event.text;
+        this.#renderLive();
+      }
     });
     session.on("error", (event: { err: unknown }) => {
       this.#setFatal(new Error(`session error: ${String(event.err)}`));
@@ -82,17 +110,19 @@ class PttDemo {
   }
 
   async run(): Promise<void> {
-    const source = this.#wav
+    this.#sourceLabel = this.#wav
       ? `wav replay ${this.#options.wavPath}`
-      : "microphone (ffmpeg avfoundation)";
-    console.log(`speak-easy ptt demo | engine=sherpa | source=${source}`);
+      : `microphone ${await resolveDeviceLabel(this.#options.device ?? DEFAULT_MIC_DEVICE)}`;
+    console.log(
+      `speak-easy ptt demo | engine=sherpa | source=${this.#sourceLabel}`,
+    );
 
     if (!this.#wav) {
       this.#capture = startMicCapture({
         device: this.#options.device,
         onFrame: (frame) => {
           if (this.#talking && !this.#fatal) {
-            this.#session.pushAudio(frame);
+            this.#ingestFrame(frame);
           }
         },
         onError: (error) => {
@@ -144,6 +174,9 @@ class PttDemo {
     console.log("Enter = start/release talking, Ctrl+C = quit.");
     process.stdin.setRawMode(true);
     process.stdin.resume();
+    // Raw mode swallows SIGINT, so 0x03 handling below is the only Ctrl+C
+    // path; restore the TTY on every exit, even a hard process.exit().
+    process.on("exit", restoreTty);
 
     await new Promise<void>((resolve) => {
       this.#fatalNotify = resolve;
@@ -158,15 +191,22 @@ class PttDemo {
       };
       process.stdin.on("data", (chunk: Buffer) => {
         for (const byte of chunk) {
-          if (byte === 0x03) {
-            enqueue(() => {
-              resolve();
-            });
+          if (byte === 0x03 || byte === 0x04) {
+            // Ctrl+C / Ctrl+D: quit IMMEDIATELY, never behind the queue (a
+            // stuck release must not make the demo unkillable). A second
+            // press hard-exits.
+            if (this.#quitting) {
+              process.exit(130);
+            }
+            this.#quitting = true;
+            this.#clearLiveLine();
+            console.log("quitting...");
+            resolve();
             return;
           }
           if (byte === 0x0d || byte === 0x0a) {
             enqueue(async () => {
-              if (this.#fatal) {
+              if (this.#fatal || this.#quitting) {
                 resolve();
               } else if (this.#talking) {
                 await this.#handleRelease();
@@ -187,7 +227,14 @@ class PttDemo {
     this.#talking = true;
     this.#utterance += 1;
     this.#lastPartial = "";
+    this.#framePeaks = [];
+    this.#utterancePeak = 0;
     console.log(`utterance ${this.#utterance}: talking (Enter to release)`);
+    if (process.stdout.isTTY) {
+      this.#levelTimer = setInterval(() => {
+        this.#renderLive();
+      }, LEVEL_RENDER_INTERVAL_MS);
+    }
     if (this.#wav) {
       this.#wavFeed = this.#feedWav(this.#wav);
     }
@@ -198,8 +245,9 @@ class PttDemo {
       throw new Error("script error: release while not talking");
     }
     this.#talking = false;
+    this.#stopLevelTimer();
     await this.#wavFeed;
-    this.#clearPartialLine();
+    this.#clearLiveLine();
     this.#throwIfFatal();
 
     // Register the final waiter BEFORE flush(): the contract makes no
@@ -215,7 +263,7 @@ class PttDemo {
       );
     } else {
       console.log(
-        `utterance ${this.#utterance}: no final within ${FINAL_TIMEOUT_MS}ms (no speech committed)`,
+        `utterance ${this.#utterance}: no speech committed (peak level ${this.#utterancePeak.toFixed(3)} on ${this.#sourceLabel}). If the level stays at 0, check mic permission or pick another input with --list-devices / --device <index>.`,
       );
     }
   }
@@ -231,18 +279,37 @@ class PttDemo {
         if (!this.#talking || this.#fatal) {
           return;
         }
-        this.#session.pushAudio(frame);
+        this.#ingestFrame(frame);
         const wait =
           feedStart + (index + 1) * CAPTURE_FRAME_MS - performance.now();
         if (wait > 0) {
           await delay(wait);
         }
       }
-      this.#clearPartialLine();
+      this.#clearLiveLine();
       console.log("(wav exhausted; release to commit)");
     } catch (error) {
       this.#setFatal(toError(error));
     }
+  }
+
+  /** Single ingest path for mic and wav frames: level tracking + push. */
+  #ingestFrame(frame: Float32Array): void {
+    let peak = 0;
+    for (const sample of frame) {
+      const abs = Math.abs(sample);
+      if (abs > peak) {
+        peak = abs;
+      }
+    }
+    this.#framePeaks.push(peak);
+    if (this.#framePeaks.length > LEVEL_WINDOW_FRAMES) {
+      this.#framePeaks.shift();
+    }
+    if (peak > this.#utterancePeak) {
+      this.#utterancePeak = peak;
+    }
+    this.#session.pushAudio(frame);
   }
 
   #nextFinal(timeoutMs: number): Promise<FinalObservation | undefined> {
@@ -259,21 +326,31 @@ class PttDemo {
     });
   }
 
-  #renderPartial(text: string): void {
-    if (!this.#talking || text === this.#lastPartial) {
+  /** One overwriting status line: [level bar] peak + latest partial. */
+  #renderLive(): void {
+    if (!this.#talking) {
       return;
     }
-    this.#lastPartial = text;
+    const level = this.#framePeaks.length > 0 ? Math.max(...this.#framePeaks) : 0;
     if (process.stdout.isTTY) {
-      process.stdout.write(`\r\x1b[K  ${text}`);
-    } else {
-      console.log(`  partial: ${text}`);
+      process.stdout.write(
+        `\r\x1b[K  [${levelBar(level)}] ${level.toFixed(2)} ${this.#lastPartial}`,
+      );
+    } else if (this.#lastPartial) {
+      console.log(`  partial: ${this.#lastPartial} (level=${level.toFixed(2)})`);
     }
   }
 
-  #clearPartialLine(): void {
-    if (process.stdout.isTTY && this.#lastPartial) {
+  #clearLiveLine(): void {
+    if (process.stdout.isTTY) {
       process.stdout.write("\r\x1b[K");
+    }
+  }
+
+  #stopLevelTimer(): void {
+    if (this.#levelTimer) {
+      clearInterval(this.#levelTimer);
+      this.#levelTimer = undefined;
     }
   }
 
@@ -287,18 +364,50 @@ class PttDemo {
 
   async #shutdown(): Promise<void> {
     this.#talking = false;
+    this.#stopLevelTimer();
     await this.#wavFeed;
     await this.#capture?.stop();
     await this.#session.end().catch(() => {});
-    if (process.stdin.isTTY) {
-      process.stdin.setRawMode(false);
-    }
+    restoreTty();
     process.stdin.pause();
   }
 
   #throwIfFatal(): void {
     if (this.#fatal) {
       throw this.#fatal;
+    }
+  }
+}
+
+async function resolveDeviceLabel(spec: string): Promise<string> {
+  if (spec === DEFAULT_MIC_DEVICE) {
+    return `${DEFAULT_MIC_DEVICE} (system default input)`;
+  }
+  const indexMatch = /^:(\d+)$/.exec(spec);
+  if (!indexMatch) {
+    return spec;
+  }
+  const devices = await listAudioDevices().catch(() => []);
+  const device = devices.find(
+    (candidate) => candidate.index === Number(indexMatch[1]),
+  );
+  return device ? `[${device.index}] ${device.name}` : spec;
+}
+
+function levelBar(level: number): string {
+  const filled = Math.min(
+    LEVEL_BAR_CELLS,
+    Math.round(level * LEVEL_BAR_CELLS),
+  );
+  return "#".repeat(filled).padEnd(LEVEL_BAR_CELLS, "-");
+}
+
+function restoreTty(): void {
+  if (process.stdin.isTTY) {
+    try {
+      process.stdin.setRawMode(false);
+    } catch {
+      // The TTY may already be gone at exit time.
     }
   }
 }
@@ -314,8 +423,13 @@ function parseArgs(argv: string[]): DemoOptions {
       case "--script":
         options.script = parseScript(expectValue(argv, (index += 1), arg));
         break;
-      case "--device":
-        options.device = expectValue(argv, (index += 1), arg);
+      case "--device": {
+        const value = expectValue(argv, (index += 1), arg);
+        options.device = /^\d+$/.test(value) ? `:${value}` : value;
+        break;
+      }
+      case "--list-devices":
+        options.listDevices = true;
         break;
       default:
         throw new Error(`Unknown argument ${arg}\n${USAGE}`);
