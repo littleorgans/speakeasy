@@ -16,9 +16,13 @@ const RMS_MIN_THRESHOLD = 0.016;
 const RMS_TAIL_NOISE_MS = 500;
 
 export type SpeechProfile = {
+  /** Loose reference: last voiced sample plus hangover (clamped to file end). */
   endMs: number;
   frameIndex: number;
   offsetWithinFrameMs: number;
+  /** Strict reference: end of the last RMS window at or above threshold. */
+  voicedEndMs: number;
+  voicedFrameIndex: number;
   threshold: number;
   windowMs: number;
   hangoverMs: number;
@@ -46,23 +50,33 @@ export function detectSpeechProfile(
     throw new Error("WAV does not contain detectable speech");
   }
 
-  const endMs = Math.min(
-    audio.durationMs,
-    lastSpeechWindow.endMs + RMS_HANGOVER_MS,
-  );
-  const samplesPerFrame = Math.round((audio.sampleRate * frameMs) / 1_000);
-  const endSample = Math.round((endMs / 1_000) * audio.sampleRate);
-  const frameIndex = Math.floor(endSample / samplesPerFrame);
-  const sampleOffset = endSample % samplesPerFrame;
-  const offsetWithinFrameMs = (sampleOffset / audio.sampleRate) * 1_000;
+  const voicedEndMs = lastSpeechWindow.endMs;
+  const endMs = Math.min(audio.durationMs, voicedEndMs + RMS_HANGOVER_MS);
+  const loose = locateFrame(endMs, audio.sampleRate, frameMs);
+  const strict = locateFrame(voicedEndMs, audio.sampleRate, frameMs);
 
   return {
     endMs,
-    frameIndex,
-    offsetWithinFrameMs,
+    frameIndex: loose.frameIndex,
+    offsetWithinFrameMs: loose.offsetWithinFrameMs,
+    voicedEndMs,
+    voicedFrameIndex: strict.frameIndex,
     threshold,
     windowMs: RMS_WINDOW_MS,
     hangoverMs: RMS_HANGOVER_MS,
+  };
+}
+
+function locateFrame(
+  ms: number,
+  sampleRate: number,
+  frameMs: number,
+): { frameIndex: number; offsetWithinFrameMs: number } {
+  const samplesPerFrame = Math.round((sampleRate * frameMs) / 1_000);
+  const endSample = Math.round((ms / 1_000) * sampleRate);
+  return {
+    frameIndex: Math.floor(endSample / samplesPerFrame),
+    offsetWithinFrameMs: ((endSample % samplesPerFrame) / sampleRate) * 1_000,
   };
 }
 
