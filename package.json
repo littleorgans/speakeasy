@@ -9,6 +9,7 @@
   },
   "scripts": {
     "bench": "node src/bench/run.ts",
+    "demo": "node src/demo/ptt.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
