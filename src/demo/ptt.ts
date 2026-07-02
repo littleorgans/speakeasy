@@ -7,6 +7,7 @@ import {
   CAPTURE_SAMPLE_RATE,
   DEFAULT_MIC_DEVICE,
   listAudioDevices,
+  resolveDefaultMicDevice,
   startMicCapture,
   type MicCapture,
 } from "../capture/ffmpeg.ts";
@@ -29,9 +30,10 @@ import { SherpaEngine } from "../engines/sherpa.ts";
  * recorded file replayed at real-time cadence from the top of each utterance.
  * --script drives the Enter presses deterministically for unattended runs.
  *
- * --save turns the demo into a labeled-corpus collector: each kept utterance
- * is written as a wav + json sidecar pair (see src/corpus/store.ts) that
- * `pnpm bench --corpus <dir>` scores for WER.
+ * The demo is a labeled-corpus collector by default: each kept utterance is
+ * written as a wav + json sidecar pair (see src/corpus/store.ts) that
+ * `pnpm bench --corpus <dir>` scores for WER. --save <dir> overrides the
+ * directory, --no-save disarms, --save-all skips the prompts.
  */
 
 const FINAL_TIMEOUT_MS = 2_000;
@@ -40,8 +42,10 @@ const LEVEL_RENDER_INTERVAL_MS = 100;
 const LEVEL_BAR_CELLS = 10;
 const SCRIPT_EVENT_PATTERN = /^(start|release)@(\d+(?:\.\d+)?)ms?$/;
 const USAGE =
-  'usage: pnpm demo [--wav <path>] [--script "start@0ms,release@2200ms,..."] [--device <index>] [--list-devices] [--save [dir]] [--save-all]\n' +
-  `  --save [dir]  arm corpus collection (default dir: ${DEFAULT_CORPUS_DIR}/): after each final, s = save wav+json pair and label it, any other key = discard\n` +
+  'usage: pnpm demo [--wav <path>] [--script "start@0ms,release@2200ms,..."] [--device <index>] [--list-devices] [--save <dir>] [--no-save] [--save-all]\n' +
+  `  corpus collection is ON by default (dir: ${DEFAULT_CORPUS_DIR}/): after each final, s = save wav+json pair and label it, any other key = discard\n` +
+  "  --save <dir>  override the corpus directory\n" +
+  "  --no-save     disarm corpus collection\n" +
   "  --save-all    save every utterance without prompting (expected=null; label the sidecars by hand)";
 
 type ScriptAction = "start" | "release";
@@ -52,6 +56,7 @@ type DemoOptions = {
   device?: string;
   listDevices?: boolean;
   saveDir?: string;
+  noSave?: boolean;
   saveAll?: boolean;
 };
 
@@ -72,15 +77,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (
-    options.saveDir &&
-    !options.saveAll &&
-    (options.script || !process.stdin.isTTY)
-  ) {
-    throw new Error(
-      "--save prompts for keep/label after each utterance; unattended runs (--script or piped stdin) need --save-all",
-    );
-  }
+  resolveSavePlan(options);
 
   const wav = options.wavPath
     ? await readWavFrames(options.wavPath, CAPTURE_FRAME_MS)
@@ -103,6 +100,7 @@ class PttDemo {
   readonly #options: DemoOptions;
   readonly #engineLabel: string;
   #capture: MicCapture | undefined;
+  #micSpec: string = DEFAULT_MIC_DEVICE;
   #sourceLabel = "";
   #talking = false;
   #quitting = false;
@@ -140,16 +138,20 @@ class PttDemo {
   }
 
   async run(): Promise<void> {
-    this.#sourceLabel = this.#wav
-      ? `wav replay ${this.#options.wavPath}`
-      : `microphone ${await resolveDeviceLabel(this.#options.device ?? DEFAULT_MIC_DEVICE)}`;
+    if (this.#wav) {
+      this.#sourceLabel = `wav replay ${this.#options.wavPath}`;
+    } else {
+      const mic = await this.#resolveMic();
+      this.#micSpec = mic.spec;
+      this.#sourceLabel = `microphone ${mic.label}`;
+    }
     console.log(
       `speak-easy ptt demo | engine=sherpa | source=${this.#sourceLabel}`,
     );
 
     if (!this.#wav) {
       this.#capture = startMicCapture({
-        device: this.#options.device,
+        device: this.#micSpec,
         onFrame: (frame) => {
           if (this.#talking && !this.#fatal) {
             this.#ingestFrame(frame);
@@ -409,10 +411,25 @@ class PttDemo {
     }
   }
 
+  /** --device overrides; otherwise the name-preference list, else :default. */
+  async #resolveMic(): Promise<{ spec: string; label: string }> {
+    if (this.#options.device) {
+      return {
+        spec: this.#options.device,
+        label: await resolveDeviceLabel(this.#options.device),
+      };
+    }
+    const resolved = await resolveDefaultMicDevice();
+    return {
+      spec: resolved.spec,
+      label: resolved.device
+        ? `[${resolved.device.index}] ${resolved.device.name} (preferred name match)`
+        : await resolveDeviceLabel(resolved.spec),
+    };
+  }
+
   #deviceSpec(): string {
-    return this.#wav
-      ? `wav:${this.#options.wavPath}`
-      : (this.#options.device ?? DEFAULT_MIC_DEVICE);
+    return this.#wav ? `wav:${this.#options.wavPath}` : this.#micSpec;
   }
 
   /** Never rejects; failures surface through #fatal at the next checkpoint. */
@@ -581,16 +598,12 @@ function parseArgs(argv: string[]): DemoOptions {
       case "--list-devices":
         options.listDevices = true;
         break;
-      case "--save": {
-        const value = argv[index + 1];
-        if (value !== undefined && !value.startsWith("--")) {
-          options.saveDir = value;
-          index += 1;
-        } else {
-          options.saveDir = DEFAULT_CORPUS_DIR;
-        }
+      case "--save":
+        options.saveDir = expectValue(argv, (index += 1), arg);
         break;
-      }
+      case "--no-save":
+        options.noSave = true;
+        break;
       case "--save-all":
         options.saveAll = true;
         break;
@@ -598,10 +611,39 @@ function parseArgs(argv: string[]): DemoOptions {
         throw new Error(`Unknown argument ${arg}\n${USAGE}`);
     }
   }
+  return options;
+}
+
+/**
+ * Corpus collection is armed by default. The keep/label prompts need an
+ * interactive TTY, so unattended runs (--script or piped stdin) quietly
+ * disarm the default; an EXPLICIT --save there is an error unless --save-all
+ * removes the prompting.
+ */
+function resolveSavePlan(options: DemoOptions): void {
+  if (options.noSave) {
+    if (options.saveDir !== undefined || options.saveAll) {
+      throw new Error(`--no-save conflicts with --save/--save-all\n${USAGE}`);
+    }
+    return;
+  }
   if (options.saveAll) {
     options.saveDir ??= DEFAULT_CORPUS_DIR;
+    return;
   }
-  return options;
+  const unattended = Boolean(options.script) || !process.stdin.isTTY;
+  if (unattended) {
+    if (options.saveDir !== undefined) {
+      throw new Error(
+        "--save prompts for keep/label after each utterance; unattended runs (--script or piped stdin) need --save-all",
+      );
+    }
+    console.log(
+      "corpus saving disarmed (unattended run); pass --save-all to keep every utterance",
+    );
+    return;
+  }
+  options.saveDir ??= DEFAULT_CORPUS_DIR;
 }
 
 function expectValue(argv: string[], index: number, flag: string): string {

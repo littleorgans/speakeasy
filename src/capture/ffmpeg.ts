@@ -17,6 +17,12 @@ export const CAPTURE_FRAME_SAMPLES =
 /** avfoundation spec for the system-default audio input (never an index: */
 /** device order varies per machine, e.g. :0 can be a silent virtual device). */
 export const DEFAULT_MIC_DEVICE = ":default";
+/**
+ * Preferred input devices, matched case-insensitively by name substring in
+ * order. Name matching survives device-order shifts that break hardcoded
+ * indices; the system default (often a virtual device) is only the fallback.
+ */
+export const PREFERRED_MIC_NAMES = ["MacBook Pro Microphone"];
 
 const FFMPEG_PATH = "/opt/homebrew/bin/ffmpeg";
 const BYTES_PER_SAMPLE = 4;
@@ -133,6 +139,30 @@ export function startMicCapture(options: MicCaptureOptions): MicCapture {
         child.kill("SIGTERM");
       }),
   };
+}
+
+/**
+ * Resolve the default mic: the first PREFERRED_MIC_NAMES match by current
+ * index, else the system default. Listing failures fall back silently; the
+ * capture itself surfaces real errors.
+ */
+export async function resolveDefaultMicDevice(
+  ffmpegPath = FFMPEG_PATH,
+): Promise<{ spec: string; device?: AudioDevice }> {
+  try {
+    const devices = await listAudioDevices(ffmpegPath);
+    for (const preferred of PREFERRED_MIC_NAMES) {
+      const match = devices.find((device) =>
+        device.name.toLowerCase().includes(preferred.toLowerCase()),
+      );
+      if (match) {
+        return { spec: `:${match.index}`, device: match };
+      }
+    }
+  } catch {
+    // Fall through to the system default.
+  }
+  return { spec: DEFAULT_MIC_DEVICE };
 }
 
 /** Enumerate avfoundation audio input devices (index + name). */
