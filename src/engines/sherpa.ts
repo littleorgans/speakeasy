@@ -27,6 +27,15 @@ import { downloadFile, extractTarBz2, hasNonEmptyFile } from "./assets.ts";
 
 const SAMPLE_RATE = 16_000;
 const FEATURE_DIM = 80;
+/**
+ * Silence pushed instantly at flush() so the encoder's pending chunk and
+ * right context fill without waiting for real trailing audio. Sized for one
+ * full chunk (~640ms for chunk-16 at 4x subsampling on 10ms features) plus
+ * right context, with headroom. Decoding the extra silence costs only a few
+ * encoder steps, so flush stays well under the 200ms budget.
+ */
+const FLUSH_PADDING_MS = 1_200;
+const FLUSH_PADDING_SAMPLES = (SAMPLE_RATE * FLUSH_PADDING_MS) / 1_000;
 const MODEL_NAME = "sherpa-onnx-streaming-zipformer-en-2023-06-26";
 const MODEL_URL =
   `https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${MODEL_NAME}.tar.bz2`;
@@ -98,6 +107,18 @@ class SherpaSession extends EventEmitter implements STTSession {
   }
 
   flush(): void {
+    if (this.#closed) {
+      return;
+    }
+    // Commit fast without closing the session: the streaming zipformer holds
+    // the last word until its chunk/right-context is satisfied, so push
+    // synthetic silence instantly (never inputFinished(), which would end the
+    // stream), decode everything pending, then commit. reset() inside
+    // #commit() leaves the stream accepting audio for the next utterance.
+    this.#stream.acceptWaveform({
+      samples: new Float32Array(FLUSH_PADDING_SAMPLES),
+      sampleRate: SAMPLE_RATE,
+    });
     this.#decodeReady();
     this.#commit(false);
   }

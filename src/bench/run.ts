@@ -1,10 +1,24 @@
-import { mkdir, writeFile } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
 import { setTimeout as delay } from "node:timers/promises";
 import type { EndpointConfig, STTSession, VoiceToText } from "../contract.ts";
 import { StubEngine } from "../engines/stub.ts";
 import { MoonshineEngine } from "../engines/moonshine.ts";
 import { SherpaEngine } from "../engines/sherpa.ts";
+import {
+  formatBoolean,
+  formatEndpoint,
+  formatMs,
+  formatOptionalMs,
+} from "./format.ts";
+import { upsertReportSection } from "./report.ts";
+import { detectSpeechProfile, type SpeechProfile } from "./speech.ts";
+import { median, medianOptional } from "./stats.ts";
+import {
+  DEFAULT_MAX_WORD_ERRORS,
+  isExactTranscript,
+  isWordTolerantTranscript,
+  wordErrorCount,
+} from "./transcript.ts";
 import { readWavFrames, type WavAudio } from "./wav.ts";
 
 const DEFAULT_RUNS = 5;
@@ -14,13 +28,10 @@ const PASS_THRESHOLD_MS = 200;
 const SOFT_THRESHOLD_MS = 300;
 const SESSION_TIMEOUT_MS = 30_000;
 const EXPECTED_JFK_TRANSCRIPT = "and so my fellow americans";
-const RMS_WINDOW_MS = 20;
-const RMS_HANGOVER_MS = 650;
-const RMS_PEAK_RATIO = 0.04;
-const RMS_NOISE_MULTIPLIER = 8;
-const RMS_MIN_THRESHOLD = 0.016;
-const RMS_TAIL_NOISE_MS = 500;
 const SHERPA_SWEEP_PATH = "results/sherpa-sweep.txt";
+const SWEEP_SECTION_HEADER = "# sherpa endpoint sweep";
+const PTT_SECTION_HEADER = "# ptt mode";
+const PTT_MIN_RUNS = 6;
 const PARTIAL_ROOTCAUSE = "model-right-context";
 const SHERPA_SWEEP: Required<EndpointConfig>[] = [
   { mode: "eager", minTrailingSilenceMs: 80, minUtteranceMs: 20_000 },
@@ -37,20 +48,32 @@ type BenchEngine = VoiceToText & {
   prepare?: () => Promise<void>;
 };
 
+type BenchMode = "sweep" | "ptt";
+
 type CliOptions = {
   engine: EngineName;
   wav?: string;
   runs: number;
   frameMs: number;
+  mode: BenchMode;
 };
 
-type SpeechProfile = {
-  endMs: number;
-  frameIndex: number;
-  offsetWithinFrameMs: number;
-  threshold: number;
-  windowMs: number;
-  hangoverMs: number;
+type PttRunResult = {
+  run: number;
+  flushToFinalMs: number;
+  firstPartialMs?: number;
+  wordErrors: number;
+  finalText: string;
+  textCorrect: boolean;
+};
+
+type PttSummary = {
+  engineLabel: string;
+  results: PttRunResult[];
+  coldFlushToFinalMs: number;
+  warmFlushToFinalMedianMs: number;
+  textCorrect: boolean;
+  passFail: "PASS" | "FAIL";
 };
 
 type FinalObservation = {
@@ -89,12 +112,15 @@ const options = parseArgs(process.argv.slice(2));
 if (!options.wav) {
   throw new Error("Missing required --wav <path> argument");
 }
+if (options.mode === "ptt") {
+  options.runs = Math.max(options.runs, PTT_MIN_RUNS);
+}
 
 const audio = await readWavFrames(options.wav, options.frameMs);
 const speech = detectSpeechProfile(audio, options.frameMs);
 
 console.log("speak-easy latency benchmark");
-console.log(`wav=${options.wav}`);
+console.log(`wav=${options.wav} mode=${options.mode}`);
 console.log(
   `audio=${audio.durationMs.toFixed(0)}ms speech-end=${speech.endMs.toFixed(0)}ms trailing-silence=${(audio.durationMs - speech.endMs).toFixed(0)}ms`,
 );
@@ -102,35 +128,52 @@ console.log(
   `speech-end-detector=rms-window window=${speech.windowMs}ms hangover=${speech.hangoverMs}ms threshold=${speech.threshold.toFixed(4)}`,
 );
 console.log(
-  `expected=${JSON.stringify(EXPECTED_JFK_TRANSCRIPT)} comparison=case/punct-insensitive-exact`,
+  options.mode === "ptt"
+    ? `expected=${JSON.stringify(EXPECTED_JFK_TRANSCRIPT)} comparison=word-tolerant(word-errors<=${DEFAULT_MAX_WORD_ERRORS})`
+    : `expected=${JSON.stringify(EXPECTED_JFK_TRANSCRIPT)} comparison=case/punct-insensitive-exact`,
 );
 console.log(
   `format=${audio.sampleRate}Hz mono ${audio.bitsPerSample}-bit cadence=${options.frameMs}ms/frame frames=${audio.frames.length} runs=${options.runs}`,
 );
-console.log(
-  options.engine === "sherpa"
+console.log(describeFeedStrategy(options));
+
+if (options.mode === "ptt") {
+  const summary = await runPttSummary(options, audio, speech);
+  printPttSummary(summary);
+  if (options.engine === "sherpa") {
+    await writePttReport(SHERPA_SWEEP_PATH, summary, speech);
+    console.log(`file=${SHERPA_SWEEP_PATH}`);
+  }
+} else {
+  const summaries = options.engine === "sherpa"
+    ? await runSherpaSweep(options, audio, speech)
+    : [await runEngineSummary(options, audio, speech, undefined)];
+
+  for (const summary of summaries) {
+    printSummary(summary);
+  }
+
+  const selected =
+    selectBestSummary(summaries) ?? selectLowestMeasuredSummary(summaries);
+  if (summaries.length > 1 && selected) {
+    console.log(
+      `selected=${formatEndpoint(selected.endpoint)} endpoint->final=${formatMs(selected.speechEndToFinalMedian)} event->final=${formatMs(selected.endpointToFinalMedian)} text-correct=${formatBoolean(selected.textCorrect)} first-partial-warm=${formatOptionalMs(selected.firstPartialWarmMedian)} partial-rootcause=${PARTIAL_ROOTCAUSE}`,
+    );
+  }
+
+  if (options.engine === "sherpa") {
+    await writeSherpaSweep(SHERPA_SWEEP_PATH, summaries, selected, speech);
+    console.log(`file=${SHERPA_SWEEP_PATH}`);
+  }
+}
+
+function describeFeedStrategy(cli: CliOptions): string {
+  if (cli.mode === "ptt") {
+    return "ptt mode: feeding frames in real time up to speech-end (rms reference), then flush() immediately; measuring flush->final";
+  }
+  return cli.engine === "sherpa"
     ? "feeding frames in real time; sherpa endpoint configs are swept for eager finalization"
-    : "feeding frames in real time; endpoint is supplied by the engine or end-of-input",
-);
-
-const summaries = options.engine === "sherpa"
-  ? await runSherpaSweep(options, audio, speech)
-  : [await runEngineSummary(options, audio, speech, undefined)];
-
-for (const summary of summaries) {
-  printSummary(summary);
-}
-
-const selected = selectBestSummary(summaries) ?? selectLowestMeasuredSummary(summaries);
-if (summaries.length > 1 && selected) {
-  console.log(
-    `selected=${formatEndpoint(selected.endpoint)} endpoint->final=${formatMs(selected.speechEndToFinalMedian)} event->final=${formatMs(selected.endpointToFinalMedian)} text-correct=${formatBoolean(selected.textCorrect)} first-partial-warm=${formatOptionalMs(selected.firstPartialWarmMedian)} partial-rootcause=${PARTIAL_ROOTCAUSE}`,
-  );
-}
-
-if (options.engine === "sherpa") {
-  await writeSherpaSweep(SHERPA_SWEEP_PATH, summaries, selected, speech);
-  console.log(`file=${SHERPA_SWEEP_PATH}`);
+    : "feeding frames in real time; endpoint is supplied by the engine or end-of-input";
 }
 
 async function writeSherpaSweep(
@@ -139,7 +182,6 @@ async function writeSherpaSweep(
   selected: Summary | undefined,
   speechProfile: SpeechProfile,
 ): Promise<void> {
-  await mkdir("results", { recursive: true });
   const knee = selectBestSummary(summaries);
   const rows = summaries.map((summary) =>
     [
@@ -150,9 +192,7 @@ async function writeSherpaSweep(
     ].join(" | "),
   );
 
-  const content = [
-    "# sherpa endpoint sweep",
-    "",
+  await upsertReportSection(path, SWEEP_SECTION_HEADER, [
     `engine: ${summaries[0]?.engineLabel ?? "unknown"}`,
     `speech-end-reference: rms-window ${speechProfile.windowMs}ms + ${speechProfile.hangoverMs}ms hangover, threshold=${speechProfile.threshold.toFixed(4)}, end=${speechProfile.endMs.toFixed(1)}ms`,
     `expected: ${JSON.stringify(EXPECTED_JFK_TRANSCRIPT)} (case/punct-insensitive exact)`,
@@ -163,10 +203,37 @@ async function writeSherpaSweep(
     "config | perceived endpoint->final median | text-correct | finalText",
     "--- | ---: | :---: | ---",
     ...rows,
-    "",
-  ].join("\n");
+  ]);
+}
 
-  await writeFile(path, content);
+async function writePttReport(
+  path: string,
+  summary: PttSummary,
+  speechProfile: SpeechProfile,
+): Promise<void> {
+  const rows = summary.results.map((result) =>
+    [
+      result.run === 1 ? "1 (cold)" : String(result.run),
+      formatMs(result.flushToFinalMs),
+      formatBoolean(result.textCorrect),
+      String(result.wordErrors),
+      JSON.stringify(result.finalText),
+    ].join(" | "),
+  );
+
+  await upsertReportSection(path, PTT_SECTION_HEADER, [
+    `engine: ${summary.engineLabel}`,
+    `scenario: push-to-talk; frames fed in real time up to speech-end (rms reference end=${speechProfile.endMs.toFixed(1)}ms incl. ${speechProfile.hangoverMs}ms hangover), then flush() immediately; engine endpointing=manual (disabled)`,
+    `flush: synthetic silence pushed instantly at flush() to satisfy the model's chunk/right-context, then decode+commit; session stays open`,
+    `expected: ${JSON.stringify(EXPECTED_JFK_TRANSCRIPT)} gate=word-tolerant (word-error-count <= ${DEFAULT_MAX_WORD_ERRORS} after case/punct normalization; "saw" for "so" passes, fragmented words fail)`,
+    `pass-rule: warm median flush->final < ${PASS_THRESHOLD_MS}ms AND all runs text-correct`,
+    "",
+    "run | flush->final | text-correct | word-errors | finalText",
+    "--- | ---: | :---: | ---: | ---",
+    ...rows,
+    "",
+    `runs=${summary.results.length} cold=${formatMs(summary.coldFlushToFinalMs)} warm-median=${formatMs(summary.warmFlushToFinalMedianMs)} text-correct=${formatBoolean(summary.textCorrect)} result=${summary.passFail}`,
+  ]);
 }
 
 function mostCommonFinalText(results: RunResult[]): string {
@@ -283,7 +350,7 @@ async function runOnce(input: {
     text: "",
   };
   const speechEndToFinalMs = final.finalAt - observedSpeechEndAt;
-  const textCorrect = isExpectedTranscript(final.text);
+  const textCorrect = isExactTranscript(final.text, EXPECTED_JFK_TRANSCRIPT);
 
   return {
     run: input.run,
@@ -298,6 +365,117 @@ async function runOnce(input: {
     finalizedAfterSpeechEnd: speechEndToFinalMs >= 0,
     textCorrect,
   };
+}
+
+async function runPttSummary(
+  cli: CliOptions,
+  wav: WavAudio,
+  speechProfile: SpeechProfile,
+): Promise<PttSummary> {
+  const engine = createEngine(cli.engine);
+  await engine.prepare?.();
+  const engineLabel = engine.label ?? cli.engine;
+  const results: PttRunResult[] = [];
+
+  for (let run = 1; run <= cli.runs; run += 1) {
+    results.push(
+      await runPttOnce({
+        run,
+        engine,
+        audio: wav,
+        speech: speechProfile,
+        frameMs: cli.frameMs,
+      }),
+    );
+  }
+
+  const coldFlushToFinalMs = results[0]!.flushToFinalMs;
+  const warmFlushToFinalMedianMs = median(
+    results.slice(1).map((result) => result.flushToFinalMs),
+  );
+  const textCorrect = results.every((result) => result.textCorrect);
+
+  return {
+    engineLabel,
+    results,
+    coldFlushToFinalMs,
+    warmFlushToFinalMedianMs,
+    textCorrect,
+    passFail:
+      textCorrect && warmFlushToFinalMedianMs < PASS_THRESHOLD_MS
+        ? "PASS"
+        : "FAIL",
+  };
+}
+
+async function runPttOnce(input: {
+  run: number;
+  engine: VoiceToText;
+  audio: WavAudio;
+  speech: SpeechProfile;
+  frameMs: number;
+}): Promise<PttRunResult> {
+  // Push-to-talk: the consumer finalizes externally (button release), so the
+  // engine's own silence endpointing is disabled and flush() is the commit
+  // path. Frames are fed in real time only up to the RMS speech-end
+  // reference; flush() fires immediately after the release frame.
+  const session = await input.engine.open({
+    sampleRate: input.audio.sampleRate,
+    endpoint: { mode: "manual" },
+  });
+  const state = attachSessionObservers(session);
+  const start = performance.now();
+  const releaseFrame = Math.min(
+    input.speech.frameIndex,
+    input.audio.frames.length - 1,
+  );
+
+  for (let index = 0; index <= releaseFrame; index += 1) {
+    session.pushAudio(input.audio.frames[index]!);
+    if (index < releaseFrame) {
+      await delay(input.frameMs);
+    }
+  }
+
+  const flushAt = performance.now();
+  session.flush();
+  // flush() commits synchronously, so any final has been observed by now.
+  const final = state.finals.findLast((observed) => observed.text);
+  const flushToFinalMs = (final?.finalAt ?? performance.now()) - flushAt;
+  const finalText = final?.text ?? "";
+
+  await withTimeout(session.end(), SESSION_TIMEOUT_MS);
+  state.throwIfError();
+
+  return {
+    run: input.run,
+    flushToFinalMs,
+    firstPartialMs: state.firstPartialAt
+      ? state.firstPartialAt - start
+      : undefined,
+    wordErrors: wordErrorCount(finalText, EXPECTED_JFK_TRANSCRIPT),
+    finalText,
+    textCorrect: isWordTolerantTranscript(finalText, EXPECTED_JFK_TRANSCRIPT),
+  };
+}
+
+function printPttSummary(summary: PttSummary): void {
+  console.log(`engine=${summary.engineLabel} mode=ptt endpoint=manual`);
+  for (const result of summary.results) {
+    console.log(
+      [
+        `run=${result.run}${result.run === 1 ? "(cold)" : ""}`,
+        `flush->final=${formatMs(result.flushToFinalMs)}`,
+        `first-partial=${formatOptionalMs(result.firstPartialMs)}`,
+        `word-errors=${result.wordErrors}`,
+        `text-correct=${formatBoolean(result.textCorrect)}`,
+        `text=${JSON.stringify(result.finalText)}`,
+      ].join(" "),
+    );
+  }
+  console.log(
+    `flush->final cold=${formatMs(summary.coldFlushToFinalMs)} warm-median=${formatMs(summary.warmFlushToFinalMedianMs)} text-correct=${formatBoolean(summary.textCorrect)} ${summary.passFail} threshold=${PASS_THRESHOLD_MS}ms`,
+  );
 }
 
 function attachSessionObservers(session: STTSession): {
@@ -380,6 +558,7 @@ function parseArgs(args: string[]): CliOptions {
     engine: DEFAULT_ENGINE,
     runs: DEFAULT_RUNS,
     frameMs: DEFAULT_FRAME_MS,
+    mode: "sweep",
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -398,6 +577,9 @@ function parseArgs(args: string[]): CliOptions {
         "--frame-ms",
         requireValue(args, index),
       );
+      index += 1;
+    } else if (arg === "--mode") {
+      options.mode = parseMode(requireValue(args, index));
       index += 1;
     } else {
       throw new Error(`Unknown argument ${arg}`);
@@ -426,72 +608,19 @@ function parseEngine(value: string): EngineName {
   throw new Error(`--engine must be stub, moonshine, or sherpa; received ${value}`);
 }
 
+function parseMode(value: string): BenchMode {
+  if (value === "sweep" || value === "ptt") {
+    return value;
+  }
+  throw new Error(`--mode must be sweep or ptt; received ${value}`);
+}
+
 function parsePositiveInteger(flag: string, value: string): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) {
     throw new Error(`${flag} must be a positive integer, received ${value}`);
   }
   return parsed;
-}
-
-function detectSpeechProfile(audio: WavAudio, frameMs: number): SpeechProfile {
-  const windowSamples = Math.round((audio.sampleRate * RMS_WINDOW_MS) / 1_000);
-  const windows = buildRmsWindows(audio.samples, audio.sampleRate, windowSamples);
-  const peakRms = Math.max(...windows.map((window) => window.rms));
-  const tailNoise = median(
-    windows
-      .filter((window) => window.endMs >= audio.durationMs - RMS_TAIL_NOISE_MS)
-      .map((window) => window.rms),
-  );
-  const threshold = Math.max(
-    RMS_MIN_THRESHOLD,
-    peakRms * RMS_PEAK_RATIO,
-    tailNoise * RMS_NOISE_MULTIPLIER,
-  );
-  const lastSpeechWindow = windows.findLast((window) => window.rms >= threshold);
-  if (!lastSpeechWindow) {
-    throw new Error("WAV does not contain detectable speech");
-  }
-
-  const endMs = Math.min(
-    audio.durationMs,
-    lastSpeechWindow.endMs + RMS_HANGOVER_MS,
-  );
-  const samplesPerFrame = Math.round((audio.sampleRate * frameMs) / 1_000);
-  const endSample = Math.round((endMs / 1_000) * audio.sampleRate);
-  const frameIndex = Math.floor(endSample / samplesPerFrame);
-  const sampleOffset = endSample % samplesPerFrame;
-  const offsetWithinFrameMs = (sampleOffset / audio.sampleRate) * 1_000;
-
-  return {
-    endMs,
-    frameIndex,
-    offsetWithinFrameMs,
-    threshold,
-    windowMs: RMS_WINDOW_MS,
-    hangoverMs: RMS_HANGOVER_MS,
-  };
-}
-
-function buildRmsWindows(
-  samples: Float32Array,
-  sampleRate: number,
-  windowSamples: number,
-): Array<{ endMs: number; rms: number }> {
-  const windows: Array<{ endMs: number; rms: number }> = [];
-  for (let start = 0; start < samples.length; start += windowSamples) {
-    let sumSquares = 0;
-    const end = Math.min(samples.length, start + windowSamples);
-    for (let index = start; index < end; index += 1) {
-      const sample = samples[index]!;
-      sumSquares += sample * sample;
-    }
-    windows.push({
-      endMs: (end / sampleRate) * 1_000,
-      rms: Math.sqrt(sumSquares / Math.max(1, end - start)),
-    });
-  }
-  return windows;
 }
 
 function selectBestSummary(summaries: Summary[]): Summary | undefined {
@@ -529,23 +658,6 @@ function printSummary(summary: Summary): void {
   );
 }
 
-function median(values: number[]): number {
-  if (values.length === 0) {
-    throw new Error("Cannot compute median of an empty array");
-  }
-  const sorted = [...values].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  if (sorted.length % 2 === 1) {
-    return sorted[middle]!;
-  }
-  return (sorted[middle - 1]! + sorted[middle]!) / 2;
-}
-
-function medianOptional(values: Array<number | undefined>): number | undefined {
-  const present = values.filter((value): value is number => value !== undefined);
-  return present.length > 0 ? median(present) : undefined;
-}
-
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -579,33 +691,3 @@ function formatRun(result: RunResult): string {
   ].join(" ");
 }
 
-function isExpectedTranscript(text: string): boolean {
-  return normalizeTranscript(text) === normalizeTranscript(EXPECTED_JFK_TRANSCRIPT);
-}
-
-function normalizeTranscript(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-    .replace(/\s+/g, " ");
-}
-
-function formatEndpoint(endpoint: EndpointConfig | undefined): string {
-  if (!endpoint) {
-    return "default";
-  }
-  return `${endpoint.mode ?? "eager"}:trail=${endpoint.minTrailingSilenceMs ?? "default"}ms:minutt=${endpoint.minUtteranceMs ?? "default"}ms`;
-}
-
-function formatMs(value: number): string {
-  return `${value.toFixed(1)}ms`;
-}
-
-function formatOptionalMs(value: number | undefined): string {
-  return value === undefined ? "n/a" : formatMs(value);
-}
-
-function formatBoolean(value: boolean): "y" | "n" {
-  return value ? "y" : "n";
-}

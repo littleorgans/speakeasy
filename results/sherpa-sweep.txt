@@ -9,8 +9,27 @@ partial-rootcause: model-right-context; decode is called whenever sherpa reports
 
 config | perceived endpoint->final median | text-correct | finalText
 --- | ---: | :---: | ---
-eager:trail=80ms:minutt=20000ms | 252.8ms | n | "AND SAW MY FELL OW A MERICANS"
-eager:trail=120ms:minutt=20000ms | 602.8ms | n | "AND SAW MY FELLOW A MERICANS"
-eager:trail=160ms:minutt=20000ms | 599.9ms | n | "AND SAW MY FELLOW A MERICANS"
-eager:trail=200ms:minutt=20000ms | 599.3ms | n | "AND SAW MY FELLOW AMERICANS"
-eager:trail=300ms:minutt=20000ms | 604.0ms | n | "AND SAW MY FELLOW AMERICANS"
+eager:trail=80ms:minutt=20000ms | 251.9ms | n | "AND SAW MY FELL OW A MERICANS"
+eager:trail=120ms:minutt=20000ms | 596.8ms | n | "AND SAW MY FELLOW A MERICANS"
+eager:trail=160ms:minutt=20000ms | 596.4ms | n | "AND SAW MY FELLOW A MERICANS"
+eager:trail=200ms:minutt=20000ms | 596.9ms | n | "AND SAW MY FELLOW AMERICANS"
+eager:trail=300ms:minutt=20000ms | 597.0ms | n | "AND SAW MY FELLOW AMERICANS"
+
+# ptt mode
+
+engine: sherpa-onnx-node-1.13.3:sherpa-onnx-streaming-zipformer-en-2023-06-26:int8
+scenario: push-to-talk; frames fed in real time up to speech-end (rms reference end=2790.0ms incl. 650ms hangover), then flush() immediately; engine endpointing=manual (disabled)
+flush: synthetic silence pushed instantly at flush() to satisfy the model's chunk/right-context, then decode+commit; session stays open
+expected: "and so my fellow americans" gate=word-tolerant (word-error-count <= 1 after case/punct normalization; "saw" for "so" passes, fragmented words fail)
+pass-rule: warm median flush->final < 200ms AND all runs text-correct
+
+run | flush->final | text-correct | word-errors | finalText
+--- | ---: | :---: | ---: | ---
+1 (cold) | 39.5ms | y | 1 | "AND SAW MY FELLOW AMERICANS"
+2 | 41.3ms | y | 1 | "AND SAW MY FELLOW AMERICANS"
+3 | 45.1ms | y | 1 | "AND SAW MY FELLOW AMERICANS"
+4 | 36.9ms | y | 1 | "AND SAW MY FELLOW AMERICANS"
+5 | 38.5ms | y | 1 | "AND SAW MY FELLOW AMERICANS"
+6 | 37.1ms | y | 1 | "AND SAW MY FELLOW AMERICANS"
+
+runs=6 cold=39.5ms warm-median=38.5ms text-correct=y result=PASS
