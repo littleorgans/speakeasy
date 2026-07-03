@@ -1,23 +1,23 @@
 /**
- * Transcript normalization and correctness gates for the bench harness.
+ * Transcript correctness gates and word-level alignment for the bench harness.
+ *
+ * All comparison runs on the shared normalized form (see normalize.ts:
+ * lowercase, strip punctuation, digit-canonical numbers), so cosmetic and
+ * number-spelling differences never count as errors.
  *
  * Two gates exist:
- *   - exact: case/punct-insensitive string equality (endpoint sweep mode)
+ *   - exact: normalized string equality (endpoint sweep mode)
  *   - word-tolerant: word-level edit distance <= maxWordErrors (ptt mode,
  *     where quality is deprioritized). "and saw my fellow americans" passes
  *     (one substitution); a fragmented "and saw my fell ow a mericans" fails
  *     (one substitution plus insertions).
  */
 
+import { normalizeTranscript } from "./normalize.ts";
+
 export const DEFAULT_MAX_WORD_ERRORS = 1;
 
-export function normalizeTranscript(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-    .replace(/\s+/g, " ");
-}
+export { normalizeTranscript };
 
 export function isExactTranscript(text: string, expected: string): boolean {
   return normalizeTranscript(text) === normalizeTranscript(expected);

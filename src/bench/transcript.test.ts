@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { normalizeTranscript } from "./normalize.ts";
 import {
   isExactTranscript,
   isWordTolerantTranscript,
@@ -45,6 +46,31 @@ test("alignment reports the substitution pair", () => {
   assert.deepEqual(alignment.substitutions, [{ expected: "so", actual: "saw" }]);
   assert.deepEqual(alignment.insertions, []);
   assert.deepEqual(alignment.deletions, []);
+});
+
+test("normalizes case, punctuation, and number words to digits", () => {
+  assert.equal(normalizeTranscript("Ten, 10  TEN!"), "10 10 10");
+  assert.equal(normalizeTranscript("One, two, three"), "1 2 3");
+  assert.equal(normalizeTranscript(""), "");
+  assert.equal(normalizeTranscript("!?.,"), "");
+});
+
+test("digit/word spellings of a number collapse in WER", () => {
+  assert.equal(isExactTranscript("spawn ten agents", "spawn 10 agents"), true);
+  assert.equal(wordErrorCount("spawn ten agents", "spawn 10 agents"), 0);
+  assert.equal(
+    isExactTranscript("one two three four five", "1 2 3 4 5"),
+    true,
+  );
+});
+
+test("genuine number mishears still count as errors", () => {
+  assert.equal(wordErrorCount("spawn tone agents", "spawn 10 agents"), 1);
+  const alignment = wordErrorAlignment("Close pain ten", "Close Pane 10");
+  assert.equal(alignment.errors, 1);
+  assert.deepEqual(alignment.substitutions, [
+    { expected: "pane", actual: "pain" },
+  ]);
 });
 
 test("alignment reports insertions and deletions", () => {
