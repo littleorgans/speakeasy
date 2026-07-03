@@ -1,4 +1,5 @@
 import type { EndpointConfig, VoiceToText } from "../contract.ts";
+import type { SherpaModelId } from "../engines/sherpa-models.ts";
 
 /** Shared bench harness types. */
 
@@ -21,6 +22,8 @@ export type BenchEngine = VoiceToText & {
 
 export type CliOptions = {
   engine: EngineName;
+  /** Sherpa model registry id; ignored by non-sherpa engines. */
+  model?: SherpaModelId;
   wav?: string;
   /** Corpus directory of wav + json sidecar pairs; enables the WER scorer. */
   corpus?: string;

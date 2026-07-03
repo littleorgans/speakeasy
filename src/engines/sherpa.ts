@@ -1,7 +1,6 @@
 import { EventEmitter } from "node:events";
 import { mkdir } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { join } from "node:path";
 import type {
   OnlineRecognizer as OnlineRecognizerClass,
   OnlineRecognizerConfig,
@@ -16,12 +15,22 @@ import type {
   VoiceToText,
 } from "../contract.ts";
 import { downloadFile, extractTarBz2, hasNonEmptyFile } from "./assets.ts";
+import {
+  DEFAULT_SHERPA_MODEL,
+  resolveModelPaths,
+  resolveSherpaModel,
+  SHERPA_ROOT,
+  type SherpaModel,
+  type SherpaModelId,
+  type SherpaModelPaths,
+} from "./sherpa-models.ts";
 
 /**
  * SherpaEngine: primary streaming STT engine for the benchmark spike.
  *
- * Uses sherpa-onnx-node's native N-API addon with the English streaming
- * Zipformer transducer. The model streams partials, uses sherpa's built-in
+ * Uses sherpa-onnx-node's native N-API addon with an English streaming
+ * Zipformer transducer selected from the model registry (see
+ * sherpa-models.ts). The model streams partials, uses sherpa's built-in
  * endpoint detector, and keeps all inference in-process for Electron main.
  */
 
@@ -36,17 +45,6 @@ const FEATURE_DIM = 80;
  */
 const FLUSH_PADDING_MS = 1_200;
 const FLUSH_PADDING_SAMPLES = (SAMPLE_RATE * FLUSH_PADDING_MS) / 1_000;
-const MODEL_NAME = "sherpa-onnx-streaming-zipformer-en-2023-06-26";
-const MODEL_URL =
-  `https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${MODEL_NAME}.tar.bz2`;
-const SHERPA_ROOT = join(process.cwd(), "models", "sherpa");
-const MODEL_DIR = join(SHERPA_ROOT, MODEL_NAME);
-const MODEL_ARCHIVE = join(SHERPA_ROOT, `${MODEL_NAME}.tar.bz2`);
-const ENCODER = "encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx";
-const DECODER = "decoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx";
-const JOINER = "joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx";
-const TOKENS = "tokens.txt";
-const BPE_MODEL = "bpe.model";
 const DEFAULT_ENDPOINT: Required<EndpointConfig> = {
   mode: "eager",
   minTrailingSilenceMs: 200,
@@ -56,12 +54,20 @@ const require = createRequire(import.meta.url);
 const sherpa = require("sherpa-onnx-node") as typeof import("sherpa-onnx-node");
 
 export class SherpaEngine implements VoiceToText {
+  #model: SherpaModel;
+  #paths: SherpaModelPaths;
+
+  constructor(model: SherpaModelId = DEFAULT_SHERPA_MODEL) {
+    this.#model = resolveSherpaModel(model);
+    this.#paths = resolveModelPaths(this.#model);
+  }
+
   get label(): string {
-    return `sherpa-onnx-node-${sherpa.version}:${MODEL_NAME}:int8`;
+    return `sherpa-onnx-node-${sherpa.version}:${this.#model.name}`;
   }
 
   async prepare(): Promise<void> {
-    await ensureModel();
+    await ensureModel(this.#paths);
   }
 
   async open(config?: STTConfig): Promise<STTSession> {
@@ -70,10 +76,10 @@ export class SherpaEngine implements VoiceToText {
         `SherpaEngine expects ${SAMPLE_RATE} Hz frames, received ${config.sampleRate} Hz`,
       );
     }
-    await ensureModel();
+    await ensureModel(this.#paths);
     const endpoint = normalizeEndpoint(config?.endpoint);
     const recognizer = new sherpa.OnlineRecognizer(
-      createRecognizerConfig(endpoint),
+      createRecognizerConfig(this.#paths, endpoint),
     );
     return new SherpaSession(recognizer, endpoint);
   }
@@ -177,20 +183,20 @@ class SherpaSession extends EventEmitter implements STTSession {
   }
 }
 
-async function ensureModel(): Promise<void> {
-  const encoderPath = join(MODEL_DIR, ENCODER);
-  if (await hasNonEmptyFile(encoderPath)) {
+async function ensureModel(paths: SherpaModelPaths): Promise<void> {
+  if (await hasNonEmptyFile(paths.encoder)) {
     return;
   }
 
   await mkdir(SHERPA_ROOT, { recursive: true });
-  if (!(await hasNonEmptyFile(MODEL_ARCHIVE))) {
-    await downloadFile(MODEL_URL, MODEL_ARCHIVE);
+  if (!(await hasNonEmptyFile(paths.archive))) {
+    await downloadFile(paths.url, paths.archive);
   }
-  await extractTarBz2(MODEL_ARCHIVE, SHERPA_ROOT);
+  await extractTarBz2(paths.archive, SHERPA_ROOT);
 }
 
 function createRecognizerConfig(
+  paths: SherpaModelPaths,
   endpoint: Required<EndpointConfig>,
 ): OnlineRecognizerConfig {
   const endpointEnabled = endpoint.mode !== "manual";
@@ -201,16 +207,17 @@ function createRecognizerConfig(
     },
     modelConfig: {
       transducer: {
-        encoder: join(MODEL_DIR, ENCODER),
-        decoder: join(MODEL_DIR, DECODER),
-        joiner: join(MODEL_DIR, JOINER),
+        encoder: paths.encoder,
+        decoder: paths.decoder,
+        joiner: paths.joiner,
       },
-      tokens: join(MODEL_DIR, TOKENS),
+      tokens: paths.tokens,
       numThreads: 2,
       provider: "cpu",
       debug: 0,
-      modelingUnit: "bpe",
-      bpeVocab: join(MODEL_DIR, BPE_MODEL),
+      // bpe modelingUnit only when the model ships a bpe.model; several
+      // streaming zipformers decode straight from tokens.txt without one.
+      ...(paths.bpe ? { modelingUnit: "bpe", bpeVocab: paths.bpe } : {}),
     },
     decodingMethod: "greedy_search",
     maxActivePaths: 4,

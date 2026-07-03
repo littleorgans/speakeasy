@@ -3,6 +3,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { STTSession, VoiceToText } from "../contract.ts";
 import { MoonshineEngine } from "../engines/moonshine.ts";
 import { SherpaEngine } from "../engines/sherpa.ts";
+import type { SherpaModelId } from "../engines/sherpa-models.ts";
 import { StubEngine } from "../engines/stub.ts";
 import { FLUSH_FINAL_TIMEOUT_MS, SESSION_TIMEOUT_MS } from "./config.ts";
 import { isWordTolerantTranscript, wordErrorCount } from "./transcript.ts";
@@ -30,7 +31,13 @@ export type SessionObservers = {
   throwIfError: () => void;
 };
 
-export function createEngine(name: EngineName): BenchEngine {
+export function createEngine(
+  name: EngineName,
+  model?: SherpaModelId,
+): BenchEngine {
+  if (model && name !== "sherpa") {
+    throw new Error(`--model only applies to --engine sherpa, not ${name}`);
+  }
   if (name === "stub") {
     return new StubEngine();
   }
@@ -38,7 +45,7 @@ export function createEngine(name: EngineName): BenchEngine {
     return new MoonshineEngine();
   }
   if (name === "sherpa") {
-    return new SherpaEngine();
+    return new SherpaEngine(model);
   }
   throw new Error(`Unsupported engine ${name}`);
 }

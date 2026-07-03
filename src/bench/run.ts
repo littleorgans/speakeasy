@@ -15,6 +15,7 @@ import {
   SOFT_THRESHOLD_MS,
 } from "./config.ts";
 import { runCorpusBench } from "./corpus.ts";
+import { isSherpaModelId, SHERPA_MODELS } from "../engines/sherpa-models.ts";
 import {
   formatBoolean,
   formatEndpoint,
@@ -48,8 +49,9 @@ import type {
 import { readWavFrames, type WavAudio } from "./wav.ts";
 
 const USAGE = [
-  "usage: pnpm bench --wav <path> [--engine stub|moonshine|sherpa] [--mode sweep|ptt] [--runs <n>] [--frame-ms <n>]",
-  "       pnpm bench --corpus <dir> [--engine stub|moonshine|sherpa] [--frame-ms <n>]  (WER scorer over labeled demo recordings)",
+  "usage: pnpm bench --wav <path> [--engine stub|moonshine|sherpa] [--model <id>] [--mode sweep|ptt] [--runs <n>] [--frame-ms <n>]",
+  "       pnpm bench --corpus <dir> [--engine stub|moonshine|sherpa] [--model <id>] [--frame-ms <n>]  (WER scorer over labeled demo recordings)",
+  `       --model ids (sherpa only): ${Object.keys(SHERPA_MODELS).join(", ")}`,
 ].join("\n");
 
 const options = parseArgs(process.argv.slice(2));
@@ -150,7 +152,7 @@ async function runEngineSummary(
   speechProfile: SpeechProfile,
   endpoint: Required<EndpointConfig> | undefined,
 ): Promise<Summary> {
-  const engine = createEngine(cli.engine);
+  const engine = createEngine(cli.engine, cli.model);
   await engine.prepare?.();
   const engineLabel = engine.label ?? cli.engine;
   const results: RunResult[] = [];
@@ -261,7 +263,7 @@ async function runPttSummary(
   speechProfile: SpeechProfile,
   variant: PttVariant,
 ): Promise<PttSummary> {
-  const engine = createEngine(cli.engine);
+  const engine = createEngine(cli.engine, cli.model);
   await engine.prepare?.();
   const engineLabel = engine.label ?? cli.engine;
   const releaseMs =
@@ -355,6 +357,9 @@ function parseArgs(args: string[]): CliOptions {
     if (arg === "--engine") {
       options.engine = parseEngine(requireValue(args, index));
       index += 1;
+    } else if (arg === "--model") {
+      options.model = parseModel(requireValue(args, index));
+      index += 1;
     } else if (arg === "--wav") {
       options.wav = requireValue(args, index);
       index += 1;
@@ -402,6 +407,15 @@ function parseEngine(value: string): EngineName {
     return value;
   }
   throw new Error(`--engine must be stub, moonshine, or sherpa; received ${value}`);
+}
+
+function parseModel(value: string): CliOptions["model"] {
+  if (isSherpaModelId(value)) {
+    return value;
+  }
+  throw new Error(
+    `--model must be one of ${Object.keys(SHERPA_MODELS).join(", ")}; received ${value}`,
+  );
 }
 
 function parseMode(value: string): BenchMode {

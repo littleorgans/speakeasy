@@ -47,7 +47,7 @@ export async function runCorpusBench(options: CliOptions): Promise<void> {
     return;
   }
 
-  const engine = createEngine(options.engine);
+  const engine = createEngine(options.engine, options.model);
   await engine.prepare?.();
   console.log(
     `engine=${engine.label ?? options.engine} endpoint=manual cadence=${options.frameMs}ms/frame release=end-of-capture (demo recordings end at the release keypress)`,
@@ -114,9 +114,11 @@ function printAggregate(results: CorpusUtteranceResult[]): void {
     .filter((value) => Number.isFinite(value));
   const medianLatency =
     latencies.length > 0 ? formatMs(median(latencies)) : "n/a";
+  const maxLatency =
+    latencies.length > 0 ? formatMs(Math.max(...latencies)) : "n/a";
 
   console.log(
-    `corpus WER=${corpusWer.toFixed(1)}% errors=${errors}/${words} utterances=${results.length} median flush->final=${medianLatency}`,
+    `corpus WER=${corpusWer.toFixed(1)}% errors=${errors}/${words} utterances=${results.length} median flush->final=${medianLatency} max flush->final=${maxLatency}`,
   );
   const worst = tallySubstitutions(results);
   console.log(
