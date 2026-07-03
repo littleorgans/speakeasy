@@ -19,6 +19,7 @@ import {
 } from "../corpus/store.ts";
 import { SherpaEngine } from "../engines/sherpa.ts";
 import {
+  DEFAULT_SHERPA_MODEL,
   parseSherpaModelId,
   SHERPA_MODELS,
   type SherpaModelId,
@@ -48,7 +49,7 @@ const LEVEL_BAR_CELLS = 10;
 const SCRIPT_EVENT_PATTERN = /^(start|release)@(\d+(?:\.\d+)?)ms?$/;
 const USAGE =
   'usage: pnpm demo [--model <id>] [--wav <path>] [--script "start@0ms,release@2200ms,..."] [--device <index>] [--list-devices] [--save <dir>] [--no-save] [--save-all]\n' +
-  `  --model <id>  sherpa model to load (default en-2023-06-26): ${Object.keys(SHERPA_MODELS).join(", ")}\n` +
+  `  --model <id>  sherpa model to load (default ${DEFAULT_SHERPA_MODEL}): ${Object.keys(SHERPA_MODELS).join(", ")}\n` +
   `  corpus collection is ON by default (dir: ${DEFAULT_CORPUS_DIR}/): after each final, s = save wav+json pair and label it, any other key = discard\n` +
   "  --save <dir>  override the corpus directory\n" +
   "  --no-save     disarm corpus collection\n" +

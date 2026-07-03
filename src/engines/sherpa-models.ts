@@ -67,7 +67,10 @@ export const SHERPA_MODELS = {
 
 export type SherpaModelId = keyof typeof SHERPA_MODELS;
 
-export const DEFAULT_SHERPA_MODEL: SherpaModelId = "en-2023-06-26";
+// Verdict 2026-07-04: kroko wins the corpus sweep (12.8% normalized WER vs the
+// 34.0% of en-2023-06-26) at the lowest latency, so it is the default. See
+// MODEL-SWEEP.md. Both bench and demo default here when --model is omitted.
+export const DEFAULT_SHERPA_MODEL: SherpaModelId = "en-kroko-2025-08-06";
 
 export type SherpaModelPaths = {
   dir: string;

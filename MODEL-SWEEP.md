@@ -25,10 +25,10 @@ budget (`PASS_THRESHOLD_MS`).
 
 | Model id | Encoder | Raw WER | Normalized WER | median flush->final | max flush->final | Under 200ms? | Notes |
 |---|---|---|---|---|---|---|---|
-| `en-2023-06-26` (current default) | ~66M, chunk-16 int8, bpe | 36.2% (17/47) | 34.0% (16/47) | 52.9ms | 101.0ms | yes | baseline |
+| `en-2023-06-26` (prior default) | ~66M, chunk-16 int8, bpe | 36.2% (17/47) | 34.0% (16/47) | 52.9ms | 101.0ms | yes | previous baseline |
 | `en-2023-02-21` | LibriSpeech-only int8 | 27.7% (13/47) | 25.5% (12/47) | 59.5ms | 73.5ms | yes | weaker on varied acoustics / proper nouns |
 | `en-2023-06-21` | 187MB int8 (large, Libri+Giga) | 21.3% (10/47) | 19.1% (9/47) | 54.9ms | **300.2ms** | **no** | best full-model WER, but tail blows the budget |
-| `en-kroko-2025-08-06` | 70MB fp32 (Banafo Kroko) | **17.0% (8/47)** | **12.8% (6/47)** | **29.3ms** | **37.4ms** | yes | **winner: lowest WER and lowest latency** |
+| `en-kroko-2025-08-06` (**default**) | 70MB fp32 (Banafo Kroko) | **17.0% (8/47)** | **12.8% (6/47)** | **29.3ms** | **37.4ms** | yes | **winner: lowest WER and lowest latency** |
 
 ## Findings
 
@@ -58,12 +58,13 @@ budget (`PASS_THRESHOLD_MS`).
 ## Reproduce
 
 ```
-node src/bench/run.ts --corpus corpus --engine sherpa                          # baseline (en-2023-06-26)
+node src/bench/run.ts --corpus corpus --engine sherpa                          # default (en-kroko-2025-08-06)
+node src/bench/run.ts --corpus corpus --engine sherpa --model en-2023-06-26     # prior default
 node src/bench/run.ts --corpus corpus --engine sherpa --model en-2023-06-21
 node src/bench/run.ts --corpus corpus --engine sherpa --model en-2023-02-21
-node src/bench/run.ts --corpus corpus --engine sherpa --model en-kroko-2025-08-06
 ```
 
 Model registry: `src/engines/sherpa-models.ts`. Adding a candidate is
-config-only (one descriptor); swapping is `--model <id>`. The default model is
-unchanged pending the orchestrator's verdict.
+config-only (one descriptor); swapping is `--model <id>`. Per Stuart's verdict
+(2026-07-04) the default is now `en-kroko-2025-08-06`; the no-flag run above
+loads it.

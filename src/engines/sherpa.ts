@@ -38,10 +38,11 @@ const SAMPLE_RATE = 16_000;
 const FEATURE_DIM = 80;
 /**
  * Silence pushed instantly at flush() so the encoder's pending chunk and
- * right context fill without waiting for real trailing audio. Sized for one
- * full chunk (~640ms for chunk-16 at 4x subsampling on 10ms features) plus
- * right context, with headroom. Decoding the extra silence costs only a few
- * encoder steps, so flush stays well under the 200ms budget.
+ * right context fill without waiting for real trailing audio. Sized for the
+ * registry's largest chunk as a worst case (~640ms for a chunk-16 model at 4x
+ * subsampling on 10ms features) plus right context, with headroom, so it also
+ * covers the smaller-context default. Decoding the extra silence costs only a
+ * few encoder steps, so flush stays well under the 200ms budget.
  */
 const FLUSH_PADDING_MS = 1_200;
 const FLUSH_PADDING_SAMPLES = (SAMPLE_RATE * FLUSH_PADDING_MS) / 1_000;
