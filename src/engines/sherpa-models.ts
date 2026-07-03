@@ -108,3 +108,13 @@ export function resolveSherpaModel(id: string): SherpaModel {
 export function isSherpaModelId(value: string): value is SherpaModelId {
   return value in SHERPA_MODELS;
 }
+
+/** Parse a CLI `--model` value into a typed id, or throw with the valid set. */
+export function parseSherpaModelId(value: string): SherpaModelId {
+  if (isSherpaModelId(value)) {
+    return value;
+  }
+  throw new Error(
+    `--model must be one of ${Object.keys(SHERPA_MODELS).join(", ")}; received ${value}`,
+  );
+}

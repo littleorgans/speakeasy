@@ -18,6 +18,11 @@ import {
   type CorpusSidecarMeta,
 } from "../corpus/store.ts";
 import { SherpaEngine } from "../engines/sherpa.ts";
+import {
+  parseSherpaModelId,
+  SHERPA_MODELS,
+  type SherpaModelId,
+} from "../engines/sherpa-models.ts";
 
 /**
  * Live push-to-talk demo: Enter starts an utterance (frames flow to the
@@ -42,7 +47,8 @@ const LEVEL_RENDER_INTERVAL_MS = 100;
 const LEVEL_BAR_CELLS = 10;
 const SCRIPT_EVENT_PATTERN = /^(start|release)@(\d+(?:\.\d+)?)ms?$/;
 const USAGE =
-  'usage: pnpm demo [--wav <path>] [--script "start@0ms,release@2200ms,..."] [--device <index>] [--list-devices] [--save <dir>] [--no-save] [--save-all]\n' +
+  'usage: pnpm demo [--model <id>] [--wav <path>] [--script "start@0ms,release@2200ms,..."] [--device <index>] [--list-devices] [--save <dir>] [--no-save] [--save-all]\n' +
+  `  --model <id>  sherpa model to load (default en-2023-06-26): ${Object.keys(SHERPA_MODELS).join(", ")}\n` +
   `  corpus collection is ON by default (dir: ${DEFAULT_CORPUS_DIR}/): after each final, s = save wav+json pair and label it, any other key = discard\n` +
   "  --save <dir>  override the corpus directory\n" +
   "  --no-save     disarm corpus collection\n" +
@@ -51,6 +57,7 @@ const USAGE =
 type ScriptAction = "start" | "release";
 type ScriptEvent = { action: ScriptAction; atMs: number };
 type DemoOptions = {
+  model?: SherpaModelId;
   wavPath?: string;
   script?: ScriptEvent[];
   device?: string;
@@ -83,7 +90,7 @@ async function main(): Promise<void> {
     ? await readWavFrames(options.wavPath, CAPTURE_FRAME_MS)
     : undefined;
 
-  const engine = new SherpaEngine();
+  const engine = new SherpaEngine(options.model);
   await engine.prepare();
   const session = await engine.open({
     sampleRate: CAPTURE_SAMPLE_RATE,
@@ -146,7 +153,7 @@ class PttDemo {
       this.#sourceLabel = `microphone ${mic.label}`;
     }
     console.log(
-      `speak-easy ptt demo | engine=sherpa | source=${this.#sourceLabel}`,
+      `speak-easy ptt demo | engine=${this.#engineLabel} | source=${this.#sourceLabel}`,
     );
 
     if (!this.#wav) {
@@ -584,6 +591,9 @@ function parseArgs(argv: string[]): DemoOptions {
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index]!;
     switch (arg) {
+      case "--model":
+        options.model = parseSherpaModelId(expectValue(argv, (index += 1), arg));
+        break;
       case "--wav":
         options.wavPath = expectValue(argv, (index += 1), arg);
         break;
