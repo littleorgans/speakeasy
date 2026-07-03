@@ -15,6 +15,7 @@ import type {
   VoiceToText,
 } from "../contract.ts";
 import { downloadFile, extractTarBz2, hasNonEmptyFile } from "./assets.ts";
+import { loadHotwords, type Hotwords } from "./hotwords.ts";
 import {
   DEFAULT_SHERPA_MODEL,
   resolveModelPaths,
@@ -79,8 +80,16 @@ export class SherpaEngine implements VoiceToText {
     }
     await ensureModel(this.#paths);
     const endpoint = normalizeEndpoint(config?.endpoint);
+    const hotwords = await loadHotwords();
+    if (hotwords) {
+      // Loud on purpose: hotwords flip the decoder to modified_beam_search and
+      // must never be a silent change to the measured baseline.
+      console.warn(
+        `[sherpa] HOTWORDS ACTIVE: ${hotwords.phrases.length} terms from ./hotwords.txt, score=${hotwords.score}, decoding=modified_beam_search (baseline is greedy). terms: ${hotwords.phrases.join(", ")}`,
+      );
+    }
     const recognizer = new sherpa.OnlineRecognizer(
-      createRecognizerConfig(this.#paths, endpoint),
+      createRecognizerConfig(this.#paths, endpoint, hotwords),
     );
     return new SherpaSession(recognizer, endpoint);
   }
@@ -199,6 +208,7 @@ async function ensureModel(paths: SherpaModelPaths): Promise<void> {
 function createRecognizerConfig(
   paths: SherpaModelPaths,
   endpoint: Required<EndpointConfig>,
+  hotwords?: Hotwords,
 ): OnlineRecognizerConfig {
   const endpointEnabled = endpoint.mode !== "manual";
   return {
@@ -220,14 +230,16 @@ function createRecognizerConfig(
       // streaming zipformers decode straight from tokens.txt without one.
       ...(paths.bpe ? { modelingUnit: "bpe", bpeVocab: paths.bpe } : {}),
     },
-    decodingMethod: "greedy_search",
+    // Hotwords bias only under modified_beam_search; greedy ignores them, so
+    // the decoder switches only when hotwords are actually loaded.
+    decodingMethod: hotwords ? "modified_beam_search" : "greedy_search",
     maxActivePaths: 4,
     enableEndpoint: endpointEnabled ? 1 : 0,
     rule1MinTrailingSilence: endpoint.minTrailingSilenceMs / 1_000,
     rule2MinTrailingSilence: endpoint.minTrailingSilenceMs / 1_000,
     rule3MinUtteranceLength: endpoint.minUtteranceMs / 1_000,
-    hotwordsFile: "",
-    hotwordsScore: 1.5,
+    hotwordsFile: hotwords?.file ?? "",
+    hotwordsScore: hotwords?.score ?? 1.5,
     ruleFsts: "",
     ruleFars: "",
     blankPenalty: 0,

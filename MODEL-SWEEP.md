@@ -55,6 +55,48 @@ budget (`PASS_THRESHOLD_MS`).
   normalizer runs on every WER path (corpus scorer and jfk bench), see
   `src/bench/normalize.ts`, covered by `transcript.test.ts`.
 
+## Hotwords experiment (contextual biasing)
+
+Experiment (not a feature): can hotword biasing recover the default model's
+proper-noun misses (littleorgans, chrome, pane, codex)? `SherpaEngine`
+auto-loads `./hotwords.txt` if present (one term per line, `#` comments and
+blanks ignored), feeds it to sherpa's `hotwordsFile` at `hotwordsScore=2`, and
+switches the decoder to `modified_beam_search` (hotwords are ignored under
+greedy). Activate with `cp hotwords.sample.txt hotwords.txt`.
+
+**Finding: hotwords are a no-op on the kroko default.** sherpa tokenizes each
+hotword line into the model's modeling units. BPE models do this with a
+SentencePiece `bpe.model`/`bpe.vocab`; kroko ships neither, and its tokens are
+sub-word BPE pieces (not char-level), so sherpa falls back to a literal
+tokens.txt lookup and fails on every multi-piece term:
+`Cannot find ID for token littleorgans ... Check the tokens.txt`. The context
+graph ends up empty.
+
+A/B over the corpus (kroko default):
+
+| | WER | median flush->final | max flush->final | residuals flipped | new errors |
+|---|---|---|---|---|---|
+| no hotwords (greedy) | 12.8% (6/47) | 26.9ms | 36.5ms | — | — |
+| hotwords (modified_beam_search) | 12.8% (6/47) | 32.6ms | 48.8ms | none | none |
+
+Identical WER; `littleorgans` still decodes to "little organs". The switch to
+beam search costs ~6ms median / ~12ms max — negligible, still far under the
+200ms budget. So latency is not the blocker; **tokenization is**.
+
+**The mechanism works given a bpe.vocab** (proven, so this is a data gap not a
+code bug). Regenerating the text `bpe.vocab` for the bpe model
+`en-2023-06-26` and biasing with a `CHROME` hotword flipped its decode of the
+"Open Chrome browser" clip from `"OPEN GROAM BROWSER"` (greedy) to
+`"OPEN CHROME BROWSER"` (beam + hotword).
+
+**Paths forward** (kroko biasing, if pursued): (a) obtain Banafo's SentencePiece
+`bpe.model` for kroko from HuggingFace and generate its `bpe.vocab`; (b) FST
+rewriting via `ruleFsts`/`ruleFars` (post-decode text replacement / ITN, not
+decode-time biasing) to fix systematic mis-splits like "little organs" ->
+"littleorgans" and "ten" -> "10"; (c) hand-tokenized hotwords using kroko's
+existing token pieces (brittle, needs the segmentation). The wiring stays inert
+by default: no `hotwords.txt` means greedy baseline, unchanged.
+
 ## Reproduce
 
 ```

@@ -1,0 +1,17 @@
+# speak-easy contextual-biasing hotwords — SAMPLE (experimental).
+#
+# To activate:  cp hotwords.sample.txt hotwords.txt
+# The SherpaEngine auto-loads ./hotwords.txt (this sample is NOT auto-loaded),
+# switches to modified_beam_search, and biases the decode toward these terms.
+# One term/phrase per line; blank lines and # comments are ignored.
+#
+# CAVEAT (see MODEL-SWEEP.md "Hotwords experiment"): the default model kroko
+# ships no SentencePiece bpe.model/bpe.vocab, so it CANNOT tokenize these terms
+# and hotwords are a no-op on it. Biasing works only on a model that bundles a
+# text bpe.vocab (proven on en-2023-06-26).
+#
+# Corpus proper nouns the models currently miss:
+littleorgans
+codex
+chrome
+pane
