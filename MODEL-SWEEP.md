@@ -89,13 +89,34 @@ code bug). Regenerating the text `bpe.vocab` for the bpe model
 "Open Chrome browser" clip from `"OPEN GROAM BROWSER"` (greedy) to
 `"OPEN CHROME BROWSER"` (beam + hotword).
 
-**Paths forward** (kroko biasing, if pursued): (a) obtain Banafo's SentencePiece
-`bpe.model` for kroko from HuggingFace and generate its `bpe.vocab`; (b) FST
-rewriting via `ruleFsts`/`ruleFars` (post-decode text replacement / ITN, not
-decode-time biasing) to fix systematic mis-splits like "little organs" ->
-"littleorgans" and "ten" -> "10"; (c) hand-tokenized hotwords using kroko's
-existing token pieces (brittle, needs the segmentation). The wiring stays inert
-by default: no `hotwords.txt` means greedy baseline, unchanged.
+**Path A investigated (obtain kroko's SentencePiece) — BLOCKED.** Real hotword
+biasing needs kroko's *own* `bpe.model` so the exported `bpe.vocab` aligns 1:1
+with its `tokens.txt` IDs (a generic English spm mis-tokenizes and mis-biases).
+It is not publicly obtainable:
+
+- The k2-fsa release tarball ships only encoder/decoder/joiner onnx + tokens.txt
+  (no spm). Upstream `Banafo/Kroko-ASR` and `Banafo/test-onnx` (both public)
+  ship only proprietary `.data` community bundles + a `decode_file.py`; no
+  `bpe.model`, `bpe.vocab`, or SentencePiece artifact anywhere. `decode_file.py`
+  even references `{lang}_encoder.onnx` files that are not actually published.
+- Banafo's own `decode_file.py` wires `hotwords_file` but passes no `bpe_vocab`
+  and no `modeling_unit`, so it relies on the default — which cannot tokenize
+  multi-piece English words either.
+- `modelingUnit="cjkchar"` does NOT char-split English (it treats Latin runs as
+  whole words), so it fails identically: `Cannot find ID for token littleorgans`.
+  There is no English word->subword segmentation without the spm.
+- Fabricating a `bpe.vocab` from `tokens.txt` is rejected: `tokens.txt` has the
+  pieces and IDs but not SentencePiece merge scores, so the segmentation would
+  be wrong and silently mis-bias.
+
+**Recommendation: Path B (FST replacement).** Use `ruleFsts`/`ruleFars`
+(post-decode text rewriting / ITN, model-vocab-independent) to fix systematic
+mis-splits like "little organs" -> "littleorgans" and "ten" -> "10". This needs
+no SentencePiece model and sidesteps the tokenization gate entirely.
+
+The hotwords wiring stays inert by default: no `hotwords.txt` means greedy
+baseline, unchanged. It remains useful for any future model that bundles a
+`bpe.vocab`.
 
 ## Reproduce
 
