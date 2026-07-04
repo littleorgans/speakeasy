@@ -6,3 +6,4 @@ models/
 *.wav
 results/
 /corpus/
+.venv/

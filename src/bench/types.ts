@@ -8,6 +8,13 @@ export type EngineName = "stub" | "moonshine" | "sherpa";
 export type BenchMode = "sweep" | "ptt";
 
 /**
+ * Post-decode rewrite arm for the corpus scorer (experimental, Path B):
+ * "none" = raw engine output; "map" = in-house replacement applied to the
+ * hypothesis; "fst" = sherpa ruleFsts applied inside the engine.
+ */
+export type RewriteMode = "none" | "map" | "fst";
+
+/**
  * Release-point variant for ptt mode. Strict releases at the last voiced
  * sample, so no real trailing audio is fed after release; it is the honest
  * push-to-talk headline. Loose releases at the RMS reference including the
@@ -24,6 +31,8 @@ export type CliOptions = {
   engine: EngineName;
   /** Sherpa model registry id; ignored by non-sherpa engines. */
   model?: SherpaModelId;
+  /** Post-decode rewrite arm for the corpus scorer. Default "none". */
+  rewrite: RewriteMode;
   wav?: string;
   /** Corpus directory of wav + json sidecar pairs; enables the WER scorer. */
   corpus?: string;

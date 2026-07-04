@@ -118,6 +118,63 @@ The hotwords wiring stays inert by default: no `hotwords.txt` means greedy
 baseline, unchanged. It remains useful for any future model that bundles a
 `bpe.vocab`.
 
+## Path B: post-decode rewrite (in-house map vs sherpa ruleFsts)
+
+Since hotword biasing is blocked on kroko (Path A), fix its *systematic*
+residuals after decoding instead. Head-to-head of two encodings of ONE shared
+ruleset (`src/rewrite/rules.json`): littleorgans<-"little organs",
+chrome<-"crown", pane<-"pain", ten->10.
+
+- **Arm 1 — in-house map** (`src/rewrite/replace.ts`): whole-word,
+  case-insensitive regex replacement applied to the committed hypothesis in the
+  corpus scorer (`--rewrite map`). Deliberately separate from normalize.ts (that
+  canonicalizes both sides for WER; this transforms the engine output only, so
+  WER reflects what a consumer receives).
+- **Arm 2 — sherpa ruleFsts** (`--rewrite fst`): a byte-level OpenFst rewrite
+  (`src/rewrite/replace.fst`) compiled from the same rules by `scripts/build-fst.py`
+  (kaldifst, build-time only) and applied inside the engine via `ruleFsts`.
+
+**Gate (Arm 2): ruleFsts DO fire on the streaming/online recognizer.** Proven on
+kroko: with the FST wired, `"Open crown browser"` -> `"Open chrome browser"`;
+without it, `"Open crown browser"`. So this is not offline-only.
+
+A/B/C over the corpus (kroko default):
+
+| arm | WER | residuals fixed | new errors | median flush->final | max flush->final |
+|---|---|---|---|---|---|
+| none (baseline) | 12.8% (6/47) | — | — | 28.8ms | 38.8ms |
+| in-house map | 4.3% (2/47) | littleorgans, pane, chrome | none | 30.5ms | 46.5ms |
+| ruleFsts | 4.3% (2/47) | littleorgans, pane, chrome | none | 31.3ms | 45.7ms |
+
+Both fix 4 of the 6 residuals (the littleorgans mis-split counts as 2). The 2
+left are not in the ruleset: "spawn 10 agents" -> "tone" (a genuine mishear, not
+"ten") and "go to sleep" -> "go to" (a dropped word). No new errors from either.
+
+**Comparison.** They AGREE on WER — but only after the FST build was made to
+compensate for two byte-level limitations the regex map handles for free:
+
+- *Casing.* The recognizer capitalizes words ("Little Organs"), and a byte FST
+  is case-sensitive, so `build-fst.py` emits lowercase AND title-case variants
+  (4 rules -> 8 paths). The map gets this from one `i` flag.
+- *Boundaries.* The map matches whole words (`\b`); the FST matches substrings,
+  so in general text it would over-fire ("often" -> "of10"). Safe on this corpus
+  (no such substrings) but a real divergence, on top of the shared over-trigger
+  risk (crown/pain/ten are legitimate words; flagged `overTrigger` in rules.json).
+- *Latency.* FST composition adds a few ms and scales with text length; on these
+  short commands it is within run-to-run noise, and both stay far under 200ms.
+- *Build/dependency cost.* The FST needs kaldifst (a compiled pip dep) at build
+  time and a committed binary `.fst` that must be rebuilt whenever rules change.
+  The map is plain TypeScript reading a human-readable JSON — no build step, no
+  binary, trivially diffable and unit-tested (`replace.test.ts`).
+
+**Recommendation: graduate the in-house map.** Same WER, zero runtime/build
+dependency, case + word-boundary handling for free, readable and testable rules.
+The ruleFsts arm's edge is real but unused at this scale: it runs inside the
+engine (raw-engine consumers get it without app code) and can stack with sherpa's
+number/date ITN FSTs. Keep it documented as the path if in-engine ITN is needed
+later. Both arms are opt-in (`--rewrite`, default `none`); the kroko default
+stays greedy 12.8%, unchanged.
+
 ## Reproduce
 
 ```
@@ -125,6 +182,13 @@ node src/bench/run.ts --corpus corpus --engine sherpa                          #
 node src/bench/run.ts --corpus corpus --engine sherpa --model en-2023-06-26     # prior default
 node src/bench/run.ts --corpus corpus --engine sherpa --model en-2023-06-21
 node src/bench/run.ts --corpus corpus --engine sherpa --model en-2023-02-21
+
+# Path B rewrite arms (corpus only):
+node src/bench/run.ts --corpus corpus --engine sherpa --rewrite map            # in-house map
+node src/bench/run.ts --corpus corpus --engine sherpa --rewrite fst            # sherpa ruleFsts
+# rebuild replace.fst after editing rules.json (build-time dep):
+python3 -m venv .venv && ./.venv/bin/pip install kaldifst
+./.venv/bin/python scripts/build-fst.py
 ```
 
 Model registry: `src/engines/sherpa-models.ts`. Adding a candidate is

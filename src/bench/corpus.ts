@@ -1,9 +1,10 @@
 import { readCorpusEntries, type CorpusEntry } from "../corpus/store.ts";
+import { applyRewrites, REWRITE_FST_PATH } from "../rewrite/replace.ts";
 import { formatMs } from "./format.ts";
 import { createEngine, runPttOnce } from "./harness.ts";
 import { median } from "./stats.ts";
 import { wordErrorAlignment, type WordAlignment } from "./transcript.ts";
-import type { CliOptions } from "./types.ts";
+import type { CliOptions, RewriteMode } from "./types.ts";
 import { readWavFrames } from "./wav.ts";
 
 /**
@@ -47,15 +48,24 @@ export async function runCorpusBench(options: CliOptions): Promise<void> {
     return;
   }
 
-  const engine = createEngine(options.engine, options.model);
+  const ruleFsts =
+    options.rewrite === "fst" && options.engine === "sherpa"
+      ? REWRITE_FST_PATH
+      : "";
+  const engine = createEngine(options.engine, options.model, ruleFsts);
   await engine.prepare?.();
   console.log(
-    `engine=${engine.label ?? options.engine} endpoint=manual cadence=${options.frameMs}ms/frame release=end-of-capture (demo recordings end at the release keypress)`,
+    `engine=${engine.label ?? options.engine} endpoint=manual cadence=${options.frameMs}ms/frame release=end-of-capture (demo recordings end at the release keypress) rewrite=${options.rewrite}`,
   );
 
   const results: CorpusUtteranceResult[] = [];
   for (const entry of labeled) {
-    const result = await scoreUtterance(engine, entry, options.frameMs);
+    const result = await scoreUtterance(
+      engine,
+      entry,
+      options.frameMs,
+      options.rewrite,
+    );
     printUtterance(result);
     results.push(result);
   }
@@ -66,6 +76,7 @@ async function scoreUtterance(
   engine: ReturnType<typeof createEngine>,
   entry: CorpusEntry,
   frameMs: number,
+  rewrite: RewriteMode,
 ): Promise<CorpusUtteranceResult> {
   const expected = entry.sidecar.expected!;
   const audio = await readWavFrames(entry.wavPath, frameMs);
@@ -77,11 +88,16 @@ async function scoreUtterance(
     frameMs,
     expected,
   });
+  // "map" rewrites the committed hypothesis here (consumer-facing); "fst" was
+  // rewritten inside the engine already; "none" leaves it raw. Applied to the
+  // hypothesis ONLY, so WER reflects what a consumer receives.
+  const hypothesis =
+    rewrite === "map" ? applyRewrites(run.finalText) : run.finalText;
   return {
     entry,
     flushToFinalMs: run.flushToFinalMs,
-    hypothesis: run.finalText,
-    alignment: wordErrorAlignment(run.finalText, expected),
+    hypothesis,
+    alignment: wordErrorAlignment(hypothesis, expected),
   };
 }
 
