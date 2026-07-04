@@ -1,5 +1,4 @@
 import { EventEmitter } from "node:events";
-import { mkdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 import type {
   OnlineRecognizer as OnlineRecognizerClass,
@@ -14,7 +13,7 @@ import type {
   STTSession,
   VoiceToText,
 } from "../contract.ts";
-import { downloadFile, extractTarBz2, hasNonEmptyFile } from "./assets.ts";
+import { ensureAsset } from "./assets.ts";
 import { loadHotwords, type Hotwords } from "./hotwords.ts";
 import {
   DEFAULT_SHERPA_MODEL,
@@ -194,15 +193,12 @@ class SherpaSession extends EventEmitter implements STTSession {
 }
 
 async function ensureModel(paths: SherpaModelPaths): Promise<void> {
-  if (await hasNonEmptyFile(paths.encoder)) {
-    return;
-  }
-
-  await mkdir(SHERPA_ROOT, { recursive: true });
-  if (!(await hasNonEmptyFile(paths.archive))) {
-    await downloadFile(paths.url, paths.archive);
-  }
-  await extractTarBz2(paths.archive, SHERPA_ROOT);
+  await ensureAsset({
+    url: paths.url,
+    archive: paths.archive,
+    extractTo: SHERPA_ROOT,
+    sentinel: paths.encoder,
+  });
 }
 
 function createRecognizerConfig(

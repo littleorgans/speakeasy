@@ -43,6 +43,33 @@ export async function downloadFile(
   });
 }
 
+export type AssetSpec = {
+  /** Download URL for the .tar.bz2 archive. */
+  url: string;
+  /** On-disk path for the downloaded archive. */
+  archive: string;
+  /** Directory the archive extracts into. */
+  extractTo: string;
+  /** File whose presence proves the asset is already extracted. */
+  sentinel: string;
+};
+
+/**
+ * Idempotent download + extract shared by the STT and TTS model registries:
+ * skip when the sentinel exists, reuse a previously downloaded archive,
+ * otherwise fetch and unpack.
+ */
+export async function ensureAsset(spec: AssetSpec): Promise<void> {
+  if (await hasNonEmptyFile(spec.sentinel)) {
+    return;
+  }
+  await mkdir(spec.extractTo, { recursive: true });
+  if (!(await hasNonEmptyFile(spec.archive))) {
+    await downloadFile(spec.url, spec.archive);
+  }
+  await extractTarBz2(spec.archive, spec.extractTo);
+}
+
 export async function extractTarBz2(
   archivePath: string,
   destinationDir: string,
