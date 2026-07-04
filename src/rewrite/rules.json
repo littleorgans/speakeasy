@@ -1,6 +1,5 @@
 [
   { "from": "little organs", "to": "littleorgans" },
   { "from": "crown", "to": "chrome", "overTrigger": true },
-  { "from": "pain", "to": "pane", "overTrigger": true },
-  { "from": "ten", "to": "10", "overTrigger": true }
+  { "from": "pain", "to": "pane", "overTrigger": true }
 ]

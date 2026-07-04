@@ -22,9 +22,10 @@ from pathlib import Path
 
 import kaldifst
 
-ROOT = Path(__file__).resolve().parent.parent
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parents[1]  # repo root (experiments/ruleFsts -> repo)
 RULES = ROOT / "src" / "rewrite" / "rules.json"
-OUT = ROOT / "src" / "rewrite" / "replace.fst"
+OUT = HERE / "replace.fst"
 
 
 def case_variants(text: str) -> list[str]:

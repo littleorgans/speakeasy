@@ -54,3 +54,23 @@ export interface STTSession extends EventEmitter {
 export interface VoiceToText {
   open(config?: STTConfig): Promise<STTSession>;
 }
+
+/**
+ * Post-decode rewrite configuration for the `withRewrite` decorator, which
+ * wraps any VoiceToText and rewrites committed final text. Engine-agnostic:
+ * a decorator concern, never consulted by an engine itself.
+ */
+export type RewriteRule = {
+  from: string;
+  to: string;
+  /** True when `from` is a common word that would over-trigger elsewhere. */
+  overTrigger?: boolean;
+};
+
+/** Number rendering: to digits ("ten"->"10"), to words ("10"->"ten"), or off. */
+export type NumbersMode = "digits" | "words" | "off";
+
+export type RewriteConfig = {
+  rules: RewriteRule[];
+  numbers: NumbersMode;
+};

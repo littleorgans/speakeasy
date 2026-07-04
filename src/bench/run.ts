@@ -1,6 +1,7 @@
 import { performance } from "node:perf_hooks";
 import { setTimeout as delay } from "node:timers/promises";
 import type { EndpointConfig, VoiceToText } from "../contract.ts";
+import { parseNumbersMode } from "../rewrite/numbers.ts";
 import {
   DEFAULT_ENGINE,
   DEFAULT_FRAME_MS,
@@ -43,7 +44,6 @@ import type {
   PttRunResult,
   PttSummary,
   PttVariant,
-  RewriteMode,
   RunResult,
   Summary,
 } from "./types.ts";
@@ -51,9 +51,9 @@ import { readWavFrames, type WavAudio } from "./wav.ts";
 
 const USAGE = [
   "usage: pnpm bench --wav <path> [--engine stub|moonshine|sherpa] [--model <id>] [--mode sweep|ptt] [--runs <n>] [--frame-ms <n>]",
-  "       pnpm bench --corpus <dir> [--engine stub|moonshine|sherpa] [--model <id>] [--rewrite none|map|fst] [--frame-ms <n>]  (WER scorer over labeled demo recordings)",
+  "       pnpm bench --corpus <dir> [--engine stub|moonshine|sherpa] [--model <id>] [--rewrite on|off] [--numbers digits|words|off] [--frame-ms <n>]  (WER scorer)",
   `       --model ids (sherpa only): ${Object.keys(SHERPA_MODELS).join(", ")}`,
-  "       --rewrite (corpus only): none=raw, map=in-house replacement on hypothesis, fst=sherpa ruleFsts in engine",
+  "       --rewrite (corpus only): off=raw engine output, on=wrap with the rewrite decorator (domain rules + --numbers)",
 ].join("\n");
 
 const options = parseArgs(process.argv.slice(2));
@@ -352,7 +352,8 @@ function parseArgs(args: string[]): CliOptions {
     runs: DEFAULT_RUNS,
     frameMs: DEFAULT_FRAME_MS,
     mode: "sweep",
-    rewrite: "none",
+    rewrite: false,
+    numbers: "off",
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -382,7 +383,10 @@ function parseArgs(args: string[]): CliOptions {
       options.corpus = requireValue(args, index);
       index += 1;
     } else if (arg === "--rewrite") {
-      options.rewrite = parseRewrite(requireValue(args, index));
+      options.rewrite = parseOnOff(requireValue(args, index));
+      index += 1;
+    } else if (arg === "--numbers") {
+      options.numbers = parseNumbersMode(requireValue(args, index));
       index += 1;
     } else {
       throw new Error(`Unknown argument ${arg}\n${USAGE}`);
@@ -422,11 +426,10 @@ function parseMode(value: string): BenchMode {
   throw new Error(`--mode must be sweep or ptt; received ${value}`);
 }
 
-function parseRewrite(value: string): RewriteMode {
-  if (value === "none" || value === "map" || value === "fst") {
-    return value;
-  }
-  throw new Error(`--rewrite must be none, map, or fst; received ${value}`);
+function parseOnOff(value: string): boolean {
+  if (value === "on") return true;
+  if (value === "off") return false;
+  throw new Error(`--rewrite must be on or off; received ${value}`);
 }
 
 function parsePositiveInteger(flag: string, value: string): number {

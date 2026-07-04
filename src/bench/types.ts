@@ -1,4 +1,4 @@
-import type { EndpointConfig, VoiceToText } from "../contract.ts";
+import type { EndpointConfig, NumbersMode, VoiceToText } from "../contract.ts";
 import type { SherpaModelId } from "../engines/sherpa-models.ts";
 
 /** Shared bench harness types. */
@@ -6,13 +6,6 @@ import type { SherpaModelId } from "../engines/sherpa-models.ts";
 export type EngineName = "stub" | "moonshine" | "sherpa";
 
 export type BenchMode = "sweep" | "ptt";
-
-/**
- * Post-decode rewrite arm for the corpus scorer (experimental, Path B):
- * "none" = raw engine output; "map" = in-house replacement applied to the
- * hypothesis; "fst" = sherpa ruleFsts applied inside the engine.
- */
-export type RewriteMode = "none" | "map" | "fst";
 
 /**
  * Release-point variant for ptt mode. Strict releases at the last voiced
@@ -31,8 +24,10 @@ export type CliOptions = {
   engine: EngineName;
   /** Sherpa model registry id; ignored by non-sherpa engines. */
   model?: SherpaModelId;
-  /** Post-decode rewrite arm for the corpus scorer. Default "none". */
-  rewrite: RewriteMode;
+  /** Wrap the engine with the rewrite decorator (corpus scorer). Default false. */
+  rewrite: boolean;
+  /** Number normalization mode for the rewrite pipeline. Default "off". */
+  numbers: NumbersMode;
   wav?: string;
   /** Corpus directory of wav + json sidecar pairs; enables the WER scorer. */
   corpus?: string;

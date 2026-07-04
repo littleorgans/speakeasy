@@ -58,12 +58,10 @@ const sherpa = require("sherpa-onnx-node") as typeof import("sherpa-onnx-node");
 export class SherpaEngine implements VoiceToText {
   #model: SherpaModel;
   #paths: SherpaModelPaths;
-  #ruleFsts: string;
 
-  constructor(model: SherpaModelId = DEFAULT_SHERPA_MODEL, ruleFsts = "") {
+  constructor(model: SherpaModelId = DEFAULT_SHERPA_MODEL) {
     this.#model = resolveSherpaModel(model);
     this.#paths = resolveModelPaths(this.#model);
-    this.#ruleFsts = ruleFsts;
   }
 
   get label(): string {
@@ -91,7 +89,7 @@ export class SherpaEngine implements VoiceToText {
       );
     }
     const recognizer = new sherpa.OnlineRecognizer(
-      createRecognizerConfig(this.#paths, endpoint, hotwords, this.#ruleFsts),
+      createRecognizerConfig(this.#paths, endpoint, hotwords),
     );
     return new SherpaSession(recognizer, endpoint);
   }
@@ -211,7 +209,6 @@ function createRecognizerConfig(
   paths: SherpaModelPaths,
   endpoint: Required<EndpointConfig>,
   hotwords?: Hotwords,
-  ruleFsts = "",
 ): OnlineRecognizerConfig {
   const endpointEnabled = endpoint.mode !== "manual";
   return {
@@ -243,8 +240,7 @@ function createRecognizerConfig(
     rule3MinUtteranceLength: endpoint.minUtteranceMs / 1_000,
     hotwordsFile: hotwords?.file ?? "",
     hotwordsScore: hotwords?.score ?? 1.5,
-    // Post-decode text rewrite FST (experimental Path B "fst" arm); empty = off.
-    ruleFsts,
+    ruleFsts: "",
     ruleFars: "",
     blankPenalty: 0,
   };

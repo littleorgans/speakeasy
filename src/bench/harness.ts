@@ -34,13 +34,9 @@ export type SessionObservers = {
 export function createEngine(
   name: EngineName,
   model?: SherpaModelId,
-  ruleFsts = "",
 ): BenchEngine {
   if (model && name !== "sherpa") {
     throw new Error(`--model only applies to --engine sherpa, not ${name}`);
-  }
-  if (ruleFsts && name !== "sherpa") {
-    throw new Error(`ruleFsts only applies to --engine sherpa, not ${name}`);
   }
   if (name === "stub") {
     return new StubEngine();
@@ -49,7 +45,7 @@ export function createEngine(
     return new MoonshineEngine();
   }
   if (name === "sherpa") {
-    return new SherpaEngine(model, ruleFsts);
+    return new SherpaEngine(model);
   }
   throw new Error(`Unsupported engine ${name}`);
 }

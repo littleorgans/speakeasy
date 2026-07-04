@@ -121,18 +121,18 @@ baseline, unchanged. It remains useful for any future model that bundles a
 ## Path B: post-decode rewrite (in-house map vs sherpa ruleFsts)
 
 Since hotword biasing is blocked on kroko (Path A), fix its *systematic*
-residuals after decoding instead. Head-to-head of two encodings of ONE shared
-ruleset (`src/rewrite/rules.json`): littleorgans<-"little organs",
-chrome<-"crown", pane<-"pain", ten->10.
+residuals after decoding instead. This was run as a head-to-head of two
+encodings of ONE shared ruleset (`src/rewrite/rules.json`): littleorgans<-"little
+organs", chrome<-"crown", pane<-"pain" (plus a number rule ten->10 that has since
+moved to its own stage — see "Graduated" below).
 
-- **Arm 1 — in-house map** (`src/rewrite/replace.ts`): whole-word,
-  case-insensitive regex replacement applied to the committed hypothesis in the
-  corpus scorer (`--rewrite map`). Deliberately separate from normalize.ts (that
-  canonicalizes both sides for WER; this transforms the engine output only, so
-  WER reflects what a consumer receives).
-- **Arm 2 — sherpa ruleFsts** (`--rewrite fst`): a byte-level OpenFst rewrite
-  (`src/rewrite/replace.fst`) compiled from the same rules by `scripts/build-fst.py`
-  (kaldifst, build-time only) and applied inside the engine via `ruleFsts`.
+- **Arm 1 — in-house map**: whole-word, case-insensitive regex replacement
+  applied to the committed hypothesis. Deliberately separate from normalize.ts
+  (that canonicalizes both sides for WER; this transforms the engine output only,
+  so WER reflects what a consumer receives). This arm won and was graduated.
+- **Arm 2 — sherpa ruleFsts**: a byte-level OpenFst rewrite compiled from the
+  same rules by kaldifst (build-time only) and applied inside the engine via
+  `ruleFsts`. Archived under `experiments/ruleFsts/` — not a production path.
 
 **Gate (Arm 2): ruleFsts DO fire on the streaming/online recognizer.** Proven on
 kroko: with the FST wired, `"Open crown browser"` -> `"Open chrome browser"`;
@@ -165,15 +165,31 @@ compensate for two byte-level limitations the regex map handles for free:
 - *Build/dependency cost.* The FST needs kaldifst (a compiled pip dep) at build
   time and a committed binary `.fst` that must be rebuilt whenever rules change.
   The map is plain TypeScript reading a human-readable JSON — no build step, no
-  binary, trivially diffable and unit-tested (`replace.test.ts`).
+  binary, trivially diffable and unit-tested.
 
-**Recommendation: graduate the in-house map.** Same WER, zero runtime/build
-dependency, case + word-boundary handling for free, readable and testable rules.
-The ruleFsts arm's edge is real but unused at this scale: it runs inside the
-engine (raw-engine consumers get it without app code) and can stack with sherpa's
-number/date ITN FSTs. Keep it documented as the path if in-engine ITN is needed
-later. Both arms are opt-in (`--rewrite`, default `none`); the kroko default
-stays greedy 12.8%, unchanged.
+## Graduated: the `withRewrite` decorator (production)
+
+The in-house map won and shipped as a post-processor **decorator** at the
+contract layer. `withRewrite(engine, config)` wraps any `VoiceToText`, rewrites
+committed **final** events (partials are left untouched to avoid flicker), and
+re-emits. The engine stays pure — no rewrite logic in `SherpaEngine`.
+
+`src/rewrite/` modules, one job each:
+
+- `rules.json` — user-editable domain rules (data).
+- `rules.ts` — stage 1: whole-word, case-insensitive rule application.
+- `numbers.ts` — stage 2: number normalization, words<->digits for 0..999,
+  config-gated (`--numbers digits|words|off`, default off). This is the
+  digits-vs-words requirement; a spoken counting list stays separate
+  ("one two three" -> "1 2 3") while "twenty three" compounds to 23.
+- `pipeline.ts` — composes rules then numbers (both idempotent, passthrough).
+- `decorator.ts` — `withRewrite` + the session wrapper.
+
+Wiring: the **demo wraps by default** (domain rules on; `--no-rewrite` for raw,
+`--numbers` for the number stage). The **bench toggles** `--rewrite on|off` and
+re-scores the corpus: raw reproduces **12.8% (6/47)**, wrapped hits **4.3%
+(2/47)**, decorator latency within noise of raw. All `src/rewrite/` modules are
+unit-tested (rule application, number normalization, decorator final-vs-partial).
 
 ## Reproduce
 
@@ -183,12 +199,14 @@ node src/bench/run.ts --corpus corpus --engine sherpa --model en-2023-06-26     
 node src/bench/run.ts --corpus corpus --engine sherpa --model en-2023-06-21
 node src/bench/run.ts --corpus corpus --engine sherpa --model en-2023-02-21
 
-# Path B rewrite arms (corpus only):
-node src/bench/run.ts --corpus corpus --engine sherpa --rewrite map            # in-house map
-node src/bench/run.ts --corpus corpus --engine sherpa --rewrite fst            # sherpa ruleFsts
-# rebuild replace.fst after editing rules.json (build-time dep):
+# Post-decode rewrite (corpus only): raw vs wrapped decorator
+node src/bench/run.ts --corpus corpus --engine sherpa --rewrite off            # raw, 12.8%
+node src/bench/run.ts --corpus corpus --engine sherpa --rewrite on             # wrapped, 4.3%
+node src/bench/run.ts --corpus corpus --engine sherpa --rewrite on --numbers digits
+
+# Archived ruleFsts experiment (not production):
 python3 -m venv .venv && ./.venv/bin/pip install kaldifst
-./.venv/bin/python scripts/build-fst.py
+./.venv/bin/python experiments/ruleFsts/build-fst.py
 ```
 
 Model registry: `src/engines/sherpa-models.ts`. Adding a candidate is

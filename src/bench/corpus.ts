@@ -1,10 +1,12 @@
+import type { VoiceToText } from "../contract.ts";
 import { readCorpusEntries, type CorpusEntry } from "../corpus/store.ts";
-import { applyRewrites, REWRITE_FST_PATH } from "../rewrite/replace.ts";
+import { withRewrite } from "../rewrite/decorator.ts";
+import { DEFAULT_RULES } from "../rewrite/rules.ts";
 import { formatMs } from "./format.ts";
 import { createEngine, runPttOnce } from "./harness.ts";
 import { median } from "./stats.ts";
 import { wordErrorAlignment, type WordAlignment } from "./transcript.ts";
-import type { CliOptions, RewriteMode } from "./types.ts";
+import type { CliOptions } from "./types.ts";
 import { readWavFrames } from "./wav.ts";
 
 /**
@@ -48,24 +50,24 @@ export async function runCorpusBench(options: CliOptions): Promise<void> {
     return;
   }
 
-  const ruleFsts =
-    options.rewrite === "fst" && options.engine === "sherpa"
-      ? REWRITE_FST_PATH
-      : "";
-  const engine = createEngine(options.engine, options.model, ruleFsts);
+  const engine = createEngine(options.engine, options.model);
   await engine.prepare?.();
+  // Wrap with the production rewrite decorator when --rewrite on, so the
+  // scored hypothesis is exactly what a consumer receives (hypothesis-only:
+  // the decorator rewrites final events, never the expected transcript).
+  const voice: VoiceToText = options.rewrite
+    ? withRewrite(engine, { rules: DEFAULT_RULES, numbers: options.numbers })
+    : engine;
+  const rewriteLabel = options.rewrite
+    ? `on(rules=${DEFAULT_RULES.length},numbers=${options.numbers})`
+    : "off";
   console.log(
-    `engine=${engine.label ?? options.engine} endpoint=manual cadence=${options.frameMs}ms/frame release=end-of-capture (demo recordings end at the release keypress) rewrite=${options.rewrite}`,
+    `engine=${engine.label ?? options.engine} endpoint=manual cadence=${options.frameMs}ms/frame release=end-of-capture (demo recordings end at the release keypress) rewrite=${rewriteLabel}`,
   );
 
   const results: CorpusUtteranceResult[] = [];
   for (const entry of labeled) {
-    const result = await scoreUtterance(
-      engine,
-      entry,
-      options.frameMs,
-      options.rewrite,
-    );
+    const result = await scoreUtterance(voice, entry, options.frameMs);
     printUtterance(result);
     results.push(result);
   }
@@ -73,10 +75,9 @@ export async function runCorpusBench(options: CliOptions): Promise<void> {
 }
 
 async function scoreUtterance(
-  engine: ReturnType<typeof createEngine>,
+  engine: VoiceToText,
   entry: CorpusEntry,
   frameMs: number,
-  rewrite: RewriteMode,
 ): Promise<CorpusUtteranceResult> {
   const expected = entry.sidecar.expected!;
   const audio = await readWavFrames(entry.wavPath, frameMs);
@@ -88,16 +89,13 @@ async function scoreUtterance(
     frameMs,
     expected,
   });
-  // "map" rewrites the committed hypothesis here (consumer-facing); "fst" was
-  // rewritten inside the engine already; "none" leaves it raw. Applied to the
-  // hypothesis ONLY, so WER reflects what a consumer receives.
-  const hypothesis =
-    rewrite === "map" ? applyRewrites(run.finalText) : run.finalText;
+  // finalText already carries any rewrite (the engine is wrapped by the
+  // decorator when --rewrite on), so this is the consumer-facing hypothesis.
   return {
     entry,
     flushToFinalMs: run.flushToFinalMs,
-    hypothesis,
-    alignment: wordErrorAlignment(hypothesis, expected),
+    hypothesis: run.finalText,
+    alignment: wordErrorAlignment(run.finalText, expected),
   };
 }
 
