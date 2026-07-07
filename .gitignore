@@ -7,3 +7,4 @@ models/
 results/
 /corpus/
 .venv/
+.env
