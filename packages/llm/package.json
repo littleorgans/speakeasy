@@ -1,0 +1,18 @@
+{
+  "name": "@speakeasy/llm",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Provider-agnostic streaming chat model contract with a Cerebras adapter.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"src/**/*.test.ts\""
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "typescript": "^5.9.3"
+  }
+}

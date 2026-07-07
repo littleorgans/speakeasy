@@ -8,8 +8,8 @@
     "node": ">=22.6.0"
   },
   "scripts": {
-    "typecheck": "pnpm --filter @speakeasy/speech-io typecheck",
-    "test": "pnpm --filter @speakeasy/speech-io test",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
     "bench": "node packages/speech-io/src/bench/run.ts",
     "demo": "node packages/speech-io/src/demo/ptt.ts",
     "tts": "node packages/speech-io/src/tts/run.ts"

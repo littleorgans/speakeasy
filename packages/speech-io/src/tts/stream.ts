@@ -1,6 +1,7 @@
 import { performance } from "node:perf_hooks";
-import { TtsSynth } from "./synth.ts";
+import { TtsSynth, type SynthRequest, type SynthResult } from "./synth.ts";
 import type { TtsModelId } from "./models.ts";
+import type { AudioSegment } from "./contract.ts";
 
 /**
  * Sentence-pipelined TTS streaming: the workaround for the broken native
@@ -15,16 +16,16 @@ import type { TtsModelId } from "./models.ts";
  * thread, so the overlap is real parallelism, not event-loop interleaving.
  */
 
-export type SpeechSegment = {
-  index: number;
-  sentence: string;
-  samples: Float32Array;
-  sampleRate: number;
-  /** Wall-clock ms from stream start until this segment was ready. */
-  readyAtMs: number;
-  /** Synth time for this segment alone. */
-  synthMs: number;
-  audioDurationMs: number;
+/**
+ * The pipeline yields the engine-agnostic AudioSegment defined by the TTS
+ * contract; SpeechSegment is kept as the internal name used across the demos and
+ * sweeps. One shape, one source of truth.
+ */
+export type SpeechSegment = AudioSegment;
+
+/** The synth capability the pipeline needs, structural so tests can inject a fake. */
+export type SegmentSynth = {
+  synth(request: SynthRequest): Promise<SynthResult>;
 };
 
 export type StreamSpeechOptions = {
@@ -83,11 +84,164 @@ function carveFirstChunk(sentence: string): [string, string] {
 /** Word count up to and including the first word ending a clause, else Infinity. */
 function firstClauseWordCount(words: string[]): number {
   for (const [index, word] of words.entries()) {
-    if (/[,;:—–-]$/.test(word)) {
+    if (isClauseEnd(word)) {
       return index + 1;
     }
   }
   return Number.POSITIVE_INFINITY;
+}
+
+/** A word ending a clause (comma/semicolon/colon/dash) — the first-chunk cut cues. */
+function isClauseEnd(word: string): boolean {
+  return /[,;:—–-]$/.test(word);
+}
+
+/** A word ending a sentence: a terminator plus any trailing closing quotes. */
+function isSentenceEnd(word: string): boolean {
+  return /[.!?][)\]"'”’]*$/.test(word);
+}
+
+/**
+ * Incremental counterpart to planSegments for the LLM feed: consume text deltas
+ * and yield the same speakable chunks planSegments would, but as early as each
+ * cut is provable rather than waiting for the whole reply. Feeding the complete
+ * text as a single delta yields exactly planSegments(text); token-by-token it
+ * emits the aggressive first chunk the moment its boundary is settled, then whole
+ * sentences as their terminators arrive, then flushes any trailing fragment.
+ */
+export async function* planSegmentsStream(
+  tokens: AsyncIterable<string>,
+): AsyncGenerator<string> {
+  let buffer = "";
+  let headEmitted = false;
+  for await (const delta of tokens) {
+    buffer += delta;
+    if (!headEmitted) {
+      const carved = carveStreamingHead(buffer, false);
+      if (!carved) {
+        continue;
+      }
+      yield carved.head;
+      buffer = carved.rest;
+      headEmitted = true;
+    }
+    const { sentences, remainder } = drainSentences(buffer, false);
+    yield* sentences;
+    buffer = remainder;
+  }
+  if (!headEmitted) {
+    const carved = carveStreamingHead(buffer, true);
+    if (!carved) {
+      return;
+    }
+    yield carved.head;
+    buffer = carved.rest;
+  }
+  yield* drainSentences(buffer, true).sentences;
+}
+
+type WordSpan = { text: string; start: number; end: number };
+
+/** Whitespace-delimited tokens with their raw offsets, so heads slice cleanly. */
+function wordSpans(buffer: string): WordSpan[] {
+  const spans: WordSpan[] = [];
+  const re = /\S+/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(buffer)) !== null) {
+    spans.push({ text: match[0], start: match.index, end: re.lastIndex });
+  }
+  return spans;
+}
+
+/**
+ * Words we can safely reason about: all of them once the stream ends, otherwise
+ * all but a trailing token that has no whitespace or punctuation after it (it may
+ * still grow with the next delta).
+ */
+function settledWordSpans(buffer: string, ended: boolean): WordSpan[] {
+  const spans = wordSpans(buffer);
+  if (ended || spans.length === 0) {
+    return spans;
+  }
+  const last = spans[spans.length - 1]!;
+  const followedByWhitespace = last.end < buffer.length;
+  const punctuationTerminated = /[.!?,;:—–\-)\]"'”’]$/.test(last.text);
+  return followedByWhitespace || punctuationTerminated ? spans : spans.slice(0, -1);
+}
+
+/**
+ * Decide the first-chunk cut from the settled prefix, matching carveFirstChunk:
+ * the first clause boundary within the opening words, else the word cap when the
+ * first sentence runs longer, else the whole first sentence once it terminates.
+ * Returns null while the cut is not yet provable.
+ */
+function carveStreamingHead(
+  buffer: string,
+  ended: boolean,
+): { head: string; rest: string } | null {
+  const settled = settledWordSpans(buffer, ended);
+  if (settled.length === 0) {
+    return null;
+  }
+  const terminatedAt = settled.findIndex((span) => isSentenceEnd(span.text));
+  const sentenceLength = terminatedAt === -1 ? Infinity : terminatedAt + 1;
+  const scanLimit = Math.min(FIRST_CHUNK_MAX_WORDS, sentenceLength, settled.length);
+  let clauseCut = Infinity;
+  for (let index = 0; index < scanLimit; index += 1) {
+    if (isClauseEnd(settled[index]!.text)) {
+      clauseCut = index + 1;
+      break;
+    }
+  }
+
+  let cut: number;
+  if (clauseCut !== Infinity) {
+    cut = clauseCut;
+  } else if (Number.isFinite(sentenceLength)) {
+    cut = Math.min(FIRST_CHUNK_MAX_WORDS, sentenceLength);
+  } else if (settled.length > FIRST_CHUNK_MAX_WORDS) {
+    cut = FIRST_CHUNK_MAX_WORDS;
+  } else if (ended) {
+    cut = settled.length;
+  } else {
+    return null;
+  }
+
+  const head = settled
+    .slice(0, cut)
+    .map((span) => span.text)
+    .join(" ");
+  return { head, rest: buffer.slice(settled[cut - 1]!.end) };
+}
+
+/**
+ * Pull every fully terminated sentence out of the buffer, returning the raw
+ * unterminated tail to keep accumulating. When the stream has ended the tail is
+ * emitted too, matching splitSentences exactly.
+ */
+function drainSentences(
+  buffer: string,
+  ended: boolean,
+): { sentences: string[]; remainder: string } {
+  if (ended) {
+    return { sentences: splitSentences(buffer), remainder: "" };
+  }
+  const re = /[^.!?]*[.!?]+[)\]"'”’]*\s*|[^.!?]+$/g;
+  const sentences: string[] = [];
+  let consumed = 0;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(buffer)) !== null) {
+    const isTerminated = /[.!?][)\]"'”’]*\s*$/.test(match[0]);
+    if (!isTerminated) {
+      break;
+    }
+    const trimmed = match[0].trim();
+    if (trimmed) {
+      sentences.push(trimmed);
+    }
+    consumed = re.lastIndex;
+  }
+  return { sentences, remainder: buffer.slice(consumed) };
 }
 
 /** Below this absolute amplitude (fraction of full scale) a sample is silence. */
@@ -133,7 +287,12 @@ export function trimSilence(
   return out;
 }
 
-/** Synthesize text sentence-by-sentence, yielding segments as they complete. */
+/**
+ * Synthesize a fixed string sentence-by-sentence. Thin wrapper over the shared
+ * synthPipeline: plan the chunks up front, then stream them. The incremental
+ * (LLM feed) path lives behind the TTS contract and drives synthPipeline with
+ * planSegmentsStream instead, so both share one pipeline.
+ */
 export async function* streamSpeech(
   text: string,
   options: StreamSpeechOptions = {},
@@ -144,21 +303,41 @@ export async function* streamSpeech(
   }
   const synth =
     options.synth ?? (await TtsSynth.create(options.model ?? "piper-amy"));
-  const speed = options.speed ?? 1;
+  yield* synthPipeline(fromArray(sentences), synth, options.speed ?? 1);
+}
+
+/** Adapt a fixed list of chunks to the async stream synthPipeline consumes. */
+export async function* fromArray(items: string[]): AsyncGenerator<string> {
+  yield* items;
+}
+
+/**
+ * The 1-deep synth pipeline: consume a stream of planned sentence chunks and
+ * yield an AudioSegment per chunk. While the consumer handles segment i, segment
+ * i+1 is already synthesizing on the native worker thread; because RTF < 1 with
+ * piper/kokoro, synthesis stays ahead and playback runs gapless. Timing is
+ * measured from the first chunk pulled, so readyAtMs is honest for both the
+ * fixed-string and the incremental (token-fed) callers.
+ */
+export async function* synthPipeline(
+  segments: AsyncIterable<string>,
+  synth: SegmentSynth,
+  speed: number = 1,
+): AsyncGenerator<SpeechSegment> {
+  const iterator = segments[Symbol.asyncIterator]();
+  let current = await iterator.next();
+  if (current.done) {
+    return;
+  }
   const start = performance.now();
-
-  const synthOne = (sentence: string) =>
-    synth.synth({ text: sentence, speed });
-
-  // 1-deep pipeline: while the consumer handles segment i, segment i+1 is
-  // already synthesizing on the native worker thread.
-  let pending = synthOne(sentences[0]!);
-  for (const [index, sentence] of sentences.entries()) {
+  let pending = synth.synth({ text: current.value, speed });
+  let index = 0;
+  while (!current.done) {
     const result = await pending;
     const readyAtMs = performance.now() - start;
-    const next = sentences[index + 1];
-    if (next !== undefined) {
-      pending = synthOne(next);
+    const next = await iterator.next();
+    if (!next.done) {
+      pending = synth.synth({ text: next.value, speed });
     }
     // Trim the model's ragged silence and append one controlled gap so
     // continuous playback sounds like natural sentence rhythm. audioDurationMs
@@ -167,13 +346,15 @@ export async function* streamSpeech(
     const samples = trimSilence(result.samples, result.sampleRate);
     yield {
       index,
-      sentence,
+      sentence: current.value,
       samples,
       sampleRate: result.sampleRate,
       readyAtMs,
       synthMs: result.totalSynthMs,
       audioDurationMs: (samples.length / result.sampleRate) * 1_000,
     };
+    index += 1;
+    current = next;
   }
 }
 
