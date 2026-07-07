@@ -6,7 +6,9 @@ settings:
 
 importers:
 
-  .:
+  .: {}
+
+  packages/speech-io:
     dependencies:
       llama-tokenizer-js:
         specifier: 1.2.2

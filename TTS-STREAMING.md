@@ -4,7 +4,7 @@ Follow-up to TTS-SWEEP.md. Product driver: the littleorgans conversational
 loop must start speaking before the full reply is synthesized. The native
 streaming callback in sherpa-onnx-node 1.13.3 is fatally broken (root cause
 below, with evidence), so streaming ships as an app-level sentence pipeline
-(`src/tts/stream.ts`) built on the stable no-callback path. It works: first
+(`packages/speech-io/src/tts/stream.ts`) built on the stable no-callback path. It works: first
 audio in ~0.7s instead of ~2.3s on the 3-sentence test paragraph, and
 synthesis provably stays ahead of playback.
 
@@ -97,7 +97,7 @@ granularity our sentence pipeline already achieves today.
 
 ## Part 2: sentence-pipelined streaming (shipped)
 
-`src/tts/stream.ts`:
+`packages/speech-io/src/tts/stream.ts`:
 
 - `splitSentences(text)`: terminator-aware splitter (unit-tested).
 - `streamSpeech(text, {model, speed})`: AsyncGenerator that synthesizes
@@ -109,7 +109,7 @@ granularity our sentence pipeline already achieves today.
   play slot starts at `readyAt(segment 0) + sum(audio 0..i-1)`; the stream
   is ahead of playback iff every segment is ready before its slot.
 
-`src/tts/stream-demo.ts` makes it audible: feeds each segment into one
+`packages/speech-io/src/tts/stream-demo.ts` makes it audible: feeds each segment into one
 persistent audio sink as it arrives (see Part 3 for the sink and the TTFA
 work) and prints the timing report. Segments are also written to
 `results/tts/stream-<i>.wav`.
@@ -136,11 +136,11 @@ work) and prints the timing report. Segments are also written to
 ### Hear it
 
 ```
-node src/tts/stream-demo.ts                          # piper-amy, warm + pre-opened sink
-node src/tts/stream-demo.ts --model kokoro-v0.19     # kokoro
-node src/tts/stream-demo.ts --text "Your reply here. Second sentence."
-node src/tts/stream-demo.ts --cold                   # fresh-process TTFA (no warm/pre-open)
-node src/tts/stream-demo.ts --no-play                # timings + wavs only
+node packages/speech-io/src/tts/stream-demo.ts                          # piper-amy, warm + pre-opened sink
+node packages/speech-io/src/tts/stream-demo.ts --model kokoro-v0.19     # kokoro
+node packages/speech-io/src/tts/stream-demo.ts --text "Your reply here. Second sentence."
+node packages/speech-io/src/tts/stream-demo.ts --cold                   # fresh-process TTFA (no warm/pre-open)
+node packages/speech-io/src/tts/stream-demo.ts --no-play                # timings + wavs only
 ```
 
 ## Part 3: gapless playback + TTFA

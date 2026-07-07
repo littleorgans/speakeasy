@@ -5,13 +5,13 @@ MODEL-SWEEP.md. Goal: hear the quality difference between a fast VITS voice
 and a modern StyleTTS2-based voice, expose the config surface of
 sherpa-onnx-node's `OfflineTts`, and measure synthesis latency. TTS is a
 separate bounded context from the STT `VoiceToText` contract: everything lives
-in `src/tts/`, nothing touches `src/contract.ts`.
+in `packages/speech-io/src/tts/`, nothing touches `packages/speech-io/src/contract.ts`.
 
 ## Models compared
 
 Both ship as tarballs on the same k2-fsa release host as the STT models
 (release tag `tts-models`), downloaded and extracted under `models/tts/` via
-the shared `ensureAsset` in `src/engines/assets.ts` (also used by the STT
+the shared `ensureAsset` in `packages/speech-io/src/engines/assets.ts` (also used by the STT
 registry after this spike's refactor).
 
 | Model id | Family | Tarball | Extracted | Sample rate | Voices | Load time |
@@ -28,7 +28,7 @@ voices and the int8 Kokoro were added in the 2026-07-04 streamable-quality pass 
 
 ## Config surface
 
-`OfflineTts` config (per family, see `src/tts/synth.ts`):
+`OfflineTts` config (per family, see `packages/speech-io/src/tts/synth.ts`):
 
 - **vits**: `model`, `tokens`, `dataDir` (espeak-ng phoneme data), plus
   `noiseScale`, `noiseScaleW`, `lengthScale` knobs.
@@ -77,8 +77,8 @@ through the real pipeline to time first audio.
 
 Machine: Apple Silicon, cpu provider, back-to-back in one session. RTF is
 `synth / audio` on the paragraph; first-audio and ahead-of-playback come from
-`src/tts/qual.ts` running `streamSpeech` at 4 threads. Reproduce:
-`node src/tts/qual.ts` (all models) or `--model <id>` to narrow.
+`packages/speech-io/src/tts/qual.ts` running `streamSpeech` at 4 threads. Reproduce:
+`node packages/speech-io/src/tts/qual.ts` (all models) or `--model <id>` to narrow.
 
 | Model | Family | RTF@2thr | RTF@4thr | Streamable? | First-audio (stream, 4thr) | Download | Sample rate | Voices |
 |---|---|---|---|---|---|---|---|---|
@@ -164,7 +164,7 @@ that is where `amy-low` grates and the high-tier voices pull ahead.
 ## Results (original 2-model sweep)
 
 Machine: Apple Silicon, cpu provider, 2 threads. Per-utterance timings from
-`node src/tts/run.ts` over 5 fixed domain-flavored sentences (littleorgans
+`node packages/speech-io/src/tts/run.ts` over 5 fixed domain-flavored sentences (littleorgans
 domain line, digits, director command, neutral, 3-sentence paragraph), after
 one unmeasured warmup per model. RTF = synth time / audio time; below 1 is
 faster than realtime.
@@ -208,14 +208,14 @@ Listen: 13 wavs in `results/tts/` (`<model>-<idx>.wav` for the sentence set,
 ## Reproduce
 
 ```
-node src/tts/qual.ts                      # streamable-quality sweep, all models
-node src/tts/qual.ts --model kokoro-v0.19 # one model (repeat --model to select several)
-node src/tts/run.ts                       # original per-sentence sweep + variety wavs
-node src/tts/run.ts --model piper-amy     # one model
-node src/tts/run.ts --speed 1.2           # faster speaking rate
+node packages/speech-io/src/tts/qual.ts                      # streamable-quality sweep, all models
+node packages/speech-io/src/tts/qual.ts --model kokoro-v0.19 # one model (repeat --model to select several)
+node packages/speech-io/src/tts/run.ts                       # original per-sentence sweep + variety wavs
+node packages/speech-io/src/tts/run.ts --model piper-amy     # one model
+node packages/speech-io/src/tts/run.ts --speed 1.2           # faster speaking rate
 ```
 
-Model registry: `src/tts/models.ts`. Adding a candidate is config-only (one
+Model registry: `packages/speech-io/src/tts/models.ts`. Adding a candidate is config-only (one
 descriptor); swapping is `--model <id>`. Downloads land in `models/tts/`,
 wavs in `results/tts/` (both gitignored). `qual.ts` writes the A/B
 `qual-<model>-<idx>.wav` samples and the RTF/streamable table; `run.ts` writes

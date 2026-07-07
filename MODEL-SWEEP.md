@@ -8,14 +8,14 @@ budget (`PASS_THRESHOLD_MS`).
 
 - Corpus: 13 hand-labeled director-command utterances in `corpus/` (wav +
   json sidecar with confirmed `expected`).
-- Scorer: `node src/bench/run.ts --corpus corpus --engine sherpa --model <id>`
+- Scorer: `node packages/speech-io/src/bench/run.ts --corpus corpus --engine sherpa --model <id>`
   re-decodes each wav through the push-to-talk path (endpoint=manual, release
   at end-of-capture) and scores the fresh hypothesis vs `expected`. Comparison
   is case- and punctuation-insensitive.
 - Latency: flush->final per utterance; we report the median and the **max**
   (the tail is what the 200ms budget must survive, not the median).
 - All models use the int8 encoder where shipped; kroko ships fp32 only.
-- Scoring runs on the shared normalized form (`src/bench/normalize.ts`:
+- Scoring runs on the shared normalized form (`packages/speech-io/src/bench/normalize.ts`:
   lowercase, strip punctuation, spelled numbers canonicalized to digits so
   "10" and "ten" collapse). Raw WER (case/punct only, no number canon) is shown
   alongside so the digit-normalization delta is visible. Latency is unaffected
@@ -53,7 +53,7 @@ budget (`PASS_THRESHOLD_MS`).
   genuine mishears ("tone", "tan") still do. Kroko gains the most (17.0% ->
   12.8%): more of its residual errors were digit-spelling, not acoustics. The
   normalizer runs on every WER path (corpus scorer and jfk bench), see
-  `src/bench/normalize.ts`, covered by `transcript.test.ts`.
+  `packages/speech-io/src/bench/normalize.ts`, covered by `transcript.test.ts`.
 
 ## Hotwords experiment (contextual biasing)
 
@@ -122,7 +122,7 @@ baseline, unchanged. It remains useful for any future model that bundles a
 
 Since hotword biasing is blocked on kroko (Path A), fix its *systematic*
 residuals after decoding instead. This was run as a head-to-head of two
-encodings of ONE shared ruleset (`src/rewrite/rules.json`): littleorgans<-"little
+encodings of ONE shared ruleset (`packages/speech-io/src/rewrite/rules.json`): littleorgans<-"little
 organs", chrome<-"crown", pane<-"pain" (plus a number rule ten->10 that has since
 moved to its own stage — see "Graduated" below).
 
@@ -174,7 +174,7 @@ contract layer. `withRewrite(engine, config)` wraps any `VoiceToText`, rewrites
 committed **final** events (partials are left untouched to avoid flicker), and
 re-emits. The engine stays pure — no rewrite logic in `SherpaEngine`.
 
-`src/rewrite/` modules, one job each:
+`packages/speech-io/src/rewrite/` modules, one job each:
 
 - `rules.json` — user-editable domain rules (data).
 - `rules.ts` — stage 1: whole-word, case-insensitive rule application.
@@ -188,28 +188,28 @@ re-emits. The engine stays pure — no rewrite logic in `SherpaEngine`.
 Wiring: the **demo wraps by default** (domain rules on; `--no-rewrite` for raw,
 `--numbers` for the number stage). The **bench toggles** `--rewrite on|off` and
 re-scores the corpus: raw reproduces **12.8% (6/47)**, wrapped hits **4.3%
-(2/47)**, decorator latency within noise of raw. All `src/rewrite/` modules are
+(2/47)**, decorator latency within noise of raw. All `packages/speech-io/src/rewrite/` modules are
 unit-tested (rule application, number normalization, decorator final-vs-partial).
 
 ## Reproduce
 
 ```
-node src/bench/run.ts --corpus corpus --engine sherpa                          # default (en-kroko-2025-08-06)
-node src/bench/run.ts --corpus corpus --engine sherpa --model en-2023-06-26     # prior default
-node src/bench/run.ts --corpus corpus --engine sherpa --model en-2023-06-21
-node src/bench/run.ts --corpus corpus --engine sherpa --model en-2023-02-21
+node packages/speech-io/src/bench/run.ts --corpus corpus --engine sherpa                          # default (en-kroko-2025-08-06)
+node packages/speech-io/src/bench/run.ts --corpus corpus --engine sherpa --model en-2023-06-26     # prior default
+node packages/speech-io/src/bench/run.ts --corpus corpus --engine sherpa --model en-2023-06-21
+node packages/speech-io/src/bench/run.ts --corpus corpus --engine sherpa --model en-2023-02-21
 
 # Post-decode rewrite (corpus only): raw vs wrapped decorator
-node src/bench/run.ts --corpus corpus --engine sherpa --rewrite off            # raw, 12.8%
-node src/bench/run.ts --corpus corpus --engine sherpa --rewrite on             # wrapped, 4.3%
-node src/bench/run.ts --corpus corpus --engine sherpa --rewrite on --numbers digits
+node packages/speech-io/src/bench/run.ts --corpus corpus --engine sherpa --rewrite off            # raw, 12.8%
+node packages/speech-io/src/bench/run.ts --corpus corpus --engine sherpa --rewrite on             # wrapped, 4.3%
+node packages/speech-io/src/bench/run.ts --corpus corpus --engine sherpa --rewrite on --numbers digits
 
 # Archived ruleFsts experiment (not production):
 python3 -m venv .venv && ./.venv/bin/pip install kaldifst
 ./.venv/bin/python experiments/ruleFsts/build-fst.py
 ```
 
-Model registry: `src/engines/sherpa-models.ts`. Adding a candidate is
+Model registry: `packages/speech-io/src/engines/sherpa-models.ts`. Adding a candidate is
 config-only (one descriptor); swapping is `--model <id>`. Per Stuart's verdict
 (2026-07-04) the default is now `en-kroko-2025-08-06`; the no-flag run above
 loads it.
