@@ -8,6 +8,22 @@ importers:
 
   .: {}
 
+  packages/convo-engine:
+    dependencies:
+      '@speakeasy/llm':
+        specifier: workspace:*
+        version: link:../llm
+      '@speakeasy/speech-io':
+        specifier: workspace:*
+        version: link:../speech-io
+    devDependencies:
+      '@types/node':
+        specifier: ^25.6.0
+        version: 25.9.4
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   packages/llm:
     devDependencies:
       '@types/node':
