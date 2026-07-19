@@ -38,17 +38,20 @@ export class SherpaTextToSpeech implements TextToSpeech {
 
   async open(config: TTSConfig = {}): Promise<TTSSession> {
     const synth = await this.#createSynth(config.model ?? "piper-amy");
-    return new SherpaTTSSession(synth, config.speed ?? 1);
+    const sid = typeof config.voice === "number" ? config.voice : 0;
+    return new SherpaTTSSession(synth, config.speed ?? 1, sid);
   }
 }
 
 class SherpaTTSSession implements TTSSession {
   readonly #synth: SegmentSynth;
   readonly #speed: number;
+  readonly #sid: number;
 
-  constructor(synth: SegmentSynth, speed: number) {
+  constructor(synth: SegmentSynth, speed: number, sid: number) {
     this.#synth = synth;
     this.#speed = speed;
+    this.#sid = sid;
   }
 
   speak(text: AsyncIterable<string> | string): AsyncIterable<AudioSegment> {
@@ -56,7 +59,12 @@ class SherpaTTSSession implements TTSSession {
       typeof text === "string"
         ? fromArray(planSegments(text))
         : planSegmentsStream(text);
-    return synthPipeline(segments, this.#synth, this.#speed);
+    // Bind the speaker id (kokoro is multi-voice) into the synth the shared
+    // pipeline drives; piper is single-voice and ignores a non-zero sid.
+    const voiced: SegmentSynth = {
+      synth: (request) => this.#synth.synth({ ...request, sid: this.#sid }),
+    };
+    return synthPipeline(segments, voiced, this.#speed);
   }
 
   async close(): Promise<void> {

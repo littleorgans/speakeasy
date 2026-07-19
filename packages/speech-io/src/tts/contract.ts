@@ -16,8 +16,8 @@
 export type TTSConfig = {
   /** Engine-defined model id. The adapter maps it to its own registry. */
   model?: string;
-  /** Speaker/voice id for multi-speaker models. Default 0. */
-  voice?: number;
+  /** Voice selector: a numeric speaker id (sherpa) or a named/UUID voice (Cartesia). */
+  voice?: number | string;
   /** Speaking rate multiplier; 1 is the model's native pace. */
   speed?: number;
 };

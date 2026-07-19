@@ -4,6 +4,9 @@
   "version": "0.0.0",
   "description": "Standalone streaming voice-to-text (STT) and streaming text-to-speech (TTS). Audio in, text out, audio out. Local-first, sub-200ms finalization.",
   "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "engines": {
     "node": ">=22.6.0"
   },

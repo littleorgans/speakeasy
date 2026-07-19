@@ -1,4 +1,3 @@
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { formatMs } from "../bench/format.ts";
@@ -8,13 +7,13 @@ import {
   streamSpeech,
   type SpeechSegment,
 } from "./stream.ts";
+import {
+  createSegmentPlayer,
+  DEVICE_OPEN_EST_MS,
+  type SegmentPlayer,
+} from "./player.ts";
 import { BUILD_STATUS_PARAGRAPH, TTS_RESULTS_DIR } from "./sweep.ts";
 import { TtsSynth, writeWav } from "./synth.ts";
-
-/** Silence (ms) written to the sink on open() so CoreAudio opens off the request path. */
-const SINK_PRIMER_MS = 150;
-/** Measured ffplay CoreAudio open latency; the cold-sink penalty in the honest TTFA. */
-const DEVICE_OPEN_EST_MS = 500;
 
 /**
  * Audible demo of sentence-pipelined streaming: pulls segments from
@@ -70,7 +69,7 @@ async function runDemo(options: DemoOptions): Promise<void> {
   const startup0 = performance.now();
   const synth = await TtsSynth.create(options.model);
   const loadMs = performance.now() - startup0;
-  const player = options.play ? createPlayer(synth.sampleRate) : undefined;
+  const player = options.play ? createSegmentPlayer(synth.sampleRate) : undefined;
   let warmupMs = 0;
   const preOpened = Boolean(player) && options.warm;
   if (options.warm) {
@@ -93,7 +92,7 @@ async function runDemo(options: DemoOptions): Promise<void> {
     segments.push(segment);
     const wavPath = join(TTS_RESULTS_DIR, `stream-${segment.index}.wav`);
     await writeWav(wavPath, segment);
-    player?.write(segment, wavPath); // lazy-opens the sink here if not pre-opened
+    player?.write(segment); // lazy-opens the sink here if not pre-opened
     firstChunkMs ??= player ? performance.now() - reqStart : segment.readyAtMs;
     console.log(
       `segment=${segment.index} ready=${formatMs(segment.readyAtMs)} synth=${formatMs(segment.synthMs)} audio=${formatMs(segment.audioDurationMs)} text=${JSON.stringify(segment.sentence)}`,
@@ -116,100 +115,6 @@ async function runDemo(options: DemoOptions): Promise<void> {
       `segment=${row.index} ready=${formatMs(row.readyAtMs)} play-slot=${formatMs(row.playStartMs)} margin=${formatMs(row.marginMs)}`,
     );
   }
-}
-
-/** A continuous audio sink fed segment-by-segment as synthesis produces them. */
-type SegmentPlayer = {
-  kind: string;
-  /** Pre-open the device (off the request path) so it is hot by first write. */
-  open(): void;
-  write(segment: SpeechSegment, wavPath: string): void;
-  end(): Promise<void>;
-};
-
-/** ffplay when available (gapless PCM stdin), else the afplay chain fallback. */
-function createPlayer(sampleRate: number): SegmentPlayer {
-  return hasFfplay() ? ffplayPlayer(sampleRate) : afplayPlayer();
-}
-
-function hasFfplay(): boolean {
-  return spawnSync("ffplay", ["-version"], { stdio: "ignore" }).status === 0;
-}
-
-/**
- * One ffplay process for the whole reply: each segment's Float32 PCM is written
- * to its stdin as f32le, so playback is gapless across sentences. open() spawns
- * it and writes a short silence primer, forcing CoreAudio to open before the
- * first real chunk arrives; write() lazy-spawns too, for the --cold path.
- */
-function ffplayPlayer(sampleRate: number): SegmentPlayer {
-  let child: ChildProcess | undefined;
-  let done: Promise<void> = Promise.resolve();
-  const ensure = (): ChildProcess => {
-    if (child) {
-      return child;
-    }
-    child = spawn(
-      "ffplay",
-      // ffplay is a playback tool: channels come from -ch_layout, not the
-      // ffmpeg output flag -ac (which it rejects). -nostats/-nodisp keep it
-      // headless; -autoexit quits at stdin EOF once the queue is drained.
-      // prettier-ignore
-      [
-        "-hide_banner", "-loglevel", "error", "-nostats", "-nodisp",
-        "-autoexit", "-f", "f32le", "-ar", String(sampleRate),
-        "-ch_layout", "mono", "-i", "pipe:0",
-      ],
-      { stdio: ["pipe", "ignore", "ignore"] },
-    );
-    child.stdin?.on("error", () => {}); // report via exit, not an EPIPE throw
-    done = onExit(child, "ffplay");
-    return child;
-  };
-  return {
-    kind: "ffplay",
-    open() {
-      const frames = Math.round((sampleRate * SINK_PRIMER_MS) / 1000);
-      ensure().stdin?.write(Buffer.alloc(frames * Float32Array.BYTES_PER_ELEMENT));
-    },
-    write(segment) {
-      const { samples } = segment;
-      ensure().stdin?.write(
-        Buffer.from(samples.buffer, samples.byteOffset, samples.byteLength),
-      );
-    },
-    async end() {
-      child?.stdin?.end();
-      await done;
-    },
-  };
-}
-
-/** Fallback: chain one afplay per segment. Retains the per-spawn gap. */
-function afplayPlayer(): SegmentPlayer {
-  let queue: Promise<void> = Promise.resolve();
-  return {
-    kind: "afplay (fallback; per-segment spawn gap, no pre-open)",
-    open() {}, // afplay plays whole wav files; nothing to pre-open
-    write(_segment, wavPath) {
-      queue = queue.then(() =>
-        onExit(spawn("afplay", [wavPath], { stdio: "ignore" }), "afplay"),
-      );
-    },
-    end: () => queue,
-  };
-}
-
-/** Resolve when the child exits 0; reject on spawn error or nonzero exit. */
-function onExit(child: ChildProcess, name: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    child.on("error", reject);
-    child.on("exit", (code) =>
-      code === 0
-        ? resolve()
-        : reject(new Error(`${name} exited with code ${code ?? "unknown"}`)),
-    );
-  });
 }
 
 function parseArgs(args: string[]): DemoOptions {

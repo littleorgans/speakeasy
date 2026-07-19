@@ -332,29 +332,36 @@ export async function* synthPipeline(
   const start = performance.now();
   let pending = synth.synth({ text: current.value, speed });
   let index = 0;
-  while (!current.done) {
-    const result = await pending;
-    const readyAtMs = performance.now() - start;
-    const next = await iterator.next();
-    if (!next.done) {
-      pending = synth.synth({ text: next.value, speed });
+  try {
+    while (!current.done) {
+      const result = await pending;
+      const readyAtMs = performance.now() - start;
+      const next = await iterator.next();
+      if (!next.done) {
+        pending = synth.synth({ text: next.value, speed });
+      }
+      // Trim the model's ragged silence and append one controlled gap so
+      // continuous playback sounds like natural sentence rhythm. audioDurationMs
+      // reflects the trimmed+gapped samples, keeping the ahead-of-playback math
+      // honest against what actually plays.
+      const samples = trimSilence(result.samples, result.sampleRate);
+      yield {
+        index,
+        sentence: current.value,
+        samples,
+        sampleRate: result.sampleRate,
+        readyAtMs,
+        synthMs: result.totalSynthMs,
+        audioDurationMs: (samples.length / result.sampleRate) * 1_000,
+      };
+      index += 1;
+      current = next;
     }
-    // Trim the model's ragged silence and append one controlled gap so
-    // continuous playback sounds like natural sentence rhythm. audioDurationMs
-    // reflects the trimmed+gapped samples, keeping the ahead-of-playback math
-    // honest against what actually plays.
-    const samples = trimSilence(result.samples, result.sampleRate);
-    yield {
-      index,
-      sentence: current.value,
-      samples,
-      sampleRate: result.sampleRate,
-      readyAtMs,
-      synthMs: result.totalSynthMs,
-      audioDurationMs: (samples.length / result.sampleRate) * 1_000,
-    };
-    index += 1;
-    current = next;
+  } finally {
+    // On an early return (barge-in breaks the consumer's loop) a prefetched
+    // synth may still be in flight; swallow it so it never surfaces as an
+    // unhandled rejection.
+    void Promise.resolve(pending).catch(() => {});
   }
 }
 
