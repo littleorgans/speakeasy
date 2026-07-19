@@ -4,6 +4,9 @@
   "version": "0.0.0",
   "description": "Provider-agnostic streaming chat model contract with a Cerebras adapter.",
   "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "engines": {
     "node": ">=22.6.0"
   },
