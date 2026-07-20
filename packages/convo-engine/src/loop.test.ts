@@ -10,7 +10,13 @@ import type {
 } from "@speakeasy/speech-io";
 import type { ChatMessage, ChatModel } from "@speakeasy/llm";
 import { ConversationLoop, type AudioSink, type AudioSource } from "./loop.ts";
+import { CascadeResponder } from "./responder/cascade.ts";
 import type { ConvoState } from "./state.ts";
+
+/** The loop is always exercised through the cascade responder, as the demo wires it. */
+function cascade(llm: ChatModel, tts: TextToSpeech): CascadeResponder {
+  return new CascadeResponder({ llm, tts, now });
+}
 
 const now = () => performance.now();
 
@@ -151,7 +157,7 @@ function makeLoop(llm: FakeLLM, options: { maxTurns?: number } = {}) {
   const states: ConvoState[] = [];
   const logs: string[] = [];
   const loop = new ConversationLoop(
-    { stt, llm, tts, mic, createSink: () => sink },
+    { stt, responder: cascade(llm, tts), mic, createSink: () => sink },
     {
       maxTurns: options.maxTurns,
       now,
@@ -227,8 +233,7 @@ test("the loop recovers and serves a second turn after an error", async () => {
   const loop = new ConversationLoop(
     {
       stt,
-      llm,
-      tts: new FakeTTS(),
+      responder: cascade(llm, new FakeTTS()),
       mic: new FakeMic(),
       createSink: () => sink,
     },
@@ -299,7 +304,7 @@ test("interrupt() during playback kills the sink and returns to listening", asyn
   const sink = new FakeSink();
   const states: ConvoState[] = [];
   const loop = new ConversationLoop(
-    { stt, llm: new FakeLLM(["Hello. ", "World."]), tts, mic: new FakeMic(), createSink: () => sink },
+    { stt, responder: cascade(new FakeLLM(["Hello. ", "World."]), tts), mic: new FakeMic(), createSink: () => sink },
     { maxTurns: 1, now, log: () => {}, onState: (s) => states.push(s) },
   );
   await loop.start();
@@ -328,7 +333,7 @@ test("barge-in: sustained mic speech during playback interrupts via the VAD", as
   const sink = new FakeSink();
   const mic = new FakeMic();
   const loop = new ConversationLoop(
-    { stt, llm: new FakeLLM(["Hello. ", "World."]), tts, mic, createSink: () => sink },
+    { stt, responder: cascade(new FakeLLM(["Hello. ", "World."]), tts), mic, createSink: () => sink },
     { maxTurns: 1, now, log: () => {}, barge: true, bargeThreshold: 0.05 },
   );
   await loop.start();
@@ -354,7 +359,7 @@ test("barge-in stays off by default: loud frames while speaking do not interrupt
   const sink = new FakeSink();
   const mic = new FakeMic();
   const loop = new ConversationLoop(
-    { stt, llm: new FakeLLM(["Hi. ", "Bye."]), tts, mic, createSink: () => sink },
+    { stt, responder: cascade(new FakeLLM(["Hi. ", "Bye."]), tts), mic, createSink: () => sink },
     { maxTurns: 1, now, log: () => {} }, // barge not enabled
   );
   await loop.start();

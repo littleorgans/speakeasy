@@ -2,12 +2,9 @@ import type {
   AudioSegment,
   STTConfig,
   STTSession,
-  TTSConfig,
-  TTSSession,
-  TextToSpeech,
   VoiceToText,
 } from "@speakeasy/speech-io";
-import type { ChatModel } from "@speakeasy/llm";
+import type { ResponderSession, VoiceResponder } from "./responder/contract.ts";
 import { ChatHistory } from "./history.ts";
 import {
   buildTurnMetrics,
@@ -18,15 +15,15 @@ import { assertTransition, type ConvoState } from "./state.ts";
 import { EnergyVad } from "./vad.ts";
 
 /**
- * Half-duplex speech-to-speech loop over the three contracts only. It owns no
- * engine specifics: STT, LLM, TTS, the microphone, and the audio sink are all
- * injected, so the whole cycle is exercised in tests with fakes and driven with
- * real engines by the demo.
+ * Half-duplex speech-to-speech loop over the contracts only. It owns no engine
+ * specifics: STT, the VoiceResponder (cascade or fused), the microphone, and
+ * the audio sink are all injected, so the whole cycle is exercised in tests
+ * with fakes and driven with real engines by the demo.
  *
  * listening: mic frames -> STT (eager endpointing closes the turn).
- * thinking:  final transcript -> ChatModel.stream, tokens piped straight into
- *            TTSSession.speak (the incremental path) so audio starts on the
- *            first sentence while tokens still arrive.
+ * thinking:  final transcript -> ResponderSession.respond, which streams the
+ *            reply as interleaved token and audio events (a cascade starts
+ *            audio on the first sentence; a fused model starts immediately).
  * speaking:  audio segments -> continuous sink; mic gated (frames discarded).
  * Any stage failure logs one redacted line and returns to listening; the loop
  * never dies mid-conversation.
@@ -52,8 +49,8 @@ export interface AudioSink {
 
 export type ConvoDeps = {
   stt: VoiceToText;
-  llm: ChatModel;
-  tts: TextToSpeech;
+  /** The spoken-reply engine: CascadeResponder (LLM + TTS) or a fused model. */
+  responder: VoiceResponder;
   mic: AudioSource;
   /** Built per turn once the first segment's sample rate is known. */
   createSink: (sampleRate: number) => AudioSink;
@@ -63,7 +60,6 @@ export type ConvoOptions = {
   systemPrompt?: string;
   historyLimit?: number;
   sttConfig?: STTConfig;
-  ttsConfig?: TTSConfig;
   /** Auto-stop after this many completed turns; unset runs until stop(). */
   maxTurns?: number;
   /** Enable voice barge-in: user speech during playback cuts the assistant off. */
@@ -85,7 +81,6 @@ export class ConversationLoop {
   readonly #onPartial: (text: string) => void;
   readonly #onInterrupt: () => void;
   readonly #sttConfig: STTConfig;
-  readonly #ttsConfig: TTSConfig;
   readonly #maxTurns: number | undefined;
   readonly #barge: boolean;
   readonly #vad: EnergyVad;
@@ -94,7 +89,7 @@ export class ConversationLoop {
 
   #state: ConvoState = "idle";
   #session: STTSession | undefined;
-  #ttsSession: TTSSession | undefined;
+  #responderSession: ResponderSession | undefined;
   #endpointAt = 0;
   #turnsStarted = 0;
   #queue: Promise<void> = Promise.resolve();
@@ -112,7 +107,6 @@ export class ConversationLoop {
     this.#onPartial = options.onPartial ?? (() => {});
     this.#onInterrupt = options.onInterrupt ?? (() => {});
     this.#sttConfig = options.sttConfig ?? { endpoint: { mode: "eager" } };
-    this.#ttsConfig = options.ttsConfig ?? {};
     this.#maxTurns = options.maxTurns;
     this.#barge = options.barge ?? false;
     this.#vad = new EnergyVad({ threshold: options.bargeThreshold });
@@ -132,7 +126,7 @@ export class ConversationLoop {
 
   async start(): Promise<void> {
     this.#session = await this.#deps.stt.open(this.#sttConfig);
-    this.#ttsSession = await this.#deps.tts.open(this.#ttsConfig);
+    this.#responderSession = await this.#deps.responder.open();
     this.#wireSession(this.#session);
     this.#setState("listening");
     await this.#deps.mic.start({
@@ -149,7 +143,7 @@ export class ConversationLoop {
     this.#setState("idle");
     await Promise.resolve(this.#deps.mic.stop()).catch(() => {});
     await this.#queue.catch(() => {});
-    await this.#ttsSession?.close().catch(() => {});
+    await this.#responderSession?.close().catch(() => {});
     await this.#session?.end().catch(() => {});
     this.#resolveDone?.();
   }
@@ -226,10 +220,10 @@ export class ConversationLoop {
     endpointAt: number,
     finalAt: number,
   ): Promise<void> {
-    if (this.#stopping || !this.#ttsSession) {
+    if (this.#stopping || !this.#responderSession) {
       return;
     }
-    const ttsSession = this.#ttsSession;
+    const responderSession = this.#responderSession;
     const turn = (this.#turnsStarted += 1);
     this.#interrupted = false;
     this.#vad.reset();
@@ -244,18 +238,17 @@ export class ConversationLoop {
     let sink: AudioSink | undefined;
 
     try {
-      const tokens = instrument(
-        this.#deps.llm.stream(this.#history.messages()),
-        (token) => {
-          firstTokenAt ??= this.#now();
-          tokenCount += 1;
-          reply += token;
-        },
-      );
-      for await (const segment of ttsSession.speak(tokens)) {
+      for await (const event of responderSession.respond(this.#history.messages())) {
         if (this.#interrupted) {
-          break;
+          break; // ends the iteration; the responder cancels in its finally
         }
+        if (event.type === "token") {
+          firstTokenAt ??= event.at;
+          tokenCount += 1;
+          reply += event.text;
+          continue;
+        }
+        const segment = event.segment;
         if (firstAudioAt === undefined) {
           firstAudioAt = this.#now();
           this.#setState("speaking");
@@ -334,17 +327,6 @@ export class ConversationLoop {
     assertTransition(this.#state, next);
     this.#state = next;
     this.#onState(next);
-  }
-}
-
-/** Tap a token stream for instrumentation without buffering it. */
-async function* instrument(
-  source: AsyncIterable<string>,
-  onToken: (token: string) => void,
-): AsyncGenerator<string> {
-  for await (const token of source) {
-    onToken(token);
-    yield token;
   }
 }
 
