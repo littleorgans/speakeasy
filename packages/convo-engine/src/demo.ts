@@ -20,6 +20,13 @@ import {
 } from "@speakeasy/speech-io";
 import { CerebrasChatModel, DEFAULT_CEREBRAS_MODEL } from "@speakeasy/llm";
 import { ConversationLoop, type AudioSource } from "./loop.ts";
+import type { VoiceResponder } from "./responder/contract.ts";
+import { CascadeResponder } from "./responder/cascade.ts";
+import {
+  DEFAULT_REALTIME_MODEL,
+  DEFAULT_REALTIME_VOICE,
+  OpenAIRealtimeResponder,
+} from "./responder/openai-realtime.ts";
 import { formatSessionSummary } from "./metrics.ts";
 
 /**
@@ -38,8 +45,10 @@ const FRAME_SAMPLES = (CAPTURE_SAMPLE_RATE * CAPTURE_FRAME_MS) / 1_000;
 const WAV_SILENCE_TAIL_MS = 700;
 
 type TtsEngine = "sherpa" | "cartesia";
+type ResponderKind = "cascade" | "realtime";
 
 type DemoArgs = {
+  responder: ResponderKind;
   llmModel: string;
   ttsEngine: TtsEngine;
   ttsModel: string | undefined;
@@ -53,39 +62,29 @@ type DemoArgs = {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
-  if (!process.env.CEREBRAS_API_KEY) {
-    console.error(
-      "CEREBRAS_API_KEY is not set. Add it to a gitignored .env and export it before running the convo demo.",
-    );
-    process.exitCode = 1;
-    return;
-  }
-
   const engine = new SherpaEngine();
   await engine.prepare();
   const stt = withRewrite(engine, { rules: DEFAULT_RULES, numbers: "off" });
-  const llm = new CerebrasChatModel({ config: { model: args.llmModel } });
 
-  const voice = buildTts(args);
-  if (!voice) {
+  const built = buildResponder(args);
+  if (!built) {
     process.exitCode = 1;
     return;
   }
-  const { tts, ttsConfig, ttsLabel } = voice;
+  const { responder, label } = built;
 
   const mic = args.wavPath
     ? new WavAudioSource(await readWavFrames(args.wavPath, CAPTURE_FRAME_MS))
     : new MicAudioSource((await resolveDefaultMicDevice()).spec);
 
   const loop = new ConversationLoop(
-    { stt, llm, tts, mic, createSink: (sampleRate) => createSegmentPlayer(sampleRate) },
+    { stt, responder, mic, createSink: (sampleRate) => createSegmentPlayer(sampleRate) },
     {
       systemPrompt: args.system,
       sttConfig: {
         sampleRate: CAPTURE_SAMPLE_RATE,
         endpoint: { mode: "eager" },
       },
-      ttsConfig,
       maxTurns: args.maxTurns,
       barge: args.barge,
       log: (line) => {
@@ -117,7 +116,7 @@ async function main(): Promise<void> {
   const restoreKeys = interactive ? setupKeys(loop) : undefined;
 
   console.log(
-    `speak-easy convo | stt=${engine.label} | llm=${args.llmModel} | tts=${ttsLabel} | source=${args.wavPath ? `wav ${args.wavPath}` : "microphone"}${args.barge ? " | barge-in on (use headphones)" : ""}`,
+    `speak-easy convo | stt=${engine.label} | responder=${label} | source=${args.wavPath ? `wav ${args.wavPath}` : "microphone"}${args.barge ? " | barge-in on (use headphones)" : ""}`,
   );
   console.log(
     interactive
@@ -131,6 +130,44 @@ async function main(): Promise<void> {
   restoreKeys?.();
   process.removeListener("SIGINT", onSigint);
   console.log(formatSessionSummary([...loop.metrics]));
+}
+
+/**
+ * Build the VoiceResponder from the args: the Cerebras+TTS cascade (default)
+ * or the fused OpenAI Realtime engine. Returns undefined (after printing a
+ * clear message) when the chosen engine's key is missing, so main() fails fast.
+ */
+function buildResponder(
+  args: DemoArgs,
+): { responder: VoiceResponder; label: string } | undefined {
+  if (args.responder === "realtime") {
+    if (!process.env.OPENAI_API_KEY) {
+      console.error(
+        "OPENAI_API_KEY is not set. Add it to a gitignored .env and export it before using --responder realtime.",
+      );
+      return undefined;
+    }
+    const voice = args.voice ?? DEFAULT_REALTIME_VOICE;
+    return {
+      responder: new OpenAIRealtimeResponder({ voice }),
+      label: `openai-realtime ${DEFAULT_REALTIME_MODEL} voice=${voice}`,
+    };
+  }
+  if (!process.env.CEREBRAS_API_KEY) {
+    console.error(
+      "CEREBRAS_API_KEY is not set. Add it to a gitignored .env and export it before running the convo demo.",
+    );
+    return undefined;
+  }
+  const voice = buildTts(args);
+  if (!voice) {
+    return undefined;
+  }
+  const llm = new CerebrasChatModel({ config: { model: args.llmModel } });
+  return {
+    responder: new CascadeResponder({ llm, tts: voice.tts, ttsConfig: voice.ttsConfig }),
+    label: `${args.llmModel} + ${voice.ttsLabel}`,
+  };
 }
 
 /**
@@ -266,6 +303,7 @@ class WavAudioSource implements AudioSource {
 
 function parseArgs(argv: string[]): DemoArgs {
   const args: DemoArgs = {
+    responder: "cascade",
     llmModel: DEFAULT_CEREBRAS_MODEL,
     ttsEngine: "sherpa",
     ttsModel: undefined,
@@ -286,8 +324,13 @@ function parseArgs(argv: string[]): DemoArgs {
       return next;
     };
     switch (flag) {
+      case "--": // pnpm forwards the separator verbatim; ignore it
+        break;
       case "--barge":
         args.barge = true;
+        break;
+      case "--responder":
+        args.responder = parseResponder(value());
         break;
       case "--model":
         args.llmModel = value();
@@ -320,6 +363,13 @@ function parseArgs(argv: string[]): DemoArgs {
 function parseTtsEngine(value: string): TtsEngine {
   if (value !== "sherpa" && value !== "cartesia") {
     throw new Error(`--tts must be "sherpa" or "cartesia", got "${value}"`);
+  }
+  return value;
+}
+
+function parseResponder(value: string): ResponderKind {
+  if (value !== "cascade" && value !== "realtime") {
+    throw new Error(`--responder must be "cascade" or "realtime", got "${value}"`);
   }
   return value;
 }
