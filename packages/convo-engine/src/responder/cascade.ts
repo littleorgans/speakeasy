@@ -60,6 +60,10 @@ class CascadeSession implements ResponderSession {
     yield* pending.splice(0); // trailing tokens after the last audio segment
   }
 
+  interrupt(): void {
+    // Breaking the consumer loop closes the local token and speech generators.
+  }
+
   async close(): Promise<void> {
     await this.#tts.close();
   }

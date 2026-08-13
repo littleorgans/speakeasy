@@ -1,0 +1,127 @@
+import {
+  CartesiaTextToSpeech,
+  DEFAULT_CARTESIA_MODEL,
+  DEFAULT_CARTESIA_VOICE,
+  DEFAULT_RULES,
+  parseTtsModelId,
+  SherpaEngine,
+  SherpaTextToSpeech,
+  withRewrite,
+  type TextToSpeech,
+  type TTSConfig,
+  type VoiceToText,
+} from "@speakeasy/speech-io";
+import { CerebrasChatModel, DEFAULT_CEREBRAS_MODEL } from "@speakeasy/llm";
+import { CascadeResponder } from "./responder/cascade.ts";
+import {
+  DEFAULT_REALTIME_MODEL,
+  DEFAULT_REALTIME_VOICE,
+  OpenAIRealtimeResponder,
+  parseRealtimeVoice,
+} from "./responder/openai-realtime.ts";
+import type { VoiceResponder } from "./responder/contract.ts";
+
+export type ResponderKind = "cascade" | "realtime";
+export type TtsEngine = "sherpa" | "cartesia";
+
+export type RuntimeConfig = {
+  responder?: ResponderKind;
+  llmModel?: string;
+  ttsEngine?: TtsEngine;
+  ttsModel?: string;
+  voice?: string;
+};
+
+export type ConversationRuntime = {
+  stt: VoiceToText;
+  responder: VoiceResponder;
+  label: string;
+};
+
+/**
+ * Shared composition root for every host. Concrete engine selection stays here
+ * so browser, terminal, and future desktop shells never grow parallel wiring.
+ */
+export async function createConversationRuntime(
+  config: RuntimeConfig = {},
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<ConversationRuntime> {
+  const responder = buildResponder(config, env);
+  const engine = new SherpaEngine();
+  await engine.prepare();
+  return {
+    stt: withRewrite(engine, { rules: DEFAULT_RULES, numbers: "off" }),
+    responder: responder.value,
+    label: `${engine.label} · ${responder.label}`,
+  };
+}
+
+function buildResponder(
+  config: RuntimeConfig,
+  env: NodeJS.ProcessEnv,
+): { value: VoiceResponder; label: string } {
+  if ((config.responder ?? "cascade") === "realtime") {
+    requireKey(env.OPENAI_API_KEY, "OPENAI_API_KEY", "realtime responder");
+    const voice = parseRealtimeVoice(config.voice ?? DEFAULT_REALTIME_VOICE);
+    const model = config.llmModel ?? DEFAULT_REALTIME_MODEL;
+    return {
+      value: new OpenAIRealtimeResponder({
+        model,
+        voice,
+        apiKey: () => env.OPENAI_API_KEY,
+      }),
+      label: `OpenAI Realtime ${model} · ${voice}`,
+    };
+  }
+
+  requireKey(env.CEREBRAS_API_KEY, "CEREBRAS_API_KEY", "cascade responder");
+  const voice = buildTts(config, env);
+  const model = config.llmModel ?? DEFAULT_CEREBRAS_MODEL;
+  return {
+    value: new CascadeResponder({
+      llm: new CerebrasChatModel({
+        config: { model },
+        apiKey: () => env.CEREBRAS_API_KEY,
+      }),
+      tts: voice.value,
+      ttsConfig: voice.config,
+    }),
+    label: `${model} · ${voice.label}`,
+  };
+}
+
+function buildTts(
+  config: RuntimeConfig,
+  env: NodeJS.ProcessEnv,
+): { value: TextToSpeech; config: TTSConfig; label: string } {
+  if ((config.ttsEngine ?? "sherpa") === "cartesia") {
+    requireKey(env.CARTESIA_API_KEY, "CARTESIA_API_KEY", "Cartesia voice");
+    const voice = config.voice ?? DEFAULT_CARTESIA_VOICE;
+    return {
+      value: new CartesiaTextToSpeech({ apiKey: () => env.CARTESIA_API_KEY }),
+      config: { model: config.ttsModel, voice },
+      label: `Cartesia ${config.ttsModel ?? DEFAULT_CARTESIA_MODEL} · ${voice}`,
+    };
+  }
+
+  const model = parseTtsModelId(config.ttsModel ?? "kokoro-v0.19");
+  const speaker = config.voice === undefined ? undefined : Number(config.voice);
+  if (speaker !== undefined && !Number.isFinite(speaker)) {
+    throw new Error(`Sherpa voice must be a numeric speaker id, got "${config.voice}"`);
+  }
+  return {
+    value: new SherpaTextToSpeech(),
+    config: { model, voice: speaker },
+    label: `${model}${speaker === undefined ? "" : ` · voice ${speaker}`}`,
+  };
+}
+
+function requireKey(
+  value: string | undefined,
+  name: string,
+  purpose: string,
+): asserts value is string {
+  if (!value) {
+    throw new Error(`${name} is required for the ${purpose}`);
+  }
+}

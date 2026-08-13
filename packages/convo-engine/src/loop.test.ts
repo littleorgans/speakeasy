@@ -10,6 +10,7 @@ import type {
 } from "@speakeasy/speech-io";
 import type { ChatMessage, ChatModel } from "@speakeasy/llm";
 import { ConversationLoop, type AudioSink, type AudioSource } from "./loop.ts";
+import type { ConversationEvent } from "./events.ts";
 import { CascadeResponder } from "./responder/cascade.ts";
 import type { ConvoState } from "./state.ts";
 
@@ -23,10 +24,13 @@ const now = () => performance.now();
 /** STT fake: an EventEmitter session whose finals the test triggers directly. */
 class FakeSTTSession extends EventEmitter implements STTSession {
   readonly pushed: Float32Array[] = [];
+  flushes = 0;
   pushAudio(frame: Float32Array): void {
     this.pushed.push(frame);
   }
-  flush(): void {}
+  flush(): void {
+    this.flushes += 1;
+  }
   reset(): void {}
   async end(): Promise<void> {}
   /** Mimic sherpa eager commit: endpoint then final in one tick. */
@@ -129,8 +133,9 @@ class FakeSink implements AudioSink {
     }
     this.segments.push(seg);
   }
-  interrupt(): void {
+  async interrupt(): Promise<number> {
     this.interrupted += 1;
+    return 125;
   }
   async end(): Promise<void> {
     this.ended += 1;
@@ -156,16 +161,20 @@ function makeLoop(llm: FakeLLM, options: { maxTurns?: number } = {}) {
   const sink = new FakeSink();
   const states: ConvoState[] = [];
   const logs: string[] = [];
+  const events: ConversationEvent[] = [];
   const loop = new ConversationLoop(
     { stt, responder: cascade(llm, tts), mic, createSink: () => sink },
     {
       maxTurns: options.maxTurns,
       now,
-      log: (line) => logs.push(line),
-      onState: (state) => states.push(state),
+      onEvent: (event) => {
+        events.push(event);
+        if (event.type === "state") states.push(event.state);
+        if (event.type === "notice") logs.push(event.message);
+      },
     },
   );
-  return { loop, stt, tts, mic, sink, states, logs };
+  return { loop, stt, tts, mic, sink, states, logs, events };
 }
 
 test("a happy turn walks listening -> thinking -> speaking -> listening", async () => {
@@ -185,9 +194,23 @@ test("a happy turn walks listening -> thinking -> speaking -> listening", async 
   assert.equal(tts.session.closed, 1);
 });
 
+test("commitInput flushes only while the loop is listening", async () => {
+  const { loop, stt } = makeLoop(new FakeLLM([]));
+  loop.commitInput();
+  assert.equal(stt.session.flushes, 0);
+
+  await loop.start();
+  loop.commitInput();
+  assert.equal(stt.session.flushes, 1);
+
+  await loop.stop();
+  loop.commitInput();
+  assert.equal(stt.session.flushes, 1);
+});
+
 test("the user message and assistant reply are appended to history", async () => {
   const llm = new FakeLLM(["The ", "answer ", "is ", "42."]);
-  const { loop, stt } = makeLoop(llm, { maxTurns: 1 });
+  const { loop, stt, events } = makeLoop(llm, { maxTurns: 1 });
   await loop.start();
   stt.session.say("what is it");
   await loop.done;
@@ -197,6 +220,29 @@ test("the user message and assistant reply are appended to history", async () =>
   const roles = llm.lastMessages.map((m) => m.role);
   assert.deepEqual(roles, ["system", "user"]);
   assert.equal(llm.lastMessages.at(-1)?.content, "what is it");
+  assert.deepEqual(
+    events.filter((event) => event.type === "transcript"),
+    [
+      {
+        type: "transcript",
+        role: "user",
+        text: "what is it",
+        final: true,
+        mode: "replace",
+      },
+      { type: "transcript", role: "assistant", text: "The ", final: false, mode: "append" },
+      { type: "transcript", role: "assistant", text: "answer ", final: false, mode: "append" },
+      { type: "transcript", role: "assistant", text: "is ", final: false, mode: "append" },
+      { type: "transcript", role: "assistant", text: "42.", final: false, mode: "append" },
+      {
+        type: "transcript",
+        role: "assistant",
+        text: "The answer is 42.",
+        final: true,
+        mode: "replace",
+      },
+    ],
+  );
 });
 
 test("first audio is produced before the token stream drains", async () => {
@@ -237,7 +283,7 @@ test("the loop recovers and serves a second turn after an error", async () => {
       mic: new FakeMic(),
       createSink: () => sink,
     },
-    { maxTurns: 2, now, log: () => {} },
+    { maxTurns: 2, now },
   );
   await loop.start();
   stt.session.say("first");
@@ -305,7 +351,13 @@ test("interrupt() during playback kills the sink and returns to listening", asyn
   const states: ConvoState[] = [];
   const loop = new ConversationLoop(
     { stt, responder: cascade(new FakeLLM(["Hello. ", "World."]), tts), mic: new FakeMic(), createSink: () => sink },
-    { maxTurns: 1, now, log: () => {}, onState: (s) => states.push(s) },
+    {
+      maxTurns: 1,
+      now,
+      onEvent: (event) => {
+        if (event.type === "state") states.push(event.state);
+      },
+    },
   );
   await loop.start();
   stt.session.say("hi");
@@ -334,7 +386,7 @@ test("barge-in: sustained mic speech during playback interrupts via the VAD", as
   const mic = new FakeMic();
   const loop = new ConversationLoop(
     { stt, responder: cascade(new FakeLLM(["Hello. ", "World."]), tts), mic, createSink: () => sink },
-    { maxTurns: 1, now, log: () => {}, barge: true, bargeThreshold: 0.05 },
+    { maxTurns: 1, now, barge: true, bargeThreshold: 0.05 },
   );
   await loop.start();
   stt.session.say("hi");
@@ -360,7 +412,7 @@ test("barge-in stays off by default: loud frames while speaking do not interrupt
   const mic = new FakeMic();
   const loop = new ConversationLoop(
     { stt, responder: cascade(new FakeLLM(["Hi. ", "Bye."]), tts), mic, createSink: () => sink },
-    { maxTurns: 1, now, log: () => {} }, // barge not enabled
+    { maxTurns: 1, now }, // barge not enabled
   );
   await loop.start();
   stt.session.say("hi");

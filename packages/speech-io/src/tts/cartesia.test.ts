@@ -105,10 +105,14 @@ test("synth throws when no API key is available", async () => {
   await assert.rejects(() => collect(session.speak("Hi.")), /CARTESIA_API_KEY is not set/);
 });
 
-// Gated live smoke: only runs with a real key. Prints timing, never audio.
+// Explicit live smoke. An ambient key alone must never spend provider quota.
 test(
   "live: synthesizes a sentence to real PCM",
-  { skip: !process.env.CARTESIA_API_KEY },
+  {
+    skip:
+      process.env.SPEAKEASY_LIVE_CARTESIA !== "1" ||
+      !process.env.CARTESIA_API_KEY,
+  },
   async () => {
     const tts = new CartesiaTextToSpeech();
     const session = await tts.open({ voice: DEFAULT_CARTESIA_VOICE });

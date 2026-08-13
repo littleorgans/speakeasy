@@ -1,12 +1,9 @@
 {
-  "name": "@speakeasy/convo-engine",
+  "name": "@speakeasy/browser-voice",
   "private": true,
   "version": "0.0.0",
-  "description": "Half-duplex speech-to-speech conversation loop over the STT, LLM, and TTS contracts.",
+  "description": "Browser microphone, playback, and conversation UI for speak-easy.",
   "type": "module",
-  "exports": {
-    ".": "./src/index.ts"
-  },
   "engines": {
     "node": ">=22.6.0"
   },
@@ -15,8 +12,7 @@
     "test": "node --test \"src/**/*.test.ts\""
   },
   "dependencies": {
-    "@speakeasy/llm": "workspace:*",
-    "@speakeasy/speech-io": "workspace:*",
+    "@speakeasy/convo-engine": "workspace:*",
     "ws": "^8.21.1"
   },
   "devDependencies": {
