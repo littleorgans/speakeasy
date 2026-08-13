@@ -32,6 +32,8 @@ export interface ResponderSession {
    * may use only the newest user message.
    */
   respond(messages: ChatMessage[]): AsyncIterable<ResponderEvent>;
+  /** Stop the active reply. The position resolves to audio actually played locally. */
+  interrupt(playedAudioMs: Promise<number | undefined>): void;
   close(): Promise<void>;
 }
 

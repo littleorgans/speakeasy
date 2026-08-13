@@ -24,7 +24,28 @@ import type { ResponderEvent, ResponderSession, VoiceResponder } from "./contrac
 export const REALTIME_URL = "wss://api.openai.com/v1/realtime";
 export const DEFAULT_REALTIME_MODEL = "gpt-realtime-2.1-mini";
 export const DEFAULT_REALTIME_VOICE = "marin";
+export const REALTIME_VOICES = [
+  "alloy",
+  "ash",
+  "ballad",
+  "coral",
+  "echo",
+  "sage",
+  "shimmer",
+  "verse",
+  "marin",
+  "cedar",
+] as const;
+export type RealtimeVoice = (typeof REALTIME_VOICES)[number];
 const OUTPUT_SAMPLE_RATE = 24_000;
+const TRUNCATE_ACK_TIMEOUT_MS = 5_000;
+
+export function parseRealtimeVoice(value: string): RealtimeVoice {
+  if (REALTIME_VOICES.includes(value as RealtimeVoice)) {
+    return value as RealtimeVoice;
+  }
+  throw new Error(`Unsupported Realtime voice "${value}"`);
+}
 
 /** The subset of the ws client the adapter drives; fakes implement this. */
 export type SocketLike = {
@@ -38,7 +59,7 @@ export type SocketLike = {
 export type RealtimeOptions = {
   model?: string;
   /** Realtime voice name, e.g. "marin", "cedar". */
-  voice?: string;
+  voice?: RealtimeVoice;
   /** Key source, read on open(); defaults to the environment. */
   apiKey?: () => string | undefined;
   /** Injectable socket factory; defaults to `ws` with a bearer header. */
@@ -55,7 +76,7 @@ export class OpenAIRealtimeResponder implements VoiceResponder {
 
   constructor(options: RealtimeOptions = {}) {
     this.#model = options.model ?? DEFAULT_REALTIME_MODEL;
-    this.#voice = options.voice ?? DEFAULT_REALTIME_VOICE;
+    this.#voice = parseRealtimeVoice(options.voice ?? DEFAULT_REALTIME_VOICE);
     this.#apiKey = options.apiKey ?? (() => process.env.OPENAI_API_KEY);
     this.#createSocket =
       options.createSocket ??
@@ -84,10 +105,30 @@ export class OpenAIRealtimeResponder implements VoiceResponder {
 /** A server event, parsed leniently: only the routed fields are typed. */
 type ServerEvent = {
   type: string;
+  event_id?: string;
   response?: { id?: string };
   response_id?: string;
+  item_id?: string;
+  content_index?: number;
+  audio_end_ms?: number;
+  item?: { id?: string; type?: string };
   delta?: string;
-  error?: { message?: string };
+  error?: { type?: string; code?: string; message?: string; event_id?: string };
+};
+
+type ActiveTurn = {
+  responseId?: string;
+  itemId?: string;
+  cancelled: boolean;
+  responseDone: boolean;
+  cancelEventId?: string;
+  deliveredAudioSamples: number;
+  audioEndMs?: number;
+  truncateSent: boolean;
+  truncateEventId?: string;
+  truncateAudioEndMs?: number;
+  truncateAckTimer?: ReturnType<typeof setTimeout>;
+  resolveInterruption?: () => void;
 };
 
 class RealtimeSession implements ResponderSession {
@@ -95,9 +136,14 @@ class RealtimeSession implements ResponderSession {
   readonly #voice: string;
   readonly #now: () => number;
   readonly #queue = new EventQueue<ServerEvent>();
+  readonly #cancelledTurns = new Map<string, ActiveTurn>();
   #openPromise: Promise<void>;
   #instructions: string | undefined;
   #closed = false;
+  #eventSequence = 0;
+  #fatalError: Error | undefined;
+  #activeTurn: ActiveTurn | undefined;
+  #interruptionDone: Promise<void> = Promise.resolve();
 
   constructor(socket: SocketLike, voice: string, now: () => number) {
     this.#socket = socket;
@@ -118,16 +164,39 @@ class RealtimeSession implements ResponderSession {
         return; // ignore unparseable frames
       }
       if (event.type === "error") {
-        this.#queue.fail(
-          new Error(`realtime error: ${event.error?.message ?? "unknown"}`),
+        const turn = this.#activeTurn;
+        const cancelEventId = event.error?.event_id;
+        const cancelledTurn = cancelEventId
+          ? this.#cancelledTurns.get(cancelEventId)
+          : undefined;
+        if (
+          cancelEventId &&
+          cancelledTurn &&
+          isCompletedResponseCancel(event, cancelledTurn)
+        ) {
+          this.#cancelledTurns.delete(cancelEventId);
+          cancelledTurn.responseDone = true;
+          this.#truncateInterruptedTurn(cancelledTurn);
+          if (cancelledTurn === turn) this.#queue.push(event);
+          return;
+        }
+        const error = new Error(
+          `realtime error: ${event.error?.message ?? "unknown"}`,
         );
+        this.#fatalError ??= error;
+        if (turn) this.#resolveInterruption(turn);
+        this.#queue.fail(error);
         return;
       }
+      this.#observeTurn(event);
       this.#queue.push(event);
     });
     socket.on("close", () => {
       if (!this.#closed) {
-        this.#queue.fail(new Error("realtime socket closed unexpectedly"));
+        const error = new Error("realtime socket closed unexpectedly");
+        this.#fatalError ??= error;
+        if (this.#activeTurn) this.#resolveInterruption(this.#activeTurn);
+        this.#queue.fail(error);
       }
     });
   }
@@ -150,6 +219,8 @@ class RealtimeSession implements ResponderSession {
   }
 
   async *respond(messages: ChatMessage[]): AsyncGenerator<ResponderEvent> {
+    await this.#interruptionDone;
+    if (this.#fatalError) throw this.#fatalError;
     const start = this.#now();
     this.#syncInstructions(messages);
     const user = messages.findLast((message) => message.role === "user");
@@ -164,24 +235,34 @@ class RealtimeSession implements ResponderSession {
         content: [{ type: "input_text", text: user.content }],
       },
     });
+    const turn: ActiveTurn = {
+      cancelled: false,
+      responseDone: false,
+      deliveredAudioSamples: 0,
+      truncateSent: false,
+    };
+    this.#activeTurn = turn;
     this.#send({ type: "response.create" });
 
     // Route by response id so a cancelled turn's stragglers never leak into
     // the next one: events before our response.created (or tagged with a
     // different id) are skipped.
-    let responseId: string | undefined;
     let index = 0;
     let done = false;
     try {
       for (;;) {
         const event = await this.#queue.next();
-        if (responseId === undefined) {
+        if (turn.cancelled && turn.responseDone) {
+          done = true;
+          return;
+        }
+        if (turn.responseId === undefined) {
           if (event.type === "response.created") {
-            responseId = event.response?.id;
+            turn.responseId = event.response?.id;
           }
           continue;
         }
-        if (event.response_id !== undefined && event.response_id !== responseId) {
+        if (event.response_id !== undefined && event.response_id !== turn.responseId) {
           continue;
         }
         switch (event.type) {
@@ -193,6 +274,7 @@ class RealtimeSession implements ResponderSession {
           case "response.output_audio.delta":
             if (event.delta) {
               const samples = decodePcm16(event.delta);
+              turn.deliveredAudioSamples += samples.length;
               yield {
                 type: "audio",
                 segment: {
@@ -215,17 +297,123 @@ class RealtimeSession implements ResponderSession {
         }
       }
     } finally {
-      // Early exit (barge-in breaks the consumer's loop): stop generation so
-      // the server does not keep speaking into a dead sink.
-      if (!done && !this.#closed) {
-        this.#send({ type: "response.cancel" });
+      if (!done && !this.#closed && !turn.cancelled) {
+        this.#cancel(turn, Promise.resolve(undefined));
       }
     }
   }
 
+  interrupt(playedAudioMs: Promise<number | undefined>): void {
+    const turn = this.#activeTurn;
+    if (!turn || turn.cancelled || this.#closed) {
+      return;
+    }
+    this.#cancel(turn, playedAudioMs);
+  }
+
   async close(): Promise<void> {
     this.#closed = true;
+    if (this.#activeTurn) this.#resolveInterruption(this.#activeTurn);
     this.#socket.close();
+  }
+
+  #cancel(turn: ActiveTurn, playedAudioMs: Promise<number | undefined>): void {
+    turn.cancelled = true;
+    if (!turn.responseDone) {
+      turn.cancelEventId = `cancel_${++this.#eventSequence}`;
+      this.#cancelledTurns.set(turn.cancelEventId, turn);
+      this.#send({
+        event_id: turn.cancelEventId,
+        type: "response.cancel",
+        ...(turn.responseId ? { response_id: turn.responseId } : {}),
+      });
+    }
+    this.#interruptionDone = new Promise((resolve) => {
+      turn.resolveInterruption = resolve;
+    });
+    void playedAudioMs.then(
+      (milliseconds) => {
+        turn.audioEndMs = Math.max(0, Math.floor(milliseconds ?? 0));
+        this.#truncateInterruptedTurn(turn);
+      },
+      () => {
+        turn.audioEndMs = 0;
+        this.#truncateInterruptedTurn(turn);
+      },
+    );
+  }
+
+  #observeTurn(event: ServerEvent): void {
+    const turn = this.#activeTurn;
+    if (!turn) return;
+    if (event.type === "response.created" && turn.responseId === undefined) {
+      turn.responseId = event.response?.id;
+      return;
+    }
+    if (event.response_id !== undefined && event.response_id !== turn.responseId) {
+      return;
+    }
+    if (event.type === "response.output_item.added" && event.item?.type === "message") {
+      turn.itemId = event.item.id;
+    }
+    if (event.type === "response.output_audio.delta") {
+      turn.itemId ??= event.item_id;
+    }
+    if (event.type === "response.done") {
+      turn.responseDone = true;
+      if (turn.cancelEventId) this.#cancelledTurns.delete(turn.cancelEventId);
+    }
+    if (
+      event.type === "conversation.item.truncated" &&
+      event.item_id === turn.itemId &&
+      event.content_index === 0 &&
+      event.audio_end_ms === turn.truncateAudioEndMs
+    ) {
+      this.#resolveInterruption(turn);
+      return;
+    }
+    this.#truncateInterruptedTurn(turn);
+  }
+
+  #truncateInterruptedTurn(turn: ActiveTurn): void {
+    if (this.#closed) return;
+    if (!turn.cancelled || turn.audioEndMs === undefined || turn.truncateSent) {
+      return;
+    }
+    if (turn.itemId) {
+      turn.truncateSent = true;
+      const deliveredAudioMs = Math.floor(
+        (turn.deliveredAudioSamples / OUTPUT_SAMPLE_RATE) * 1_000,
+      );
+      turn.truncateAudioEndMs = Math.min(turn.audioEndMs, deliveredAudioMs);
+      turn.truncateEventId = `truncate_${++this.#eventSequence}`;
+      this.#send({
+        event_id: turn.truncateEventId,
+        type: "conversation.item.truncate",
+        item_id: turn.itemId,
+        content_index: 0,
+        audio_end_ms: turn.truncateAudioEndMs,
+      });
+      turn.truncateAckTimer = setTimeout(() => {
+        const error = new Error("realtime truncate acknowledgement timed out");
+        this.#fatalError ??= error;
+        this.#resolveInterruption(turn);
+        this.#queue.fail(error);
+      }, TRUNCATE_ACK_TIMEOUT_MS);
+      return;
+    }
+    if (turn.responseDone) {
+      this.#resolveInterruption(turn);
+    }
+  }
+
+  #resolveInterruption(turn: ActiveTurn): void {
+    if (turn.truncateAckTimer) {
+      clearTimeout(turn.truncateAckTimer);
+      turn.truncateAckTimer = undefined;
+    }
+    turn.resolveInterruption?.();
+    turn.resolveInterruption = undefined;
   }
 
   /** Install/refresh the system prompt as session instructions when it changes. */
@@ -243,6 +431,17 @@ class RealtimeSession implements ResponderSession {
   #send(payload: unknown): void {
     this.#socket.send(JSON.stringify(payload));
   }
+}
+
+function isCompletedResponseCancel(event: ServerEvent, turn: ActiveTurn): boolean {
+  return (
+    turn.cancelled &&
+    turn.cancelEventId !== undefined &&
+    event.error?.event_id === turn.cancelEventId &&
+    /^Cancellation failed: no active response found\.?$/i.test(
+      event.error.message ?? "",
+    )
+  );
 }
 
 /** Base64 PCM16 mono -> Float32 samples (the AudioSegment/player format). */

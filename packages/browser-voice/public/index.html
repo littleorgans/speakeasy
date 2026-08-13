@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#11120f" />
+    <title>Speak Easy · Live room</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/room-controls.css" />
+    <script src="/app.js" type="module"></script>
+  </head>
+  <body data-session="stopped" data-state="idle" data-mode="natural" data-holding="false">
+    <a class="skip-link" href="#conversation">Skip to conversation</a>
+    <div class="atmosphere" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Speak Easy home">
+        <span class="brand-mark" aria-hidden="true">SE</span>
+        <span>
+          <strong>Speak Easy</strong>
+          <small>Local voice room · 001</small>
+        </span>
+      </a>
+      <div class="connection" aria-live="polite">
+        <span class="connection-dot" aria-hidden="true"></span>
+        <span id="connection-label">Room closed</span>
+      </div>
+      <button class="quiet-button" id="settings-button" type="button">
+        <span>Room setup</span>
+        <span aria-hidden="true">↗</span>
+      </button>
+    </header>
+
+    <main class="room-shell">
+      <section class="voice-stage" aria-labelledby="status-word">
+        <div class="stage-index" aria-hidden="true">01 / VOICE</div>
+        <div class="state-copy">
+          <p class="state-kicker" id="state-kicker">A quiet line, ready when you are</p>
+          <h1 id="status-word">Come in.</h1>
+          <p class="state-caption" id="state-caption">
+            Start the room, speak naturally, then pause. Your reply will arrive as audio.
+          </p>
+        </div>
+
+        <div class="signal-field" aria-hidden="true">
+          <div class="signal-rule"></div>
+          <div class="signal-bars" id="signal-bars"></div>
+          <span class="signal-origin"></span>
+          <span class="signal-label">LIVE INPUT</span>
+        </div>
+
+        <div class="control-deck">
+          <button class="main-control" id="main-control" type="button">
+            <span class="control-rings" aria-hidden="true"></span>
+            <span class="control-face">
+              <span class="control-number">01</span>
+              <strong id="main-control-label">Enter room</strong>
+              <small id="main-control-hint">Microphone permission required</small>
+            </span>
+          </button>
+
+          <div class="secondary-controls" aria-label="Session controls">
+            <button id="mute-button" type="button" disabled>
+              <span class="button-light" aria-hidden="true"></span>
+              <span id="mute-label">Mute mic</span>
+            </button>
+            <button id="end-button" type="button" disabled>
+              <span class="stop-square" aria-hidden="true"></span>
+              End room
+            </button>
+          </div>
+        </div>
+
+        <dl class="latency-strip" aria-label="Latest turn latency">
+          <div>
+            <dt>Transcript</dt>
+            <dd id="metric-final">—</dd>
+          </div>
+          <div>
+            <dt>First thought</dt>
+            <dd id="metric-token">—</dd>
+          </div>
+          <div class="headline-metric">
+            <dt>First voice</dt>
+            <dd id="metric-audio">—</dd>
+          </div>
+        </dl>
+      </section>
+
+      <aside class="transcript-panel" id="conversation" aria-labelledby="conversation-title">
+        <header class="panel-header">
+          <div>
+            <p>02 / TRANSCRIPT</p>
+            <h2 id="conversation-title">What was said</h2>
+          </div>
+          <button id="clear-button" class="text-button" type="button">Clear</button>
+        </header>
+
+        <div class="transcript-scroll" id="transcript-scroll" aria-live="polite">
+          <div class="empty-conversation" id="empty-conversation">
+            <span aria-hidden="true">“</span>
+            <p>The conversation will collect here while the room stays open.</p>
+          </div>
+          <ol class="turn-list" id="turn-list"></ol>
+        </div>
+
+        <footer class="panel-footer">
+          <span class="privacy-mark" aria-hidden="true"></span>
+          <p>
+            Microphone audio stays on this machine until an enabled engine handles the turn.
+          </p>
+        </footer>
+      </aside>
+    </main>
+
+    <footer class="page-footer">
+      <span>Built for interruption, silence, and the way people actually speak.</span>
+      <span id="runtime-label">Engine waiting</span>
+    </footer>
+
+    <dialog class="settings-dialog" id="settings-dialog">
+      <form method="dialog" class="settings-form">
+        <header>
+          <div>
+            <p>ROOM SETUP</p>
+            <h2>Before we speak</h2>
+          </div>
+          <button class="dialog-close" value="cancel" aria-label="Close settings">×</button>
+        </header>
+
+        <div class="settings-body">
+        <fieldset class="mode-field">
+          <legend>Conversation mode</legend>
+          <label>
+            <input type="radio" name="conversation-mode" value="natural" checked />
+            <span>
+              <strong>Natural pauses</strong>
+              <small>The room listens continuously and sends after a quiet pause.</small>
+            </span>
+          </label>
+          <label>
+            <input type="radio" name="conversation-mode" value="hold" />
+            <span>
+              <strong>Hold to speak</strong>
+              <small>Hold the main control or Space, then release to send.</small>
+            </span>
+          </label>
+        </fieldset>
+
+        <label class="field" id="pause-field">
+          <span>Pause before sending</span>
+          <span class="number-field">
+            <input id="pause-input" type="number" min="200" max="3000" step="50" value="700" required />
+            <span>ms</span>
+          </span>
+          <small>How long a quiet pause can last before the transcript is committed.</small>
+        </label>
+
+        <label class="field">
+          <span>Microphone</span>
+          <select id="microphone-select">
+            <option value="">System default</option>
+          </select>
+          <small>Browser echo cancellation and noise suppression stay enabled.</small>
+        </label>
+
+        <label class="field">
+          <span>Voice</span>
+          <select id="voice-select">
+            <option value="marin" selected>Marin</option>
+            <option value="cedar">Cedar</option>
+            <option value="alloy">Alloy</option>
+            <option value="ash">Ash</option>
+            <option value="ballad">Ballad</option>
+            <option value="coral">Coral</option>
+            <option value="echo">Echo</option>
+            <option value="sage">Sage</option>
+            <option value="shimmer">Shimmer</option>
+            <option value="verse">Verse</option>
+          </select>
+          <small>The selected Realtime voice applies the next time you enter the room.</small>
+        </label>
+
+        <label class="field">
+          <span>How should the voice behave?</span>
+          <textarea id="system-prompt" rows="4" placeholder="Warm, concise, curious. Ask one question at a time."></textarea>
+        </label>
+
+        <label class="switch-field" id="barge-field">
+          <span>
+            <strong>Voice interruption</strong>
+            <small>Speaking over the reply cuts playback and reopens the microphone.</small>
+          </span>
+          <input id="barge-toggle" type="checkbox" checked />
+          <span class="switch" aria-hidden="true"></span>
+        </label>
+        </div>
+
+        <footer>
+          <button class="save-button" id="save-settings" value="default">Save room setup</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="alert" hidden></div>
+  </body>
+</html>

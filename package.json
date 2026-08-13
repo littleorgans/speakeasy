@@ -13,6 +13,7 @@
     "bench": "node packages/speech-io/src/bench/run.ts",
     "demo": "node packages/speech-io/src/demo/ptt.ts",
     "tts": "node packages/speech-io/src/tts/run.ts",
-    "convo": "node packages/convo-engine/src/demo.ts"
+    "convo": "node packages/convo-engine/src/demo.ts",
+    "browser": "node packages/browser-voice/src/server.ts"
   }
 }

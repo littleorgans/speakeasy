@@ -1,32 +1,21 @@
 import {
   CAPTURE_FRAME_MS,
   CAPTURE_SAMPLE_RATE,
-  CartesiaTextToSpeech,
   createSegmentPlayer,
-  DEFAULT_CARTESIA_MODEL,
-  DEFAULT_CARTESIA_VOICE,
-  DEFAULT_RULES,
-  parseTtsModelId,
   readWavFrames,
   resolveDefaultMicDevice,
-  SherpaEngine,
-  SherpaTextToSpeech,
   startMicCapture,
-  withRewrite,
   type MicCapture,
-  type TextToSpeech,
-  type TTSConfig,
   type WavAudio,
 } from "@speakeasy/speech-io";
-import { CerebrasChatModel, DEFAULT_CEREBRAS_MODEL } from "@speakeasy/llm";
 import { ConversationLoop, type AudioSource } from "./loop.ts";
-import type { VoiceResponder } from "./responder/contract.ts";
-import { CascadeResponder } from "./responder/cascade.ts";
 import {
-  DEFAULT_REALTIME_MODEL,
-  DEFAULT_REALTIME_VOICE,
-  OpenAIRealtimeResponder,
-} from "./responder/openai-realtime.ts";
+  createConversationRuntime,
+  type ResponderKind,
+  type RuntimeConfig,
+  type TtsEngine,
+} from "./runtime.ts";
+import type { ConversationEvent } from "./events.ts";
 import { formatSessionSummary } from "./metrics.ts";
 
 /**
@@ -44,15 +33,7 @@ const FRAME_SAMPLES = (CAPTURE_SAMPLE_RATE * CAPTURE_FRAME_MS) / 1_000;
 /** Silence appended after a --wav utterance so the endpoint detector fires. */
 const WAV_SILENCE_TAIL_MS = 700;
 
-type TtsEngine = "sherpa" | "cartesia";
-type ResponderKind = "cascade" | "realtime";
-
-type DemoArgs = {
-  responder: ResponderKind;
-  llmModel: string;
-  ttsEngine: TtsEngine;
-  ttsModel: string | undefined;
-  voice: string | undefined;
+type DemoArgs = RuntimeConfig & {
   system: string | undefined;
   wavPath: string | undefined;
   maxTurns: number | undefined;
@@ -62,23 +43,26 @@ type DemoArgs = {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
-  const engine = new SherpaEngine();
-  await engine.prepare();
-  const stt = withRewrite(engine, { rules: DEFAULT_RULES, numbers: "off" });
-
-  const built = buildResponder(args);
-  if (!built) {
+  let runtime;
+  try {
+    runtime = await createConversationRuntime(args);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
     return;
   }
-  const { responder, label } = built;
 
   const mic = args.wavPath
     ? new WavAudioSource(await readWavFrames(args.wavPath, CAPTURE_FRAME_MS))
     : new MicAudioSource((await resolveDefaultMicDevice()).spec);
 
   const loop = new ConversationLoop(
-    { stt, responder, mic, createSink: (sampleRate) => createSegmentPlayer(sampleRate) },
+    {
+      stt: runtime.stt,
+      responder: runtime.responder,
+      mic,
+      createSink: (sampleRate) => createSegmentPlayer(sampleRate),
+    },
     {
       systemPrompt: args.system,
       sttConfig: {
@@ -87,20 +71,7 @@ async function main(): Promise<void> {
       },
       maxTurns: args.maxTurns,
       barge: args.barge,
-      log: (line) => {
-        clearPartial();
-        console.log(line);
-      },
-      onState: (state) => {
-        clearPartial();
-        console.log(`[state] ${state}`);
-      },
-      onPartial: (text) => {
-        if (process.stdout.isTTY) {
-          process.stdout.write(`\r\x1b[K… ${text}`);
-        }
-      },
-      onInterrupt: clearPartial,
+      onEvent: printTerminalEvent,
     },
   );
 
@@ -116,7 +87,7 @@ async function main(): Promise<void> {
   const restoreKeys = interactive ? setupKeys(loop) : undefined;
 
   console.log(
-    `speak-easy convo | stt=${engine.label} | responder=${label} | source=${args.wavPath ? `wav ${args.wavPath}` : "microphone"}${args.barge ? " | barge-in on (use headphones)" : ""}`,
+    `speak-easy convo | ${runtime.label} | source=${args.wavPath ? `wav ${args.wavPath}` : "microphone"}${args.barge ? " | barge-in on (use headphones)" : ""}`,
   );
   console.log(
     interactive
@@ -132,79 +103,25 @@ async function main(): Promise<void> {
   console.log(formatSessionSummary([...loop.metrics]));
 }
 
-/**
- * Build the VoiceResponder from the args: the Cerebras+TTS cascade (default)
- * or the fused OpenAI Realtime engine. Returns undefined (after printing a
- * clear message) when the chosen engine's key is missing, so main() fails fast.
- */
-function buildResponder(
-  args: DemoArgs,
-): { responder: VoiceResponder; label: string } | undefined {
-  if (args.responder === "realtime") {
-    if (!process.env.OPENAI_API_KEY) {
-      console.error(
-        "OPENAI_API_KEY is not set. Add it to a gitignored .env and export it before using --responder realtime.",
-      );
-      return undefined;
-    }
-    const voice = args.voice ?? DEFAULT_REALTIME_VOICE;
-    return {
-      responder: new OpenAIRealtimeResponder({ voice }),
-      label: `openai-realtime ${DEFAULT_REALTIME_MODEL} voice=${voice}`,
-    };
-  }
-  if (!process.env.CEREBRAS_API_KEY) {
-    console.error(
-      "CEREBRAS_API_KEY is not set. Add it to a gitignored .env and export it before running the convo demo.",
-    );
-    return undefined;
-  }
-  const voice = buildTts(args);
-  if (!voice) {
-    return undefined;
-  }
-  const llm = new CerebrasChatModel({ config: { model: args.llmModel } });
-  return {
-    responder: new CascadeResponder({ llm, tts: voice.tts, ttsConfig: voice.ttsConfig }),
-    label: `${args.llmModel} + ${voice.ttsLabel}`,
-  };
-}
-
-/**
- * Select the TTS engine from --tts. Returns undefined (after printing a clear
- * message) when the chosen engine's key is missing, so main() can fail fast.
- */
-function buildTts(
-  args: DemoArgs,
-): { tts: TextToSpeech; ttsConfig: TTSConfig; ttsLabel: string } | undefined {
-  if (args.ttsEngine === "cartesia") {
-    if (!process.env.CARTESIA_API_KEY) {
-      console.error(
-        "CARTESIA_API_KEY is not set. Add it to a gitignored .env and export it before using --tts cartesia.",
-      );
-      return undefined;
-    }
-    const voice = args.voice ?? DEFAULT_CARTESIA_VOICE;
-    return {
-      tts: new CartesiaTextToSpeech(),
-      ttsConfig: { model: args.ttsModel, voice },
-      ttsLabel: `cartesia ${args.ttsModel ?? DEFAULT_CARTESIA_MODEL} voice=${voice}`,
-    };
-  }
-  const model = parseTtsModelId(args.ttsModel ?? "kokoro-v0.19");
-  return {
-    tts: new SherpaTextToSpeech(),
-    ttsConfig: {
-      model,
-      voice: args.voice !== undefined ? Number(args.voice) : undefined,
-    },
-    ttsLabel: `${model}${args.voice !== undefined ? ` voice=${args.voice}` : ""}`,
-  };
-}
-
 function clearPartial(): void {
   if (process.stdout.isTTY) {
     process.stdout.write("\r\x1b[K");
+  }
+}
+
+function printTerminalEvent(event: ConversationEvent): void {
+  if (event.type === "transcript" && event.role === "user" && !event.final) {
+    if (process.stdout.isTTY) {
+      process.stdout.write(`\r\x1b[K… ${event.text}`);
+    }
+    return;
+  }
+  clearPartial();
+  if (event.type === "state") {
+    console.log(`[state] ${event.state}`);
+  } else if (event.type === "notice") {
+    const output = event.level === "error" ? console.error : console.log;
+    output(event.message);
   }
 }
 
@@ -304,7 +221,6 @@ class WavAudioSource implements AudioSource {
 function parseArgs(argv: string[]): DemoArgs {
   const args: DemoArgs = {
     responder: "cascade",
-    llmModel: DEFAULT_CEREBRAS_MODEL,
     ttsEngine: "sherpa",
     ttsModel: undefined,
     voice: undefined,

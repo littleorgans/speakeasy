@@ -117,11 +117,15 @@ test("a fake ChatModel satisfies the contract", async () => {
   assert.deepEqual(parts, ["echo:ping"]);
 });
 
-// Gated live smoke: only runs when a real key is present in the environment.
-// It records first-token latency and prints timing only, never any content.
+// Explicit live smoke. A key in the ambient environment is insufficient: the
+// suite must never spend provider quota unless the caller opts in deliberately.
 test(
   "live: streams a short completion and records first-token latency",
-  { skip: !process.env.CEREBRAS_API_KEY },
+  {
+    skip:
+      process.env.SPEAKEASY_LIVE_CEREBRAS !== "1" ||
+      !process.env.CEREBRAS_API_KEY,
+  },
   async () => {
     const model = new CerebrasChatModel({ config: { maxTokens: 16 } });
     const start = performance.now();

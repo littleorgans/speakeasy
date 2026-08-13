@@ -28,7 +28,7 @@ export type SegmentPlayer = {
   open(): void;
   write(segment: AudioSegment): void;
   /** Stop playback immediately, dropping buffered audio (barge-in). */
-  interrupt(): void;
+  interrupt(): Promise<number | undefined>;
   end(): Promise<void>;
 };
 
@@ -83,11 +83,12 @@ function ffplayPlayer(sampleRate: number): SegmentPlayer {
         Buffer.from(samples.buffer, samples.byteOffset, samples.byteLength),
       );
     },
-    interrupt() {
+    async interrupt() {
       // SIGKILL drops whatever ffplay has buffered so sound stops now, not at
       // the end of the current sentence.
       stopped = true;
       child?.kill("SIGKILL");
+      return undefined;
     },
     async end() {
       if (!stopped) {
@@ -126,9 +127,10 @@ function afplayPlayer(sampleRate: number): SegmentPlayer {
         await onExit(current, "afplay").catch(() => {});
       });
     },
-    interrupt() {
+    async interrupt() {
       stopped = true;
       current?.kill("SIGKILL");
+      return undefined;
     },
     end: () => queue.catch(() => {}),
   };

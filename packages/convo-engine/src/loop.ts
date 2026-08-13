@@ -6,6 +6,7 @@ import type {
 } from "@speakeasy/speech-io";
 import type { ResponderSession, VoiceResponder } from "./responder/contract.ts";
 import { ChatHistory } from "./history.ts";
+import type { ConversationEvent, ConversationObserver } from "./events.ts";
 import {
   buildTurnMetrics,
   formatTurnLine,
@@ -43,7 +44,8 @@ export interface AudioSink {
   open(): void;
   write(segment: AudioSegment): void;
   /** Stop playback immediately, dropping buffered audio (barge-in). */
-  interrupt(): void;
+  /** Stop now and report how many milliseconds reached the audio device. */
+  interrupt(): Promise<number | undefined>;
   end(): Promise<void>;
 }
 
@@ -67,19 +69,14 @@ export type ConvoOptions = {
   /** Peak-amplitude threshold for the barge-in VAD (0..1). */
   bargeThreshold?: number;
   now?: () => number;
-  log?: (line: string) => void;
-  onState?: (state: ConvoState) => void;
-  onPartial?: (text: string) => void;
-  onInterrupt?: () => void;
+  /** One host-neutral stream for state, transcripts, metrics, and failures. */
+  onEvent?: ConversationObserver;
 };
 
 export class ConversationLoop {
   readonly #deps: ConvoDeps;
   readonly #now: () => number;
-  readonly #log: (line: string) => void;
-  readonly #onState: (state: ConvoState) => void;
-  readonly #onPartial: (text: string) => void;
-  readonly #onInterrupt: () => void;
+  readonly #onEvent: ConversationObserver;
   readonly #sttConfig: STTConfig;
   readonly #maxTurns: number | undefined;
   readonly #barge: boolean;
@@ -102,10 +99,7 @@ export class ConversationLoop {
   constructor(deps: ConvoDeps, options: ConvoOptions = {}) {
     this.#deps = deps;
     this.#now = options.now ?? (() => performance.now());
-    this.#log = options.log ?? ((line) => console.log(line));
-    this.#onState = options.onState ?? (() => {});
-    this.#onPartial = options.onPartial ?? (() => {});
-    this.#onInterrupt = options.onInterrupt ?? (() => {});
+    this.#onEvent = options.onEvent ?? (() => {});
     this.#sttConfig = options.sttConfig ?? { endpoint: { mode: "eager" } };
     this.#maxTurns = options.maxTurns;
     this.#barge = options.barge ?? false;
@@ -131,13 +125,16 @@ export class ConversationLoop {
     this.#setState("listening");
     await this.#deps.mic.start({
       onFrame: (frame) => this.#onFrame(frame),
-      onError: (error) => this.#log(`mic error: ${redact(error)}`),
+      onError: (error) => this.#notice("error", `mic error: ${redact(error)}`),
     });
   }
 
   async stop(): Promise<void> {
     if (this.#stopping) {
       return;
+    }
+    if (this.#state === "speaking" || this.#state === "thinking") {
+      this.interrupt();
     }
     this.#stopping = true;
     this.#setState("idle");
@@ -148,10 +145,25 @@ export class ConversationLoop {
     this.#resolveDone?.();
   }
 
+  /** Commit the recognizer's current utterance for an explicit push-to-talk release. */
+  commitInput(): void {
+    if (this.#stopping || this.#state !== "listening") {
+      return;
+    }
+    this.#endpointAt = this.#now();
+    this.#session?.flush();
+  }
+
   #wireSession(session: STTSession): void {
     session.on("partial", (event: { text: string }) => {
       if (this.#state === "listening") {
-        this.#onPartial(event.text);
+        this.#emit({
+          type: "transcript",
+          role: "user",
+          text: event.text,
+          final: false,
+          mode: "replace",
+        });
       }
     });
     session.on("endpoint", () => {
@@ -161,11 +173,18 @@ export class ConversationLoop {
       const finalAt = this.#now();
       const transcript = event.text.trim();
       if (transcript) {
+        this.#emit({
+          type: "transcript",
+          role: "user",
+          text: transcript,
+          final: true,
+          mode: "replace",
+        });
         this.#enqueueTurn(transcript, this.#endpointAt || finalAt, finalAt);
       }
     });
     session.on("error", (event: { err: unknown }) => {
-      this.#log(`stt error: ${redact(event.err)}`);
+      this.#notice("error", `stt error: ${redact(event.err)}`);
     });
   }
 
@@ -199,11 +218,11 @@ export class ConversationLoop {
       return;
     }
     this.#interrupted = true;
-    this.#activeSink?.interrupt();
+    const playedAudioMs = this.#activeSink?.interrupt() ?? Promise.resolve(undefined);
+    this.#responderSession?.interrupt(playedAudioMs.catch(() => 0));
     this.#vad.reset();
     this.#setState("listening");
-    this.#log("interrupted");
-    this.#onInterrupt();
+    this.#emit({ type: "interrupted" });
   }
 
   #enqueueTurn(transcript: string, endpointAt: number, finalAt: number): void {
@@ -246,6 +265,13 @@ export class ConversationLoop {
           firstTokenAt ??= event.at;
           tokenCount += 1;
           reply += event.text;
+          this.#emit({
+            type: "transcript",
+            role: "assistant",
+            text: event.text,
+            final: false,
+            mode: "append",
+          });
           continue;
         }
         const segment = event.segment;
@@ -261,10 +287,18 @@ export class ConversationLoop {
       }
       await sink?.end();
       if (this.#interrupted) {
-        this.#log(`turn ${turn} | interrupted (returning to listening)`);
+        this.#notice("info", `turn ${turn} | interrupted (returning to listening)`);
       } else {
         if (reply.trim()) {
-          this.#history.addAssistant(reply.trim());
+          const finalReply = reply.trim();
+          this.#history.addAssistant(finalReply);
+          this.#emit({
+            type: "transcript",
+            role: "assistant",
+            text: finalReply,
+            final: true,
+            mode: "replace",
+          });
         }
         this.#recordTurn(turn, transcript, {
           endpointAt,
@@ -277,7 +311,10 @@ export class ConversationLoop {
       }
     } catch (error) {
       await sink?.end().catch(() => {});
-      this.#log(`turn ${turn} | error: ${redact(error)} (returning to listening)`);
+      this.#notice(
+        "error",
+        `turn ${turn} | error: ${redact(error)} (returning to listening)`,
+      );
     } finally {
       this.#activeSink = undefined;
       this.#setState("listening");
@@ -301,7 +338,7 @@ export class ConversationLoop {
     },
   ): void {
     if (outcome.firstAudioAt === undefined || outcome.firstTokenAt === undefined) {
-      this.#log(`turn ${turn} | no reply produced (returning to listening)`);
+      this.#notice("info", `turn ${turn} | no reply produced (returning to listening)`);
       return;
     }
     const metrics = buildTurnMetrics(
@@ -317,7 +354,8 @@ export class ConversationLoop {
       outcome.spokenMs,
     );
     this.#metrics.push(metrics);
-    this.#log(formatTurnLine(metrics));
+    this.#emit({ type: "metrics", metrics });
+    this.#notice("info", formatTurnLine(metrics));
   }
 
   #setState(next: ConvoState): void {
@@ -326,7 +364,15 @@ export class ConversationLoop {
     }
     assertTransition(this.#state, next);
     this.#state = next;
-    this.#onState(next);
+    this.#emit({ type: "state", state: next });
+  }
+
+  #notice(level: "info" | "error", message: string): void {
+    this.#emit({ type: "notice", level, message });
+  }
+
+  #emit(event: ConversationEvent): void {
+    this.#onEvent(event);
   }
 }
 
