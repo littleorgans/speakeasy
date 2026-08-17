@@ -1,5 +1,4 @@
 import { performance } from "node:perf_hooks";
-import { setTimeout as delay } from "node:timers/promises";
 import type { STTSession, VoiceToText } from "../contract.ts";
 import { MoonshineEngine } from "../engines/moonshine.ts";
 import { SherpaEngine } from "../engines/sherpa.ts";
@@ -13,7 +12,7 @@ import type {
   FinalObservation,
   PttRunResult,
 } from "./types.ts";
-import type { WavAudio } from "./wav.ts";
+import { pacedFrames, type WavAudio } from "./wav.ts";
 
 /**
  * Session plumbing shared by the bench modes (sweep, ptt, corpus): engine
@@ -132,10 +131,13 @@ export async function runPttOnce(input: {
   const state = attachSessionObservers(session);
   const start = performance.now();
 
-  for (let index = 0; index <= input.releaseFrame; index += 1) {
-    session.pushAudio(input.audio.frames[index]!);
-    if (index < input.releaseFrame) {
-      await delay(input.frameMs);
+  for await (const [index, frame] of pacedFrames(
+    input.audio.frames,
+    input.frameMs,
+  )) {
+    session.pushAudio(frame);
+    if (index >= input.releaseFrame) {
+      break;
     }
   }
 

@@ -1,4 +1,6 @@
 import { readFile } from "node:fs/promises";
+import { performance } from "node:perf_hooks";
+import { setTimeout as delay } from "node:timers/promises";
 
 const RIFF = "RIFF";
 const WAVE = "WAVE";
@@ -18,6 +20,29 @@ export type WavAudio = {
   samples: Float32Array;
   frames: Float32Array[];
 };
+
+/** Yield frames in real time without accumulating timer overshoot. */
+export async function* pacedFrames(
+  frames: Iterable<Float32Array>,
+  frameMs: number,
+): AsyncGenerator<[index: number, frame: Float32Array]> {
+  if (!Number.isFinite(frameMs) || frameMs <= 0) {
+    throw new Error(`frameMs must be positive, received ${frameMs}`);
+  }
+
+  // Schedule each frame against an absolute deadline so audio time tracks
+  // wall time. A fixed sleep per frame accumulates timer overshoot.
+  const feedStart = performance.now();
+  let index = 0;
+  for (const frame of frames) {
+    yield [index, frame];
+    const wait = feedStart + (index + 1) * frameMs - performance.now();
+    if (wait > 0) {
+      await delay(wait);
+    }
+    index += 1;
+  }
+}
 
 type FormatChunk = {
   audioFormat: number;

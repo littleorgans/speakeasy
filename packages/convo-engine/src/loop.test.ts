@@ -1,18 +1,21 @@
 import assert from "node:assert/strict";
-import { EventEmitter } from "node:events";
 import { test } from "node:test";
 import type {
   AudioSegment,
-  STTSession,
   TTSSession,
   TextToSpeech,
-  VoiceToText,
 } from "@speakeasy/speech-io";
-import type { ChatMessage, ChatModel } from "@speakeasy/llm";
+import type { ChatModel } from "@speakeasy/llm";
 import { ConversationLoop, type AudioSink, type AudioSource } from "./loop.ts";
 import type { ConversationEvent } from "./events.ts";
 import { CascadeResponder } from "./responder/cascade.ts";
 import type { ConvoState } from "./state.ts";
+import {
+  FakeLLM,
+  FakeSTT,
+  FakeTTS,
+  fakeAudioSegment,
+} from "./test-support.ts";
 
 /** The loop is always exercised through the cascade responder, as the demo wires it. */
 function cascade(llm: ChatModel, tts: TextToSpeech): CascadeResponder {
@@ -20,93 +23,6 @@ function cascade(llm: ChatModel, tts: TextToSpeech): CascadeResponder {
 }
 
 const now = () => performance.now();
-
-/** STT fake: an EventEmitter session whose finals the test triggers directly. */
-class FakeSTTSession extends EventEmitter implements STTSession {
-  readonly pushed: Float32Array[] = [];
-  flushes = 0;
-  pushAudio(frame: Float32Array): void {
-    this.pushed.push(frame);
-  }
-  flush(): void {
-    this.flushes += 1;
-  }
-  reset(): void {}
-  async end(): Promise<void> {}
-  /** Mimic sherpa eager commit: endpoint then final in one tick. */
-  say(text: string): void {
-    this.emit("endpoint", {});
-    this.emit("final", { text });
-  }
-}
-
-class FakeSTT implements VoiceToText {
-  readonly session = new FakeSTTSession();
-  async open(): Promise<STTSession> {
-    return this.session;
-  }
-}
-
-/** LLM fake: streams the given tokens; records the last-token timestamp. */
-class FakeLLM implements ChatModel {
-  readonly #tokens: string[];
-  readonly #throwBeforeYield: boolean;
-  lastMessages: ChatMessage[] = [];
-  lastTokenAt = 0;
-  constructor(tokens: string[], throwBeforeYield = false) {
-    this.#tokens = tokens;
-    this.#throwBeforeYield = throwBeforeYield;
-  }
-  async *stream(messages: ChatMessage[]): AsyncGenerator<string> {
-    this.lastMessages = messages;
-    if (this.#throwBeforeYield) {
-      throw new Error("llm exploded");
-    }
-    for (const token of this.#tokens) {
-      this.lastTokenAt = now();
-      yield token;
-    }
-  }
-}
-
-/**
- * TTS fake: yields one segment right after the first token (proving audio starts
- * before the stream drains), then a second at the end. An empty token stream
- * yields no audio, exercising the "no reply" path.
- */
-class FakeTTS implements TextToSpeech {
-  readonly session = new FakeTTSSession();
-  async open(): Promise<TTSSession> {
-    return this.session;
-  }
-}
-
-class FakeTTSSession implements TTSSession {
-  firstAudioAt: number | undefined;
-  closed = 0;
-  async *speak(
-    text: AsyncIterable<string> | string,
-  ): AsyncGenerator<AudioSegment> {
-    if (typeof text === "string") {
-      yield segment(0);
-      return;
-    }
-    let index = 0;
-    for await (const _token of text) {
-      if (index === 0) {
-        this.firstAudioAt = now();
-        yield segment(0);
-      }
-      index += 1;
-    }
-    if (index > 0) {
-      yield segment(1);
-    }
-  }
-  async close(): Promise<void> {
-    this.closed += 1;
-  }
-}
 
 class FakeMic implements AudioSource {
   handlers: { onFrame: (f: Float32Array) => void } | undefined;
@@ -140,18 +56,6 @@ class FakeSink implements AudioSink {
   async end(): Promise<void> {
     this.ended += 1;
   }
-}
-
-function segment(index: number): AudioSegment {
-  return {
-    index,
-    sentence: `s${index}`,
-    samples: new Float32Array(1600).fill(0.1),
-    sampleRate: 16000,
-    readyAtMs: 0,
-    synthMs: 1,
-    audioDurationMs: 100,
-  };
 }
 
 function makeLoop(llm: FakeLLM, options: { maxTurns?: number } = {}) {
@@ -335,10 +239,10 @@ class GatedTTSSession implements TTSSession {
   }
 
   async *speak(): AsyncGenerator<AudioSegment> {
-    yield segment(0);
+    yield fakeAudioSegment(0);
     this.#resolveAfterFirst();
     await this.#gate;
-    yield segment(1);
+    yield fakeAudioSegment(1);
   }
 
   async close(): Promise<void> {}

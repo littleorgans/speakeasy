@@ -9,6 +9,13 @@ export type { ConversationEvent, ConversationObserver } from "./events.ts";
 export type { ConvoState } from "./state.ts";
 export type { TurnMetrics } from "./metrics.ts";
 export type { AudioSegment } from "@speakeasy/speech-io";
+export { createNullSink } from "./audio/null-sink.ts";
+export {
+  MicAudioSource,
+  ScriptedWavSource,
+  WavAudioSource,
+  type WavSourceOptions,
+} from "./audio/sources.ts";
 export {
   DEFAULT_REALTIME_VOICE,
   REALTIME_VOICES,

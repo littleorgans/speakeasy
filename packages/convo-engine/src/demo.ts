@@ -4,11 +4,9 @@ import {
   createSegmentPlayer,
   readWavFrames,
   resolveDefaultMicDevice,
-  startMicCapture,
-  type MicCapture,
-  type WavAudio,
 } from "@speakeasy/speech-io";
-import { ConversationLoop, type AudioSource } from "./loop.ts";
+import { MicAudioSource, WavAudioSource } from "./audio/sources.ts";
+import { ConversationLoop } from "./loop.ts";
 import {
   createConversationRuntime,
   type ResponderKind,
@@ -28,10 +26,6 @@ import { formatSessionSummary } from "./metrics.ts";
  * end-to-end smoke. Requires CEREBRAS_API_KEY in the environment; it fails fast
  * with a clear message if absent and never echoes the key.
  */
-
-const FRAME_SAMPLES = (CAPTURE_SAMPLE_RATE * CAPTURE_FRAME_MS) / 1_000;
-/** Silence appended after a --wav utterance so the endpoint detector fires. */
-const WAV_SILENCE_TAIL_MS = 700;
 
 type DemoArgs = RuntimeConfig & {
   system: string | undefined;
@@ -155,67 +149,6 @@ function setupKeys(loop: ConversationLoop): () => void {
     restore();
     process.stdin.pause();
   };
-}
-
-/** Live microphone via the ffmpeg capture helper. */
-class MicAudioSource implements AudioSource {
-  readonly #device: string;
-  #capture: MicCapture | undefined;
-
-  constructor(device: string) {
-    this.#device = device;
-  }
-
-  start(handlers: {
-    onFrame: (frame: Float32Array) => void;
-    onError: (error: Error) => void;
-  }): void {
-    this.#capture = startMicCapture({
-      device: this.#device,
-      onFrame: handlers.onFrame,
-      onError: handlers.onError,
-    });
-  }
-
-  async stop(): Promise<void> {
-    await this.#capture?.stop();
-  }
-}
-
-/** Replays a recorded utterance at real-time cadence, then a silence tail. */
-class WavAudioSource implements AudioSource {
-  readonly #frames: Float32Array[];
-  #timer: NodeJS.Timeout | undefined;
-  #stopped = false;
-
-  constructor(wav: WavAudio) {
-    this.#frames = wav.frames;
-  }
-
-  start(handlers: { onFrame: (frame: Float32Array) => void }): void {
-    const silence = Array.from(
-      { length: Math.round(WAV_SILENCE_TAIL_MS / CAPTURE_FRAME_MS) },
-      () => new Float32Array(FRAME_SAMPLES),
-    );
-    const frames = [...this.#frames, ...silence];
-    let index = 0;
-    const tick = (): void => {
-      if (this.#stopped || index >= frames.length) {
-        return;
-      }
-      handlers.onFrame(frames[index]!);
-      index += 1;
-      this.#timer = setTimeout(tick, CAPTURE_FRAME_MS);
-    };
-    tick();
-  }
-
-  stop(): void {
-    this.#stopped = true;
-    if (this.#timer) {
-      clearTimeout(this.#timer);
-    }
-  }
 }
 
 function parseArgs(argv: string[]): DemoArgs {
