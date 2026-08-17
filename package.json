@@ -14,6 +14,7 @@
     "demo": "node packages/speech-io/src/demo/ptt.ts",
     "tts": "node packages/speech-io/src/tts/run.ts",
     "convo": "node packages/convo-engine/src/demo.ts",
+    "cascade-sweep": "node packages/convo-engine/src/sweep/run.ts",
     "browser": "node packages/browser-voice/src/server.ts"
   }
 }

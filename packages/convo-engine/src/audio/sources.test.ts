@@ -70,6 +70,33 @@ test("scripted source continues after an empty final transcript", {
   assert.deepEqual(transcripts, []);
 });
 
+test("scripted source drops the rest of an utterance after an early endpoint", async () => {
+  const source = new ScriptedWavSource(
+    [utteranceFrames(1, 2), utteranceFrames(3)],
+    { frameMs: 0.0001, silenceTailMs: 0 },
+  );
+  const amplitudes: number[] = [];
+
+  source.onEvent({ type: "state", state: "listening" });
+  source.start({
+    onFrame: (frame) => {
+      amplitudes.push(frame[0] ?? 0);
+      if (amplitudes.length === 1) {
+        queueMicrotask(() => {
+          source.onEvent({ type: "state", state: "thinking" });
+          setTimeout(() => {
+            source.onEvent({ type: "state", state: "listening" });
+          }, 10);
+        });
+      }
+    },
+    onError: assert.fail,
+  });
+
+  await source.done;
+  assert.deepEqual(amplitudes, [1, 3]);
+});
+
 function utterance(amplitude: number): WavAudio {
   const samples = new Float32Array([amplitude]);
   return {
@@ -79,5 +106,17 @@ function utterance(amplitude: number): WavAudio {
     durationMs: 1,
     samples,
     frames: [samples],
+  };
+}
+
+function utteranceFrames(...amplitudes: number[]): WavAudio {
+  const frames = amplitudes.map((amplitude) => new Float32Array([amplitude]));
+  return {
+    sampleRate: 1_000,
+    channels: 1,
+    bitsPerSample: 32,
+    durationMs: amplitudes.length,
+    samples: new Float32Array(amplitudes),
+    frames,
   };
 }

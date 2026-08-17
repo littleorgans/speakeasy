@@ -55,8 +55,16 @@ export type ConversationRuntime = {
 export async function createConversationRuntime(
   config: RuntimeConfig = {},
   env: NodeJS.ProcessEnv = process.env,
+  stt?: VoiceToText,
 ): Promise<ConversationRuntime> {
   const responder = buildResponder(config, env);
+  if (stt) {
+    return {
+      stt,
+      responder: responder.value,
+      label: `shared STT · ${responder.label}`,
+    };
+  }
   const engine = new SherpaEngine();
   await engine.prepare();
   return {
