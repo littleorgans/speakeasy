@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import type { AudioSegment } from "@speakeasy/convo-engine";
 import {
@@ -6,15 +7,32 @@ import {
   decodeMicFrame,
   encodeAudioPacket,
   parseClientCommand,
+  RESPONSE_ENGINES,
 } from "./protocol.ts";
+
+test("room engine options match the protocol engines", async () => {
+  const html = await readFile(
+    new URL("../public/index.html", import.meta.url),
+    "utf8",
+  );
+  const options = html
+    .match(/<select id="engine-select">([\s\S]*?)<\/select>/)?.[1]
+    ?.matchAll(/<option value="([^"]+)"/g);
+  assert.ok(options);
+  assert.deepEqual(
+    [...options].map((match) => match[1]),
+    [...RESPONSE_ENGINES],
+  );
+});
 
 test("parseClientCommand accepts the bounded browser command set", () => {
   assert.deepEqual(
     parseClientCommand(
-      '{"type":"start","mode":"natural","pauseMs":700,"voice":"marin","barge":true,"systemPrompt":"  Be kind.  "}',
+      '{"type":"start","engine":"mercury-instant","mode":"natural","pauseMs":700,"voice":"marin","barge":true,"systemPrompt":"  Be kind.  "}',
     ),
     {
       type: "start",
+      engine: "mercury-instant",
       mode: "natural",
       pauseMs: 700,
       voice: "marin",
@@ -31,12 +49,16 @@ test("parseClientCommand accepts the bounded browser command set", () => {
   });
   assert.throws(() => parseClientCommand('{"type":"unknown"}'), /unknown command/);
   assert.throws(
-    () => parseClientCommand('{"type":"start","mode":"natural","pauseMs":199,"voice":"marin"}'),
+    () => parseClientCommand('{"type":"start","engine":"realtime","mode":"natural","pauseMs":199,"voice":"marin"}'),
     /pauseMs must be 200 to 3000/,
   );
   assert.throws(
-    () => parseClientCommand('{"type":"start","mode":"natural","pauseMs":700,"voice":"unknown"}'),
+    () => parseClientCommand('{"type":"start","engine":"realtime","mode":"natural","pauseMs":700,"voice":"unknown"}'),
     /Unsupported Realtime voice/,
+  );
+  assert.throws(
+    () => parseClientCommand('{"type":"start","engine":"unknown","mode":"natural","pauseMs":700,"voice":"marin"}'),
+    /requires engine/,
   );
   assert.throws(
     () => parseClientCommand('{"type":"playback-drained","playbackId":-1}'),

@@ -165,6 +165,16 @@
         </label>
 
         <label class="field">
+          <span>Response engine</span>
+          <select id="engine-select">
+            <option value="realtime" selected>OpenAI Realtime</option>
+            <option value="mercury-instant">Mercury 2 · Instant</option>
+            <option value="mercury-low">Mercury 2 · Low</option>
+          </select>
+          <small>Instant targets minimum latency. Low spends more compute for comparison.</small>
+        </label>
+
+        <label class="field" id="voice-field">
           <span>Voice</span>
           <select id="voice-select">
             <option value="marin" selected>Marin</option>

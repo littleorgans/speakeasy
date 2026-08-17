@@ -19,6 +19,7 @@ export {
   createConversationRuntime,
   type ConversationRuntime,
   type ResponderKind,
+  type LlmProvider,
   type RuntimeConfig,
   type TtsEngine,
 } from "./runtime.ts";

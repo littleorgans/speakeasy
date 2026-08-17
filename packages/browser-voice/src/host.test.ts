@@ -4,7 +4,7 @@ import { test } from "node:test";
 import type { ConversationRuntime, RuntimeConfig } from "@speakeasy/convo-engine";
 import { WebSocket } from "ws";
 import { startBrowserVoiceServer } from "./host.ts";
-import { safeMessage } from "./session.ts";
+import { runtimeConfigFor, safeMessage } from "./session.ts";
 
 test("host serves the room shell and reports health", async () => {
   const host = await startBrowserVoiceServer({ port: 0 });
@@ -84,6 +84,7 @@ test("browser socket drives one complete transcript and acknowledged playback", 
     await onceOpen(socket);
     socket.send(JSON.stringify({
       type: "start",
+      engine: "realtime",
       mode: "hold",
       pauseMs: 700,
       voice: "cedar",
@@ -124,6 +125,7 @@ test("natural mode maps the configured pause to eager endpointing", async () => 
     await onceOpen(socket);
     socket.send(JSON.stringify({
       type: "start",
+      engine: "realtime",
       mode: "natural",
       pauseMs: 950,
       voice: "marin",
@@ -139,6 +141,49 @@ test("natural mode maps the configured pause to eager endpointing", async () => 
     await onceClose(socket);
     await host.close();
   }
+});
+
+test("browser engine selection maps to isolated responder configurations", () => {
+  const common = {
+    type: "start" as const,
+    mode: "natural" as const,
+    pauseMs: 700,
+    voice: "cedar" as const,
+    barge: true,
+  };
+  assert.deepEqual(runtimeConfigFor(
+    { ...common, engine: "realtime" },
+    {
+      llmModel: "operator-model",
+      ttsEngine: "cartesia",
+      voice: "cascade-voice",
+    },
+  ), {
+    llmModel: "operator-model",
+    responder: "realtime",
+    ttsEngine: "cartesia",
+    voice: "cedar",
+  });
+  assert.deepEqual(runtimeConfigFor(
+    { ...common, engine: "mercury-instant" },
+    {
+      llmModel: "operator-model",
+      ttsEngine: "cartesia",
+      voice: "cascade-voice",
+    },
+  ), {
+    llmModel: "operator-model",
+    responder: "cascade",
+    llmProvider: "mercury",
+    llmReasoningEffort: "instant",
+    ttsEngine: "cartesia",
+    voice: "cascade-voice",
+  });
+  assert.equal(
+    runtimeConfigFor({ ...common, engine: "mercury-low" }, {})
+      .llmReasoningEffort,
+    "low",
+  );
 });
 
 function fakeRuntime(

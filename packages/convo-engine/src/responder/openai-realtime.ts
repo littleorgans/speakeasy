@@ -166,15 +166,11 @@ class RealtimeSession implements ResponderSession {
       if (event.type === "error") {
         const turn = this.#activeTurn;
         const cancelEventId = event.error?.event_id;
-        const cancelledTurn = cancelEventId
-          ? this.#cancelledTurns.get(cancelEventId)
-          : undefined;
-        if (
-          cancelEventId &&
-          cancelledTurn &&
-          isCompletedResponseCancel(event, cancelledTurn)
-        ) {
-          this.#cancelledTurns.delete(cancelEventId);
+        const cancelledTurn =
+          (cancelEventId ? this.#cancelledTurns.get(cancelEventId) : undefined) ??
+          (turn?.cancelled ? turn : undefined);
+        if (isNoActiveResponseCancel(event) && cancelledTurn) {
+          if (cancelEventId) this.#cancelledTurns.delete(cancelEventId);
           cancelledTurn.responseDone = true;
           this.#truncateInterruptedTurn(cancelledTurn);
           if (cancelledTurn === turn) this.#queue.push(event);
@@ -433,14 +429,10 @@ class RealtimeSession implements ResponderSession {
   }
 }
 
-function isCompletedResponseCancel(event: ServerEvent, turn: ActiveTurn): boolean {
+function isNoActiveResponseCancel(event: ServerEvent): boolean {
   return (
-    turn.cancelled &&
-    turn.cancelEventId !== undefined &&
-    event.error?.event_id === turn.cancelEventId &&
-    /^Cancellation failed: no active response found\.?$/i.test(
-      event.error.message ?? "",
-    )
+    event.error?.code === "response_cancel_not_active" ||
+    /^Cancellation failed: no active response found\.?$/i.test(event.error?.message ?? "")
   );
 }
 

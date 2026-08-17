@@ -11,7 +11,14 @@ import {
   type TTSConfig,
   type VoiceToText,
 } from "@speakeasy/speech-io";
-import { CerebrasChatModel, DEFAULT_CEREBRAS_MODEL } from "@speakeasy/llm";
+import {
+  CerebrasChatModel,
+  DEFAULT_CEREBRAS_MODEL,
+  DEFAULT_MERCURY_MODEL,
+  MercuryChatModel,
+  type ChatModel,
+  type MercuryReasoningEffort,
+} from "@speakeasy/llm";
 import { CascadeResponder } from "./responder/cascade.ts";
 import {
   DEFAULT_REALTIME_MODEL,
@@ -22,11 +29,14 @@ import {
 import type { VoiceResponder } from "./responder/contract.ts";
 
 export type ResponderKind = "cascade" | "realtime";
+export type LlmProvider = "cerebras" | "mercury";
 export type TtsEngine = "sherpa" | "cartesia";
 
 export type RuntimeConfig = {
   responder?: ResponderKind;
+  llmProvider?: LlmProvider;
   llmModel?: string;
+  llmReasoningEffort?: MercuryReasoningEffort;
   ttsEngine?: TtsEngine;
   ttsModel?: string;
   voice?: string;
@@ -74,19 +84,48 @@ function buildResponder(
     };
   }
 
-  requireKey(env.CEREBRAS_API_KEY, "CEREBRAS_API_KEY", "cascade responder");
   const voice = buildTts(config, env);
-  const model = config.llmModel ?? DEFAULT_CEREBRAS_MODEL;
+  const llm = buildChatModel(config, env);
   return {
     value: new CascadeResponder({
-      llm: new CerebrasChatModel({
-        config: { model },
-        apiKey: () => env.CEREBRAS_API_KEY,
-      }),
+      llm: llm.value,
       tts: voice.value,
       ttsConfig: voice.config,
     }),
-    label: `${model} · ${voice.label}`,
+    label: `${llm.label} · ${voice.label}`,
+  };
+}
+
+function buildChatModel(
+  config: RuntimeConfig,
+  env: NodeJS.ProcessEnv,
+): { value: ChatModel; label: string } {
+  if ((config.llmProvider ?? "cerebras") === "mercury") {
+    requireKey(
+      env.INCEPTIONLABS_API_KEY,
+      "INCEPTIONLABS_API_KEY",
+      "Mercury responder",
+    );
+    const model = config.llmModel ?? DEFAULT_MERCURY_MODEL;
+    const reasoning = config.llmReasoningEffort ?? "instant";
+    return {
+      value: new MercuryChatModel({
+        config: { model },
+        reasoningEffort: reasoning,
+        apiKey: () => env.INCEPTIONLABS_API_KEY,
+      }),
+      label: `Mercury ${model} · ${reasoning}`,
+    };
+  }
+
+  requireKey(env.CEREBRAS_API_KEY, "CEREBRAS_API_KEY", "Cerebras responder");
+  const model = config.llmModel ?? DEFAULT_CEREBRAS_MODEL;
+  return {
+    value: new CerebrasChatModel({
+      config: { model },
+      apiKey: () => env.CEREBRAS_API_KEY,
+    }),
+    label: `Cerebras ${model}`,
   };
 }
 
