@@ -25,6 +25,7 @@ export type SweepInput = {
   rows: readonly SweepMatrixRow[];
   utterances: readonly SweepUtterance[];
   runs: number;
+  turnGapMs: number;
 };
 
 export type SweepDependencies = {
@@ -60,6 +61,7 @@ export async function runSweep(
         row,
         runtime,
         expandUtterances(input.utterances, input.runs),
+        input.turnGapMs,
         dependencies.sourceOptions,
       );
     } catch (error) {
@@ -80,18 +82,24 @@ async function runRow(
   row: SweepMatrixRow,
   runtime: ConversationRuntime,
   utterances: readonly SweepUtterance[],
+  turnGapMs: number,
   sourceOptions?: WavSourceOptions,
 ): Promise<SweepResult> {
+  let committedTurns = 0;
   const source = new ScriptedWavSource(
     utterances.map((utterance) => utterance.audio),
     {
       silenceTailMs: 0,
       ...sourceOptions,
-      onUtteranceEnd: () => loop.commitInput(),
+      utteranceGapMs: turnGapMs,
+      onUtteranceEnd: () => {
+        committedTurns += 1;
+        loop.commitInput();
+      },
     },
   );
   const turns: SweepTurn[] = [];
-  const errors: string[] = [];
+  const errors: { reason: string; failedTurn: number }[] = [];
   const onEvent = (event: ConversationEvent): void => {
     source.onEvent(event);
     if (event.type === "metrics") {
@@ -105,7 +113,10 @@ async function runRow(
         });
       }
     } else if (event.type === "notice" && event.level === "error") {
-      errors.push(event.message);
+      errors.push({
+        reason: stripTurnPrefix(event.message),
+        failedTurn: committedTurns,
+      });
     }
   };
   const loop = new ConversationLoop(
@@ -129,13 +140,26 @@ async function runRow(
   }
 
   if (errors.length > 0 || turns.length !== utterances.length) {
+    const firstError = errors[0];
+    const reason =
+      firstError?.reason ??
+      `completed ${turns.length} of ${utterances.length} expected turns`;
+    if (turns.length > 0) {
+      return {
+        status: "partial",
+        id: row.id,
+        label: runtime.label,
+        reason,
+        failedTurn: firstError?.failedTurn ?? firstMissingTurn(turns),
+        turns,
+        summary: formatSessionSummary(turns.map((turn) => turn.metrics)),
+      };
+    }
     return {
       status: "skipped",
       id: row.id,
-      reason:
-        errors[0] ??
-        `completed ${turns.length} of ${utterances.length} expected turns`,
-      turns,
+      reason,
+      turns: [],
     };
   }
   return {
@@ -145,6 +169,19 @@ async function runRow(
     turns,
     summary: formatSessionSummary(turns.map((turn) => turn.metrics)),
   };
+}
+
+function firstMissingTurn(turns: readonly SweepTurn[]): number {
+  const completed = new Set(turns.map((turn) => turn.turnIndex));
+  let turn = 1;
+  while (completed.has(turn)) {
+    turn += 1;
+  }
+  return turn;
+}
+
+function stripTurnPrefix(message: string): string {
+  return message.replace(/^turn \d+ \| /, "");
 }
 
 function expandUtterances(

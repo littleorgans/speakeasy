@@ -28,8 +28,17 @@ export type SweepResult =
       summary: string;
     }
   | {
+      status: "partial";
+      id: string;
+      label: string;
+      turns: SweepTurn[];
+      summary: string;
+      reason: string;
+      failedTurn: number;
+    }
+  | {
       status: "skipped";
       id: string;
       reason: string;
-      turns: SweepTurn[];
+      turns: [];
     };

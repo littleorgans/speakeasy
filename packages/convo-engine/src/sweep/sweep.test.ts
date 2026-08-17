@@ -76,7 +76,12 @@ test("runSweep records a missing key and continues to the next row", async () =>
   stt.session.onFlush = () => stt.session.say("test utterance");
 
   const results = await runSweep(
-    { rows, utterances: [{ id: "test", audio: utterance() }], runs: 1 },
+    {
+      rows,
+      utterances: [{ id: "test", audio: utterance() }],
+      runs: 1,
+      turnGapMs: 0,
+    },
     {
       env: {},
       sourceOptions: { frameMs: 1, silenceTailMs: 1 },
@@ -103,6 +108,55 @@ test("runSweep records a missing key and continues to the next row", async () =>
   assert.match(results[0].status === "skipped" ? results[0].reason : "", /CEREBRAS_API_KEY/);
   assert.equal(results[1].turns.length, 1);
   assert.equal(results[1].turns[0]?.metrics.transcript, "test utterance");
+});
+
+test("runSweep keeps completed turns when a later turn fails", async () => {
+  const stt = new FakeSTT();
+  const transcripts = ["first", "second", "third"];
+  stt.session.onFlush = () => {
+    const transcript = transcripts.shift();
+    if (transcript) {
+      stt.session.say(transcript);
+    }
+  };
+  const llm = new FakeLLM(["Reply."]);
+  llm.failOnCall = 2;
+
+  const [result] = await runSweep(
+    {
+      rows: [{ id: "partial-row", config: { responder: "cascade" } }],
+      utterances: ["first", "second", "third"].map((id) => ({
+        id,
+        audio: utterance(),
+      })),
+      runs: 1,
+      turnGapMs: 0,
+    },
+    {
+      env: {},
+      sourceOptions: { frameMs: 1, silenceTailMs: 0 },
+      createRuntime: async () => ({
+        stt,
+        responder: new CascadeResponder({ llm, tts: new FakeTTS() }),
+        label: "fake runtime",
+      }),
+    },
+  );
+
+  assert.equal(result?.status, "partial");
+  if (result?.status !== "partial") {
+    assert.fail("expected a partial result");
+  }
+  assert.deepEqual(
+    result?.turns.map((turn) => turn.utteranceId),
+    ["first", "third"],
+  );
+  assert.equal(result.failedTurn, 2);
+  assert.match(result.reason, /llm exploded/);
+  const row = formatResultRow(result);
+  assert.match(row, /^partial-row \| partial \|/);
+  assert.match(row, /turn 2: error: llm exploded/);
+  assert.doesNotMatch(row, /n\/a/);
 });
 
 test("formatResultRow separates the cold turn from the warm median", () => {

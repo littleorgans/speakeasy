@@ -60,7 +60,9 @@ export function formatResultRow(result: SweepResult): string {
       (turn) => turn.metrics.endpointToFirstAudioMs,
     ),
     String(result.turns.length),
-    "",
+    result.status === "partial"
+      ? cleanCell(`turn ${result.failedTurn}: ${result.reason}`)
+      : "",
   ]
     .join(" | ")
     .trimEnd();
@@ -70,8 +72,8 @@ function formatColdAndWarm(
   turns: readonly SweepTurn[],
   pick: (turn: SweepTurn) => number,
 ): [cold: string, warm: string] {
-  const cold = turns[0];
-  const warm = turns.slice(1);
+  const cold = turns.find((turn) => turn.turnIndex === 1);
+  const warm = turns.filter((turn) => turn.turnIndex > 1);
   return [
     cold ? formatMs(pick(cold)) : "n/a",
     warm.length > 0 ? formatMs(median(warm.map(pick))) : "n/a",

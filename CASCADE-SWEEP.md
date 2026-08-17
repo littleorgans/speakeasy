@@ -16,6 +16,11 @@ through the same conversation loop, speech recognizer, corpus, and timing code.
   `utt-2026-07-03T20-30-23.115Z` ("Spawn 10 Codex agents").
 - This run uses three passes. Turn 1 is the cold measurement. The warm value is
   the median of turns 2 through 9.
+- The Realtime and Mercury rows come from the 15:35 UTC matrix run. Cerebras
+  Sherpa ran separately at 15:45 UTC with `--turn-gap-ms 10000`. A 10,000 ms
+  Cartesia retry still hit the queue limit on turn 5, so the completed Cartesia
+  row ran at 15:54 UTC with `--turn-gap-ms 20000`. The gap occurs before the next
+  WAV starts and stays outside the measured endpoint intervals.
 - First token has different provider semantics. Realtime records the first
   output audio transcript delta. Cascade records the first LLM token piece.
 - The null sink resolves as soon as the final audio segment arrives. First audio
@@ -25,14 +30,14 @@ through the same conversation loop, speech recognizer, corpus, and timing code.
 
 ## Results
 
-Run at 2026-08-17 15:35 UTC. Five rows completed nine turns. Both Cerebras rows
-continued through the matrix but were marked skipped after HTTP 429 failures.
+Run on 2026-08-17. All seven rows completed nine turns across the main matrix
+and the two isolated Cerebras reruns described above.
 
 | Config | Status | Cold endpoint to final | Warm endpoint to final | Cold first token | Warm first token | Cold first audio | Warm first audio | Turns | Reason |
 |---|---|---|---|---|---|---|---|---|---|
 | `realtime` | completed | 1.0ms | 32.1ms | 771.7ms | 533.4ms | **1006.6ms** | **765.8ms** | 9 | |
-| `cerebras-sherpa` | skipped | n/a | n/a | n/a | n/a | n/a | n/a | 7 | HTTP 429 queue limit on turn 4 |
-| `cerebras-cartesia` | skipped | n/a | n/a | n/a | n/a | n/a | n/a | 5 | HTTP 429 request quota on turn 3 |
+| `cerebras-sherpa` | completed | 1.0ms | 26.6ms | 649.7ms | 602.8ms | 1312.9ms | 1400.0ms | 9 | isolated, 10,000 ms gap |
+| `cerebras-cartesia` | completed | 1.0ms | **23.2ms** | 2506.0ms | 492.6ms | 3191.2ms | 1089.9ms | 9 | isolated, 20,000 ms gap |
 | `mercury-instant-sherpa` | completed | **0.7ms** | 26.1ms | 905.7ms | **486.7ms** | 1893.4ms | 1380.3ms | 9 | |
 | `mercury-instant-cartesia` | completed | 0.8ms | 26.1ms | **501.5ms** | 521.7ms | **1239.1ms** | 1191.1ms | 9 | |
 | `mercury-low-sherpa` | completed | **0.7ms** | 25.2ms | 1403.7ms | 723.0ms | 2148.7ms | 1653.0ms | 9 | |
@@ -43,25 +48,27 @@ continued through the matrix but were marked skipped after HTTP 429 failures.
 - **Realtime reached audio first.** Its 765.8ms warm first audio was 292.9ms
   faster than the best completed cascade row, `mercury-low-cartesia` at
   1058.7ms.
-- **Cartesia improved both complete Mercury comparisons.** The warm first audio
-  gain over Sherpa was 189.2ms for Mercury instant and 594.3ms for Mercury low.
-- **Cerebras produced no comparable row.** HTTP 429 responses left seven Sherpa
-  turns and five Cartesia turns. The report keeps those partial measurements in
-  the JSON dump but excludes their medians from the table.
+- **Cartesia improved every complete cascade comparison.** Its warm first audio
+  gain over Sherpa was 310.1ms for Cerebras, 189.2ms for Mercury instant, and
+  594.3ms for Mercury low.
+- **Cerebras needs request spacing for a full row.** A 10,000 ms gap completed
+  Sherpa but left Cartesia partial after a turn 5 queue limit. A 20,000 ms gap
+  completed all nine Cartesia turns.
 
 ## Verdict
 
 As measured on 2026-08-17, keep Realtime as the latency choice. Use
 `mercury-low-cartesia` when the cascade architecture is required. Rerun the two
-Cerebras rows after their provider quota recovers before making a Cerebras
-comparison.
+Cerebras rows with the documented gaps when comparing them again.
 
 ## Reproduce
 
 ```
 node packages/convo-engine/src/sweep/run.ts --runs 3 --utterances utt-2026-07-03T20-26-00.828Z,utt-2026-07-03T20-32-04.686Z,utt-2026-07-03T20-30-23.115Z
+node packages/convo-engine/src/sweep/run.ts --only cerebras-sherpa --runs 3 --turn-gap-ms 10000 --utterances utt-2026-07-03T20-26-00.828Z,utt-2026-07-03T20-32-04.686Z,utt-2026-07-03T20-30-23.115Z
+node packages/convo-engine/src/sweep/run.ts --only cerebras-cartesia --runs 3 --turn-gap-ms 20000 --utterances utt-2026-07-03T20-26-00.828Z,utt-2026-07-03T20-32-04.686Z,utt-2026-07-03T20-30-23.115Z
 ```
 
-The command writes the summary to `results/cascade-sweep.txt` and the 57
-completed per-turn records to `results/cascade-sweep.json`. Both files remain
-ignored local artifacts.
+Each command overwrites `results/cascade-sweep.txt` and
+`results/cascade-sweep.json`. Both files remain ignored local artifacts. This
+document combines the completed rows from the three commands.

@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import {
   CAPTURE_FRAME_MS,
   pacedFrames,
@@ -19,6 +20,7 @@ export type WavSourceOptions = {
 
 export type ScriptedWavSourceOptions = WavSourceOptions & {
   onUtteranceEnd?: () => void;
+  utteranceGapMs?: number;
 };
 
 type ResolvedWavSourceOptions = {
@@ -91,6 +93,7 @@ export class ScriptedWavSource implements AudioSource {
   readonly #utterances: readonly WavAudio[];
   readonly #options: ResolvedWavSourceOptions;
   readonly #onUtteranceEnd: () => void;
+  readonly #utteranceGapMs: number;
   readonly done: Promise<void>;
   #resolveDone: () => void = () => {};
   #handlers: AudioSourceHandlers | undefined;
@@ -109,6 +112,12 @@ export class ScriptedWavSource implements AudioSource {
     this.#utterances = utterances;
     this.#options = resolveOptions(options);
     this.#onUtteranceEnd = options.onUtteranceEnd ?? (() => {});
+    this.#utteranceGapMs = options.utteranceGapMs ?? 0;
+    if (!Number.isFinite(this.#utteranceGapMs) || this.#utteranceGapMs < 0) {
+      throw new Error(
+        `utteranceGapMs must be non-negative, received ${this.#utteranceGapMs}`,
+      );
+    }
     this.done = new Promise((resolve) => {
       this.#resolveDone = resolve;
     });
@@ -153,10 +162,15 @@ export class ScriptedWavSource implements AudioSource {
       return;
     }
 
+    const waitBeforeFeed = this.#nextIndex > 0;
     this.#cancelFeeding = false;
     this.#nextIndex += 1;
     const handlers = this.#handlers;
-    const feeding = this.#feed(utterance, handlers).catch((error: unknown) => {
+    const feeding = this.#feed(
+      utterance,
+      handlers,
+      waitBeforeFeed,
+    ).catch((error: unknown) => {
       handlers.onError(toError(error));
     });
     this.#feeding = feeding;
@@ -171,7 +185,11 @@ export class ScriptedWavSource implements AudioSource {
   async #feed(
     utterance: WavAudio,
     handlers: AudioSourceHandlers,
+    waitBeforeFeed: boolean,
   ): Promise<void> {
+    if (waitBeforeFeed && this.#utteranceGapMs > 0) {
+      await delay(this.#utteranceGapMs);
+    }
     const frames = framesWithSilenceTail(utterance, this.#options);
     for await (const [, frame] of pacedFrames(
       frames,

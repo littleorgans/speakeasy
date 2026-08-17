@@ -46,6 +46,8 @@ export class FakeSTT implements VoiceToText {
 export class FakeLLM implements ChatModel {
   readonly #tokens: string[];
   readonly #throwBeforeYield: boolean;
+  #calls = 0;
+  failOnCall: number | undefined;
   lastMessages: ChatMessage[] = [];
   lastTokenAt = 0;
 
@@ -55,8 +57,9 @@ export class FakeLLM implements ChatModel {
   }
 
   async *stream(messages: ChatMessage[]): AsyncGenerator<string> {
+    this.#calls += 1;
     this.lastMessages = messages;
-    if (this.#throwBeforeYield) {
+    if (this.#throwBeforeYield || this.#calls === this.failOnCall) {
       throw new Error("llm exploded");
     }
     for (const token of this.#tokens) {

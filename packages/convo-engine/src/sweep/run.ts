@@ -22,6 +22,7 @@ type CliOptions = {
   only: string | undefined;
   utteranceIds: string[];
   runs: number;
+  turnGapMs: number;
 };
 
 async function main(): Promise<void> {
@@ -36,7 +37,12 @@ async function main(): Promise<void> {
 
   const utterances = await loadUtterances(options.utteranceIds);
   const results = await runSweep(
-    { rows, utterances, runs: options.runs },
+    {
+      rows,
+      utterances,
+      runs: options.runs,
+      turnGapMs: options.turnGapMs,
+    },
     {
       createRuntime: createConversationRuntime,
       onResult: printResult,
@@ -59,6 +65,7 @@ function parseCliOptions(args: string[]): CliOptions {
       only: { type: "string" },
       utterances: { type: "string" },
       runs: { type: "string" },
+      "turn-gap-ms": { type: "string" },
     },
     strict: true,
     allowPositionals: false,
@@ -74,7 +81,13 @@ function parseCliOptions(args: string[]): CliOptions {
   if (!Number.isInteger(runs) || runs < 1) {
     throw new Error(`--runs must be a positive integer, received "${values.runs}"`);
   }
-  return { only: values.only, utteranceIds, runs };
+  const turnGapMs = Number(values["turn-gap-ms"] ?? "0");
+  if (!Number.isInteger(turnGapMs) || turnGapMs < 0) {
+    throw new Error(
+      `--turn-gap-ms must be a non-negative integer, received "${values["turn-gap-ms"]}"`,
+    );
+  }
+  return { only: values.only, utteranceIds, runs, turnGapMs };
 }
 
 async function loadUtterances(ids: readonly string[]): Promise<SweepUtterance[]> {
@@ -99,6 +112,12 @@ async function loadUtterances(ids: readonly string[]): Promise<SweepUtterance[]>
 function printResult(result: SweepResult): void {
   if (result.status === "skipped") {
     console.log(`${result.id}: skipped (${result.reason})`);
+    return;
+  }
+  if (result.status === "partial") {
+    console.log(
+      `${result.id}: partial at turn ${result.failedTurn} (${result.reason})\n${result.summary}`,
+    );
     return;
   }
   console.log(`${result.id}\n${result.summary}`);
