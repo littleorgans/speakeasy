@@ -12,6 +12,7 @@ export class FakeSTTSession extends EventEmitter implements STTSession {
   readonly pushed: Float32Array[] = [];
   flushes = 0;
   onPushAudio: ((frame: Float32Array) => void) | undefined;
+  onFlush: (() => void) | undefined;
 
   pushAudio(frame: Float32Array): void {
     this.pushed.push(frame);
@@ -20,6 +21,7 @@ export class FakeSTTSession extends EventEmitter implements STTSession {
 
   flush(): void {
     this.flushes += 1;
+    this.onFlush?.();
   }
 
   reset(): void {}

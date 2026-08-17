@@ -17,6 +17,10 @@ export type WavSourceOptions = {
   silenceTailMs?: number;
 };
 
+export type ScriptedWavSourceOptions = WavSourceOptions & {
+  onUtteranceEnd?: () => void;
+};
+
 type ResolvedWavSourceOptions = {
   frameMs: number;
   silenceTailMs: number;
@@ -86,21 +90,25 @@ export class WavAudioSource implements AudioSource {
 export class ScriptedWavSource implements AudioSource {
   readonly #utterances: readonly WavAudio[];
   readonly #options: ResolvedWavSourceOptions;
+  readonly #onUtteranceEnd: () => void;
   readonly done: Promise<void>;
   #resolveDone: () => void = () => {};
   #handlers: AudioSourceHandlers | undefined;
   #feeding: Promise<void> | undefined;
   #nextIndex = 0;
   #listening = false;
+  #readyForUtterance = false;
+  #cancelFeeding = false;
   #stopped = false;
   #finished = false;
 
   constructor(
     utterances: readonly WavAudio[],
-    options: WavSourceOptions = {},
+    options: ScriptedWavSourceOptions = {},
   ) {
     this.#utterances = utterances;
     this.#options = resolveOptions(options);
+    this.#onUtteranceEnd = options.onUtteranceEnd ?? (() => {});
     this.done = new Promise((resolve) => {
       this.#resolveDone = resolve;
     });
@@ -111,6 +119,12 @@ export class ScriptedWavSource implements AudioSource {
       return;
     }
     this.#listening = event.state === "listening";
+    if (this.#listening) {
+      this.#readyForUtterance = true;
+    } else {
+      this.#readyForUtterance = false;
+      this.#cancelFeeding = true;
+    }
     this.#pump();
   };
 
@@ -135,10 +149,11 @@ export class ScriptedWavSource implements AudioSource {
       this.#finish();
       return;
     }
-    if (!this.#listening) {
+    if (!this.#listening || !this.#readyForUtterance) {
       return;
     }
 
+    this.#cancelFeeding = false;
     this.#nextIndex += 1;
     const handlers = this.#handlers;
     const feeding = this.#feed(utterance, handlers).catch((error: unknown) => {
@@ -162,11 +177,12 @@ export class ScriptedWavSource implements AudioSource {
       frames,
       this.#options.frameMs,
     )) {
-      if (this.#stopped) {
+      if (this.#stopped || !this.#listening || this.#cancelFeeding) {
         return;
       }
       handlers.onFrame(frame);
     }
+    this.#onUtteranceEnd();
   }
 
   #finish(): void {

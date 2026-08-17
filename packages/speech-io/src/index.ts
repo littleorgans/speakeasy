@@ -74,6 +74,13 @@ export {
 
 // Recorded-audio helper (drives the mic-free live smoke).
 export { pacedFrames, readWavFrames, type WavAudio } from "./bench/wav.ts";
+export { upsertReportSection } from "./bench/report.ts";
+export {
+  DEFAULT_CORPUS_DIR,
+  readCorpusEntries,
+  type CorpusEntry,
+  type CorpusSidecar,
+} from "./corpus/store.ts";
 
 // Bench formatting + stats helpers, reused for latency reporting.
 export { formatMs, formatOptionalMs } from "./bench/format.ts";
