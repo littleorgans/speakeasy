@@ -11,10 +11,11 @@ import {
 test("parseClientCommand accepts the bounded browser command set", () => {
   assert.deepEqual(
     parseClientCommand(
-      '{"type":"start","mode":"natural","pauseMs":700,"voice":"marin","barge":true,"systemPrompt":"  Be kind.  "}',
+      '{"type":"start","engine":"mercury-instant","mode":"natural","pauseMs":700,"voice":"marin","barge":true,"systemPrompt":"  Be kind.  "}',
     ),
     {
       type: "start",
+      engine: "mercury-instant",
       mode: "natural",
       pauseMs: 700,
       voice: "marin",
@@ -31,12 +32,16 @@ test("parseClientCommand accepts the bounded browser command set", () => {
   });
   assert.throws(() => parseClientCommand('{"type":"unknown"}'), /unknown command/);
   assert.throws(
-    () => parseClientCommand('{"type":"start","mode":"natural","pauseMs":199,"voice":"marin"}'),
+    () => parseClientCommand('{"type":"start","engine":"realtime","mode":"natural","pauseMs":199,"voice":"marin"}'),
     /pauseMs must be 200 to 3000/,
   );
   assert.throws(
-    () => parseClientCommand('{"type":"start","mode":"natural","pauseMs":700,"voice":"unknown"}'),
+    () => parseClientCommand('{"type":"start","engine":"realtime","mode":"natural","pauseMs":700,"voice":"unknown"}'),
     /Unsupported Realtime voice/,
+  );
+  assert.throws(
+    () => parseClientCommand('{"type":"start","engine":"unknown","mode":"natural","pauseMs":700,"voice":"marin"}'),
+    /requires engine/,
   );
   assert.throws(
     () => parseClientCommand('{"type":"playback-drained","playbackId":-1}'),

@@ -1,5 +1,5 @@
 import { loadEnvFile } from "node:process";
-import type { ResponderKind, RuntimeConfig, TtsEngine } from "@speakeasy/convo-engine";
+import type { RuntimeConfig, TtsEngine } from "@speakeasy/convo-engine";
 import { startBrowserVoiceServer } from "./host.ts";
 
 loadLocalEnv();
@@ -20,9 +20,6 @@ function readOptions(argv: string[], env: NodeJS.ProcessEnv): {
   return {
     port,
     runtimeConfig: {
-      responder:
-        readChoice(env.SPEAKEASY_RESPONDER, ["cascade", "realtime"]) ??
-        "realtime",
       ttsEngine: readChoice(env.SPEAKEASY_TTS, ["sherpa", "cartesia"]),
       llmModel: env.SPEAKEASY_MODEL,
       ttsModel: env.SPEAKEASY_TTS_MODEL,
@@ -49,7 +46,7 @@ function isMissingFile(error: unknown): boolean {
   );
 }
 
-function readChoice<T extends ResponderKind | TtsEngine>(
+function readChoice<T extends TtsEngine>(
   value: string | undefined,
   choices: readonly T[],
 ): T | undefined {

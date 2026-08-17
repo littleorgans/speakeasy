@@ -103,9 +103,7 @@ export class BrowserConversationSession {
     this.#send({ type: "session", phase: "loading" });
     try {
       const runtimeConfig =
-        this.#runtimeConfig.responder === "cascade"
-          ? this.#runtimeConfig
-          : { ...this.#runtimeConfig, voice: command.voice };
+        runtimeConfigFor(command, this.#runtimeConfig);
       const runtime = await this.#createRuntime(runtimeConfig);
       if (!this.#starting || this.#closed) {
         return;
@@ -176,6 +174,31 @@ export class BrowserConversationSession {
       this.#socket.send(JSON.stringify(event));
     }
   }
+}
+
+export function runtimeConfigFor(
+  command: Extract<ClientCommand, { type: "start" }>,
+  defaults: RuntimeConfig,
+): RuntimeConfig {
+  const {
+    responder: _responder,
+    llmProvider: _llmProvider,
+    llmModel: _llmModel,
+    llmReasoningEffort: _llmReasoningEffort,
+    voice,
+    ...shared
+  } = defaults;
+  if (command.engine === "realtime") {
+    return { ...shared, responder: "realtime", voice: command.voice };
+  }
+  return {
+    ...shared,
+    responder: "cascade",
+    llmProvider: "mercury",
+    llmReasoningEffort:
+      command.engine === "mercury-instant" ? "instant" : "low",
+    ...(voice === undefined ? {} : { voice }),
+  };
 }
 
 function rawText(data: RawData): string {

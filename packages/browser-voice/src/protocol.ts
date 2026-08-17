@@ -13,10 +13,17 @@ export const MIN_PAUSE_MS = 200;
 export const MAX_PAUSE_MS = 3_000;
 
 export type ConversationMode = "natural" | "hold";
+export const RESPONSE_ENGINES = [
+  "realtime",
+  "mercury-instant",
+  "mercury-low",
+] as const;
+export type ResponseEngine = (typeof RESPONSE_ENGINES)[number];
 
 export type ClientCommand =
   | {
       type: "start";
+      engine: ResponseEngine;
       mode: ConversationMode;
       pauseMs: number;
       voice: RealtimeVoice;
@@ -49,7 +56,11 @@ export function parseClientCommand(raw: string): ClientCommand {
     throw new Error("command must have a type");
   }
   switch (value.type) {
-    case "start":
+    case "start": {
+      const engine = RESPONSE_ENGINES.find((candidate) => candidate === value.engine);
+      if (engine === undefined) {
+        throw new Error(`start requires engine: ${RESPONSE_ENGINES.join(", ")}`);
+      }
       if (value.mode !== "natural" && value.mode !== "hold") {
         throw new Error('start requires mode "natural" or "hold"');
       }
@@ -65,6 +76,7 @@ export function parseClientCommand(raw: string): ClientCommand {
       }
       return {
         type: "start",
+        engine,
         mode: value.mode,
         pauseMs: Number(value.pauseMs),
         voice: parseRealtimeVoice(value.voice),
@@ -73,6 +85,7 @@ export function parseClientCommand(raw: string): ClientCommand {
           ? { systemPrompt: value.systemPrompt.trim() }
           : {}),
       };
+    }
     case "stop":
     case "interrupt":
     case "commit-input":

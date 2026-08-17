@@ -58,6 +58,8 @@ class SpeakEasyRoom {
       pauseField: byId("pause-field"),
       pause: byId("pause-input"),
       microphone: byId("microphone-select"),
+      engine: byId("engine-select"),
+      voiceField: byId("voice-field"),
       voice: byId("voice-select"),
       systemPrompt: byId("system-prompt"),
       bargeField: byId("barge-field"),
@@ -101,6 +103,7 @@ class SpeakEasyRoom {
     this.elements.modeOptions.forEach((option) => {
       option.addEventListener("change", () => this.renderSettingsMode());
     });
+    this.elements.engine.addEventListener("change", () => this.renderSettingsMode());
     window.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && !this.elements.settingsDialog.open) {
         this.interrupt();
@@ -137,6 +140,7 @@ class SpeakEasyRoom {
       await this.connect();
       this.send({
         type: "start",
+        engine: this.activeSettings.engine,
         mode: this.activeSettings.mode,
         pauseMs: this.activeSettings.pauseMs,
         voice: this.activeSettings.voice,
@@ -567,6 +571,7 @@ class SpeakEasyRoom {
   loadSettings() {
     const defaults = {
       mode: "natural",
+      engine: this.elements.engine.value,
       pauseMs: Number(this.elements.pause.value),
       voice: this.elements.voice.value,
       microphoneId: "",
@@ -575,9 +580,11 @@ class SpeakEasyRoom {
     };
     try {
       const stored = { ...defaults, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}") };
+      const engines = [...this.elements.engine.options].map((option) => option.value);
       const voices = [...this.elements.voice.options].map((option) => option.value);
       return {
         mode: stored.mode === "hold" ? "hold" : "natural",
+        engine: engines.includes(stored.engine) ? stored.engine : defaults.engine,
         pauseMs: clampPause(stored.pauseMs, this.elements.pause),
         voice: voices.includes(stored.voice) ? stored.voice : defaults.voice,
         microphoneId: typeof stored.microphoneId === "string" ? stored.microphoneId : "",
@@ -593,6 +600,7 @@ class SpeakEasyRoom {
     const mode = this.elements.modeOptions.find((option) => option.value === this.settings.mode);
     if (mode) mode.checked = true;
     this.elements.pause.value = String(this.settings.pauseMs);
+    this.elements.engine.value = this.settings.engine;
     this.elements.microphone.value = this.settings.microphoneId;
     this.elements.voice.value = this.settings.voice;
     this.elements.systemPrompt.value = this.settings.systemPrompt;
@@ -606,6 +614,7 @@ class SpeakEasyRoom {
     if (mode === "natural" && !this.elements.pause.reportValidity()) return;
     this.settings = {
       mode,
+      engine: this.elements.engine.value,
       pauseMs: clampPause(this.elements.pause.value, this.elements.pause),
       microphoneId: this.elements.microphone.value,
       voice: this.elements.voice.value,
@@ -624,6 +633,7 @@ class SpeakEasyRoom {
     this.elements.pauseField.hidden = mode === "hold";
     this.elements.pause.disabled = mode === "hold";
     this.elements.bargeField.hidden = mode === "hold";
+    this.elements.voiceField.hidden = this.elements.engine.value !== "realtime";
   }
 
   createSignalBars() {

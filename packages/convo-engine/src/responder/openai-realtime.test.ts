@@ -535,28 +535,77 @@ test("a late correlated cancellation error does not poison the next turn", async
   await session.close();
 });
 
-test("an uncorrelated completed response cancellation error remains fatal", async () => {
+test("response.done before a cancellation error remains recoverable", async () => {
   const socket = new FakeSocket();
   const responder = makeResponder(socket);
   const session = await responder.open();
-  queueMicrotask(() => {
-    socket.emitEvent({ type: "response.created", response: { id: "r1" } });
-    socket.emitEvent({
-      type: "error",
-      error: {
-        message: "Cancellation failed: no active response found",
-        event_id: "unknown_cancel",
-      },
-    });
+  const first = session.respond(MESSAGES)[Symbol.asyncIterator]();
+  const firstAudio = first.next();
+  await waitFor(() => socket.sent.some((event) => event.type === "response.create"));
+  socket.emitEvent({ type: "response.created", response: { id: "r1" } });
+  socket.emitEvent({
+    type: "response.output_audio.delta",
+    response_id: "r1",
+    item_id: "item-1",
+    content_index: 0,
+    delta: pcm16Silence(300),
   });
-  await assert.rejects(
-    async () => {
-      for await (const _event of session.respond(MESSAGES)) {
-        // drain
-      }
-    },
-    /Cancellation failed: no active response found/,
+  await firstAudio;
+  session.interrupt(Promise.resolve(100));
+  const firstDone = first.next();
+  socket.emitEvent({ type: "response.done", response_id: "r1" });
+  assert.equal((await firstDone).done, true);
+
+  await waitFor(() =>
+    socket.sent.some((event) => event.type === "conversation.item.truncate"),
   );
+  socket.emitEvent({
+    type: "error",
+    error: {
+      code: "response_cancel_not_active",
+      message: "Cancellation failed: no active response found",
+      event_id: "cancel_1",
+    },
+  });
+  socket.emitEvent({
+    type: "conversation.item.truncated",
+    item_id: "item-1",
+    content_index: 0,
+    audio_end_ms: 100,
+  });
+
+  const second = session.respond([
+    ...MESSAGES,
+    { role: "user", content: "new question" },
+  ])[Symbol.asyncIterator]();
+  const secondDone = second.next();
+  await waitFor(() =>
+    socket.sent.filter((event) => event.type === "response.create").length === 2,
+  );
+  socket.emitEvent({ type: "response.created", response: { id: "r2" } });
+  socket.emitEvent({ type: "response.done", response_id: "r2" });
+  assert.equal((await secondDone).done, true);
+  await session.close();
+});
+
+test("an uncorrelated no-active cancellation error leaves the session healthy", async () => {
+  const socket = new FakeSocket();
+  const responder = makeResponder(socket);
+  const session = await responder.open();
+  const turn = session.respond(MESSAGES)[Symbol.asyncIterator]();
+  const done = turn.next();
+  await waitFor(() => socket.sent.some((event) => event.type === "response.create"));
+  socket.emitEvent({ type: "response.created", response: { id: "r1" } });
+  socket.emitEvent({
+    type: "error",
+    error: {
+      message: "Cancellation failed: no active response found",
+      event_id: "unknown_cancel",
+    },
+  });
+  socket.emitEvent({ type: "response.done", response_id: "r1" });
+  assert.equal((await done).done, true);
+  await session.close();
 });
 
 test("a server error event rejects the turn", async () => {

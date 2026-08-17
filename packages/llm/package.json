@@ -2,7 +2,7 @@
   "name": "@speakeasy/llm",
   "private": true,
   "version": "0.0.0",
-  "description": "Provider-agnostic streaming chat model contract with a Cerebras adapter.",
+  "description": "Provider-agnostic streaming chat models over OpenAI-compatible APIs.",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
