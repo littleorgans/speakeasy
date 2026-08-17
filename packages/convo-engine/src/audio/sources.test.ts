@@ -8,13 +8,18 @@ import { FakeLLM, FakeSTT, FakeTTS } from "../test-support.ts";
 import { createNullSink } from "./null-sink.ts";
 import { ScriptedWavSource } from "./sources.ts";
 
-test("scripted source waits for listening before each utterance", async () => {
-  const source = new ScriptedWavSource([utterance(0.5), utterance(0.7)], {
-    frameMs: 1,
-    silenceTailMs: 1,
-  });
+test("scripted source continues after an empty final transcript", {
+  timeout: 500,
+}, async () => {
+  const source = new ScriptedWavSource(
+    [utterance(0.5), utterance(0.7), utterance(0.9)],
+    {
+      frameMs: 1,
+      silenceTailMs: 1,
+    },
+  );
   const stt = new FakeSTT();
-  const transcripts = ["first", "second"];
+  const transcripts = ["first", "", "third"];
   const metrics: Extract<ConversationEvent, { type: "metrics" }>[] = [];
   let heardSpeech = false;
 
@@ -48,7 +53,7 @@ test("scripted source waits for listening before each utterance", async () => {
     if (heardSpeech) {
       heardSpeech = false;
       const transcript = transcripts.shift();
-      if (transcript) {
+      if (transcript !== undefined) {
         stt.session.say(transcript);
       }
     }
@@ -60,7 +65,7 @@ test("scripted source waits for listening before each utterance", async () => {
 
   assert.deepEqual(
     metrics.map((event) => event.metrics.transcript),
-    ["first", "second"],
+    ["first", "third"],
   );
   assert.deepEqual(transcripts, []);
 });

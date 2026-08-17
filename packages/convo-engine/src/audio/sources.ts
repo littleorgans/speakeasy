@@ -139,7 +139,6 @@ export class ScriptedWavSource implements AudioSource {
       return;
     }
 
-    this.#listening = false;
     this.#nextIndex += 1;
     const handlers = this.#handlers;
     const feeding = this.#feed(utterance, handlers).catch((error: unknown) => {
