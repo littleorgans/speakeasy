@@ -153,16 +153,26 @@ test("browser engine selection maps to isolated responder configurations", () =>
   };
   assert.deepEqual(runtimeConfigFor(
     { ...common, engine: "realtime" },
-    { ttsEngine: "cartesia", voice: "cascade-voice" },
+    {
+      llmModel: "operator-model",
+      ttsEngine: "cartesia",
+      voice: "cascade-voice",
+    },
   ), {
+    llmModel: "operator-model",
     responder: "realtime",
     ttsEngine: "cartesia",
     voice: "cedar",
   });
   assert.deepEqual(runtimeConfigFor(
     { ...common, engine: "mercury-instant" },
-    { ttsEngine: "cartesia", voice: "cascade-voice" },
+    {
+      llmModel: "operator-model",
+      ttsEngine: "cartesia",
+      voice: "cascade-voice",
+    },
   ), {
+    llmModel: "operator-model",
     responder: "cascade",
     llmProvider: "mercury",
     llmReasoningEffort: "instant",

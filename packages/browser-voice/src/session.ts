@@ -183,7 +183,6 @@ export function runtimeConfigFor(
   const {
     responder: _responder,
     llmProvider: _llmProvider,
-    llmModel: _llmModel,
     llmReasoningEffort: _llmReasoningEffort,
     voice,
     ...shared

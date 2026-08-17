@@ -588,7 +588,7 @@ test("response.done before a cancellation error remains recoverable", async () =
   await session.close();
 });
 
-test("an uncorrelated no-active cancellation error leaves the session healthy", async () => {
+test("an uncorrelated no-active cancellation error fails the active turn", async () => {
   const socket = new FakeSocket();
   const responder = makeResponder(socket);
   const session = await responder.open();
@@ -604,7 +604,7 @@ test("an uncorrelated no-active cancellation error leaves the session healthy", 
     },
   });
   socket.emitEvent({ type: "response.done", response_id: "r1" });
-  assert.equal((await done).done, true);
+  await assert.rejects(done, /Cancellation failed: no active response/);
   await session.close();
 });
 

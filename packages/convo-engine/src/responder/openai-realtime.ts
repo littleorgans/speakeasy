@@ -169,13 +169,11 @@ class RealtimeSession implements ResponderSession {
         const cancelledTurn =
           (cancelEventId ? this.#cancelledTurns.get(cancelEventId) : undefined) ??
           (turn?.cancelled ? turn : undefined);
-        if (isNoActiveResponseCancel(event)) {
+        if (isNoActiveResponseCancel(event) && cancelledTurn) {
           if (cancelEventId) this.#cancelledTurns.delete(cancelEventId);
-          if (cancelledTurn) {
-            cancelledTurn.responseDone = true;
-            this.#truncateInterruptedTurn(cancelledTurn);
-            if (cancelledTurn === turn) this.#queue.push(event);
-          }
+          cancelledTurn.responseDone = true;
+          this.#truncateInterruptedTurn(cancelledTurn);
+          if (cancelledTurn === turn) this.#queue.push(event);
           return;
         }
         const error = new Error(

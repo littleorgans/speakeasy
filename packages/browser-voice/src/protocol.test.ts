@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import type { AudioSegment } from "@speakeasy/convo-engine";
 import {
@@ -6,7 +7,23 @@ import {
   decodeMicFrame,
   encodeAudioPacket,
   parseClientCommand,
+  RESPONSE_ENGINES,
 } from "./protocol.ts";
+
+test("room engine options match the protocol engines", async () => {
+  const html = await readFile(
+    new URL("../public/index.html", import.meta.url),
+    "utf8",
+  );
+  const options = html
+    .match(/<select id="engine-select">([\s\S]*?)<\/select>/)?.[1]
+    ?.matchAll(/<option value="([^"]+)"/g);
+  assert.ok(options);
+  assert.deepEqual(
+    [...options].map((match) => match[1]),
+    [...RESPONSE_ENGINES],
+  );
+});
 
 test("parseClientCommand accepts the bounded browser command set", () => {
   assert.deepEqual(
