@@ -73,7 +73,7 @@ export {
 } from "./capture/ffmpeg.ts";
 
 // Recorded-audio helper (drives the mic-free live smoke).
-export { readWavFrames, type WavAudio } from "./bench/wav.ts";
+export { pacedFrames, readWavFrames, type WavAudio } from "./bench/wav.ts";
 
 // Bench formatting + stats helpers, reused for latency reporting.
 export { formatMs, formatOptionalMs } from "./bench/format.ts";

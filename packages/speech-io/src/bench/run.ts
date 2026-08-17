@@ -1,5 +1,4 @@
 import { performance } from "node:perf_hooks";
-import { setTimeout as delay } from "node:timers/promises";
 import type { EndpointConfig, VoiceToText } from "../contract.ts";
 import { parseNumbersMode } from "../rewrite/numbers.ts";
 import {
@@ -47,7 +46,7 @@ import type {
   RunResult,
   Summary,
 } from "./types.ts";
-import { readWavFrames, type WavAudio } from "./wav.ts";
+import { pacedFrames, readWavFrames, type WavAudio } from "./wav.ts";
 
 const USAGE = [
   "usage: pnpm bench --wav <path> [--engine stub|moonshine|sherpa] [--model <id>] [--mode sweep|ptt] [--runs <n>] [--frame-ms <n>]",
@@ -222,13 +221,15 @@ async function runOnce(input: {
   const start = performance.now();
   let speechEndAt: number | undefined;
 
-  for (const [frameIndex, frame] of input.audio.frames.entries()) {
+  for await (const [frameIndex, frame] of pacedFrames(
+    input.audio.frames,
+    input.frameMs,
+  )) {
     const frameSentAt = performance.now();
     session.pushAudio(frame);
     if (frameIndex === input.speech.frameIndex) {
       speechEndAt = frameSentAt + input.speech.offsetWithinFrameMs;
     }
-    await delay(input.frameMs);
   }
 
   await withTimeout(session.end(), SESSION_TIMEOUT_MS);
@@ -488,4 +489,3 @@ function formatRun(result: RunResult): string {
     `text=${JSON.stringify(result.finalText)}`,
   ].join(" ");
 }
-

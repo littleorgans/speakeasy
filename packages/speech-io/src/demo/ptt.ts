@@ -1,7 +1,11 @@
 import { createInterface } from "node:readline/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { formatMs } from "../bench/format.ts";
-import { readWavFrames, type WavAudio } from "../bench/wav.ts";
+import {
+  pacedFrames,
+  readWavFrames,
+  type WavAudio,
+} from "../bench/wav.ts";
 import {
   CAPTURE_FRAME_MS,
   CAPTURE_SAMPLE_RATE,
@@ -436,20 +440,14 @@ class PttDemo {
   /** Never rejects; failures surface through #fatal at the next checkpoint. */
   async #feedWav(wav: WavAudio): Promise<void> {
     try {
-      // Drift-corrected cadence: schedule each frame against an absolute
-      // deadline so audio time tracks wall time. A fixed sleep per frame
-      // accumulates timer overshoot and starves the release point of audio.
-      const feedStart = performance.now();
-      for (const [index, frame] of wav.frames.entries()) {
+      for await (const [, frame] of pacedFrames(
+        wav.frames,
+        CAPTURE_FRAME_MS,
+      )) {
         if (!this.#talking || this.#fatal) {
           return;
         }
         this.#ingestFrame(frame);
-        const wait =
-          feedStart + (index + 1) * CAPTURE_FRAME_MS - performance.now();
-        if (wait > 0) {
-          await delay(wait);
-        }
       }
       this.#clearLiveLine();
       console.log("(wav exhausted; release to commit)");
