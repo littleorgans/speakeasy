@@ -1,13 +1,13 @@
 # speak-easy system map
 <!-- lilo-page kind=index schema=1 -->
-<!-- lilo-covers package.json pnpm-workspace.yaml packages/*/package.json packages/speech-io/src/contract.ts packages/speech-io/src/bench/config.ts packages/speech-io/src/bench/run.ts packages/speech-io/src/engines/sherpa-models.ts packages/speech-io/src/engines/hotwords.ts packages/speech-io/src/rewrite/decorator.ts packages/speech-io/src/rewrite/numbers.ts packages/speech-io/src/tts/synth.ts packages/speech-io/src/tts/stream.ts packages/speech-io/src/tts/player.ts packages/llm/src/contract.ts packages/convo-engine/src/state.ts packages/convo-engine/src/loop.ts packages/convo-engine/src/responder/contract.ts packages/browser-voice/src/server.ts -->
-<!-- lilo-verified digest=b88790bbfd4dfdb1 commit=0251c0defed3 date=2026-10-23 -->
+<!-- lilo-covers package.json pnpm-workspace.yaml packages/*/package.json packages/speech-io/src/contract.ts packages/speech-io/src/bench/config.ts packages/speech-io/src/bench/run.ts packages/speech-io/src/engines/sherpa-models.ts packages/speech-io/src/engines/sherpa-binding.ts packages/speech-io/src/engines/ort-local.ts packages/speech-io/src/ort.ts packages/speech-io/src/engines/hotwords.ts packages/speech-io/src/rewrite/decorator.ts packages/speech-io/src/rewrite/numbers.ts packages/speech-io/src/tts/synth.ts packages/speech-io/src/tts/stream.ts packages/speech-io/src/tts/player.ts packages/llm/src/contract.ts packages/convo-engine/src/state.ts packages/convo-engine/src/loop.ts packages/convo-engine/src/responder/contract.ts packages/browser-voice/src/server.ts -->
+<!-- lilo-verified digest=0ddc337c5f43085c commit=8899f03fb703 date=2026-11-01 -->
 
 > A local first, cascaded speech to speech engine: microphone audio in, spoken reply out, with sub 200 ms speech recognition finalization as the headline goal.
 
 ## Purpose and scope
 
-speak-easy turns a spoken user turn into a spoken assistant reply. The cascade is speech to text, then a streaming LLM, then text to speech, driven by a half duplex conversation loop (`code:package.json`). Speech recognition and the default voices run in process on CPU through sherpa-onnx; the LLM and optional voices are hosted providers. The product driver is a conversational loop for the littleorgans director domain: short, proper noun heavy voice commands (claimed by S1, unverified).
+speak-easy turns a spoken user turn into a spoken assistant reply. The cascade is speech to text, then a streaming LLM, then text to speech, driven by a half duplex conversation loop (`code:package.json`). Speech recognition and the default voices run in process on CPU through sherpa-onnx; bench only STT engines on onnxruntime-node sit behind the `./ort` entry (`code:packages/speech-io/src/ort.ts`). The LLM and optional voices are hosted providers. The product driver is a conversational loop for the littleorgans director domain: short, proper noun heavy voice commands (claimed by S1, unverified).
 
 ## Responsibilities
 
@@ -35,7 +35,7 @@ Start at the STT contract (`code:packages/speech-io/src/contract.ts`), then the 
 
 ## Rules
 
-- Run every command from the repo root: model, results and hotword paths resolve from `process.cwd()` (`code:packages/speech-io/src/engines/sherpa-models.ts#SHERPA_ROOT`).
+- Run every command from the repo root: model, results and hotword paths resolve from `process.cwd()` (`code:packages/speech-io/src/engines/sherpa-binding.ts#SHERPA_ROOT`, `code:packages/speech-io/src/engines/ort-local.ts#ORT_ROOT`).
 - Never pass an `onProgress` callback to sherpa TTS `generateAsync`: in sherpa-onnx-node 1.13.3 it aborts the process with a native use after free. Streaming is an app level sentence pipeline instead (`code:packages/speech-io/src/tts/synth.ts`, `code:packages/speech-io/src/tts/stream.ts#streamSpeech`).
 - TTS runs on the `cpu` provider; CoreML aborts the process on kokoro (`code:packages/speech-io/src/tts/synth.ts`; CoreML failure claimed by S2, unverified).
 - The STT default is `en-kroko-2025-08-06`, chosen for lowest WER and latency on the command corpus (`code:packages/speech-io/src/engines/sherpa-models.ts#DEFAULT_SHERPA_MODEL`).
