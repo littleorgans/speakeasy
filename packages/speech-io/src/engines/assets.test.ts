@@ -73,6 +73,29 @@ test("download verifies, installs and marks the digest", async () => {
   assert.equal(server.calls.length, 1);
 });
 
+test("concurrent archive installs of the same missing asset all succeed", async () => {
+  const spec = await freshSpec();
+  const installs = 4;
+  let release!: () => void;
+  const barrier = new Promise<void>((resolve) => { release = resolve; });
+  let fetches = 0;
+  const fetch: FetchArchive = async () => {
+    if (++fetches === installs) release();
+    await barrier;
+    return Readable.from([archiveBytes]);
+  };
+  const results = await Promise.allSettled(
+    Array.from({ length: installs }, () => ensureAsset(spec, fetch)),
+  );
+  assert.deepEqual(
+    results.map((result) => result.status),
+    Array.from({ length: installs }, () => "fulfilled"),
+  );
+  assert.ok(await isAssetComplete(spec));
+  assert.equal(await readFile(join(spec.dir, "tokens.txt"), "utf8"), "a 0\nb 1\n");
+  assert.deepEqual((await readdir(join(spec.dir, ".."))).sort(), ["model-x", "model-x.tar.bz2"]);
+});
+
 test("a digest mismatch fails closed and leaves nothing behind", async () => {
   const spec = await freshSpec({ sha256: "0".repeat(64) });
   await assert.rejects(

@@ -98,11 +98,11 @@ export type FetchArchive = (url: string) => Promise<Readable>;
  * registries. Done when `dir` holds a completion marker for this digest.
  * Otherwise reuse the archive if its digest matches, else stream it to
  * `<archive>.<unique>.part` hashing as it goes, verify, and rename. Extract into a
- * temp folder beside `dir`, rename into place, and write the marker last, so
- * an interrupted run never leaves a directory that looks complete. A file set
- * verifies each file the same way, in place under `dir`, then writes the
- * marker; verified files already there are kept, so a repeat after partial
- * failure fetches only what is missing.
+ * temp folder beside `dir`, write the marker there, and rename into place, so
+ * `dir` appears only complete and a concurrent install that loses the rename
+ * finds the asset done. A file set verifies each file the same way, in place
+ * under `dir`, then writes the marker; verified files already there are kept,
+ * so a repeat after partial failure fetches only what is missing.
  */
 export async function ensureAsset(
   spec: AssetSpec | FileSetSpec,
@@ -192,11 +192,30 @@ async function installArchive(spec: AssetSpec): Promise<void> {
         `Archive ${spec.archive} has no ${spec.archiveRoot ?? basename(spec.dir)} directory`,
       );
     }
-    await rm(spec.dir, { recursive: true, force: true });
-    await rename(extracted, spec.dir);
-    await writeFile(join(spec.dir, COMPLETE_MARKER), completeMarkerValue(spec), "utf8");
+    await writeFile(join(extracted, COMPLETE_MARKER), completeMarkerValue(spec), "utf8");
+    await publishDir(extracted, spec, join(temp, "stale"));
   } finally {
     await rm(temp, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Rename a marked extraction into `dir`. A concurrent install of the same
+ * asset may win the rename. A stale `dir` is moved aside whole, never
+ * deleted in place, so a published asset is never partly removed.
+ */
+async function publishDir(source: string, spec: AssetSpec, aside: string): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await rename(source, spec.dir);
+      return;
+    } catch (error) {
+      if (await isAssetComplete(spec)) return;
+      if (attempt > 0) throw error;
+    }
+    await rename(spec.dir, aside).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    });
   }
 }
 
