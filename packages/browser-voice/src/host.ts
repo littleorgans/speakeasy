@@ -37,6 +37,7 @@ const STATIC_FILES = new Map([
   ["/prompt-reader.js", "prompt-reader.js"],
 ]);
 const PROMPT_READER_API = "/prompt-reader/";
+const PROMPT_READER_TAKES = "/prompt-reader/takes/";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost"]);
 const CONTENT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -145,6 +146,8 @@ async function servePromptReader(
       sendJson(response, 200, await reader.listing());
     } else if (url.pathname === "/prompt-reader/recordings" && request.method === "POST") {
       await saveTake(request, response, reader, url.searchParams);
+    } else if (url.pathname.startsWith(PROMPT_READER_TAKES) && request.method === "GET") {
+      await serveTake(request, response, reader, url.pathname.slice(PROMPT_READER_TAKES.length));
     } else {
       sendJson(response, 404, { error: "Not found" });
     }
@@ -167,12 +170,7 @@ async function saveTake(
   reader: PromptReader,
   query: URLSearchParams,
 ): Promise<void> {
-  const host = request.headers.host;
-  if (
-    !host ||
-    !LOOPBACK_HOSTNAMES.has(new URL(`http://${host}`).hostname) ||
-    request.headers.origin !== hostOrigin(request)
-  ) {
+  if (!isLoopbackHost(request) || request.headers.origin !== hostOrigin(request)) {
     sendJson(response, 403, { error: "same origin loopback pages only" });
     return;
   }
@@ -204,6 +202,42 @@ async function saveTake(
   }
 }
 
+/**
+ * Read only playback of a saved take. The name must equal the audio file a
+ * reader sidecar names, so no other path in or outside the folder is served.
+ * The Host check keeps a rebound DNS name from reading the recordings.
+ */
+async function serveTake(
+  request: IncomingMessage,
+  response: ServerResponse,
+  reader: PromptReader,
+  encodedName: string,
+): Promise<void> {
+  if (!isLoopbackHost(request)) {
+    sendJson(response, 403, { error: "loopback pages only" });
+    return;
+  }
+  let name: string;
+  try {
+    name = decodeURIComponent(encodedName);
+  } catch {
+    name = "";
+  }
+  const path = name ? await reader.takePath(name) : undefined;
+  if (!path) {
+    sendJson(response, 404, { error: "no such take" });
+    return;
+  }
+  const info = await stat(path);
+  response.writeHead(200, {
+    "content-type": "audio/wav",
+    "content-length": info.size,
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+  });
+  createReadStream(path).pipe(response);
+}
+
 /** The request body, or null once it passes `limit` bytes. */
 async function readBody(request: IncomingMessage, limit: number): Promise<Buffer | null> {
   const chunks: Buffer[] = [];
@@ -223,6 +257,11 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
     ...(status === 413 ? { connection: "close" } : {}),
   });
   response.end(JSON.stringify(body));
+}
+
+function isLoopbackHost(request: IncomingMessage): boolean {
+  const host = request.headers.host;
+  return !!host && LOOPBACK_HOSTNAMES.has(new URL(`http://${host}`).hostname);
 }
 
 function hostOrigin(request: IncomingMessage): string | undefined {

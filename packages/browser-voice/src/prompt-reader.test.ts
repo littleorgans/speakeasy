@@ -67,6 +67,26 @@ function post(
   });
 }
 
+/** GET a raw, unnormalized path so traversal attempts reach the host as sent. */
+function get(
+  host: BrowserVoiceServer,
+  path: string,
+  headers: Record<string, string> = {},
+): Promise<{ status: number; type: string | undefined; body: Buffer }> {
+  const { hostname, port } = new URL(host.url);
+  return new Promise((resolve, reject) => {
+    const outgoing = request({ hostname, port, path, method: "GET", headers }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer) => chunks.push(chunk));
+      response.on("end", () =>
+        resolve({ status: response.statusCode ?? 0, type: response.headers["content-type"], body: Buffer.concat(chunks) }),
+      );
+    });
+    outgoing.on("error", reject);
+    outgoing.end();
+  });
+}
+
 function takeBytes(samples: number, value = 0.25): Uint8Array {
   return new Uint8Array(new Float32Array(samples).fill(value).buffer);
 }
@@ -97,6 +117,7 @@ test("prompts list in id order and a saved take becomes a schema 2 corpus pair",
       before.prompts.map((prompt) => [prompt.id, prompt.recorded]),
       [["p001", false], ["p002", false]],
     );
+    assert.deepEqual(before.prompts.map((prompt) => prompt.takes), [[], []]);
 
     const saved = await post(host, "/prompt-reader/recordings?promptId=p002&device=Desk%20mic", {
       body: takeBytes(16_000),
@@ -121,6 +142,7 @@ test("prompts list in id order and a saved take becomes a schema 2 corpus pair",
       after.prompts.map((prompt) => prompt.recorded),
       [false, true],
     );
+    assert.deepEqual(after.prompts[1]?.takes, [saved.body.audio]);
   });
 });
 
@@ -223,4 +245,56 @@ test("the saved WAV preserves every captured Float32 sample at 16 kHz", async ()
     assert.equal(wav.samples.findIndex((sample, index) => sample !== samples[index]), -1, "sample values changed");
     assert.equal(wav.bitsPerSample, 32);
   });
+});
+
+test("saved takes play back read only; every other path is refused", async () => {
+  await withReader(async (host, outputDir) => {
+    const first = await post(host, "/prompt-reader/recordings?promptId=p001", { body: takeBytes(320, 0.1) });
+    const second = await post(host, "/prompt-reader/recordings?promptId=p001", { body: takeBytes(320, 0.2) });
+    const listing = (await (await fetch(`${host.url}/prompt-reader/prompts`)).json()) as PromptListing;
+    assert.deepEqual(listing.prompts[0]?.takes, [first.body.audio, second.body.audio]);
+
+    const [entry] = await readCorpusEntries(outputDir);
+    const onDisk = await readFile(entry!.wavPath);
+    const served = await get(host, `/prompt-reader/takes/${encodeURIComponent(String(first.body.audio))}`);
+    assert.equal(served.status, 200);
+    assert.equal(served.type, "audio/wav");
+    assert.ok(served.body.equals(onDisk), "served bytes match the take");
+
+    // A wav the reader did not write, a sidecar and a file outside the folder.
+    await writeFile(join(outputDir, "foreign.wav"), onDisk);
+    await writeFile(join(dirname(outputDir), "outside.wav"), onDisk);
+    const sidecar = basename(entry!.sidecarPath);
+    for (const path of [
+      "/prompt-reader/takes/foreign.wav",
+      `/prompt-reader/takes/${sidecar}`,
+      "/prompt-reader/takes/",
+      "/prompt-reader/takes/../outside.wav",
+      "/prompt-reader/takes/..%2Foutside.wav",
+      "/prompt-reader/takes/%2E%2E%2Foutside.wav",
+      `/prompt-reader/takes/${encodeURIComponent(join(dirname(outputDir), "outside.wav"))}`,
+      `/prompt-reader/takes/sub%2F..%2F${first.body.audio}`,
+      "/prompt-reader/takes/%E0%A4%A",
+    ]) {
+      const refused = await get(host, path);
+      assert.equal(refused.status, 404, path);
+      assert.notEqual(refused.type, "audio/wav", path);
+    }
+    const port = new URL(host.url).port;
+    assert.equal(
+      (await get(host, `/prompt-reader/takes/${first.body.audio}`, { host: `evil.test:${port}` })).status,
+      403,
+      "rebound host",
+    );
+    assert.ok((await readFile(entry!.wavPath)).equals(onDisk), "playback left the take unchanged");
+  });
+});
+
+test("the take route is closed when the reader is not configured", async () => {
+  const host = await startBrowserVoiceServer({ port: 0 });
+  try {
+    assert.equal((await get(host, "/prompt-reader/takes/utt-p001-x.wav")).status, 404);
+  } finally {
+    await host.close();
+  }
 });

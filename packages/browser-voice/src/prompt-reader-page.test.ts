@@ -10,6 +10,8 @@ function pageHarness() {
   const constraints: unknown[] = [];
   const denied: Array<(error: Error) => void> = [];
   const connected: unknown[] = [];
+  const played: Array<{ samples: Float32Array }> = [];
+  const fetched: string[] = [];
   const elements = new Map<string, Record<string, unknown>>();
   const document = {
     body: { dataset: {} },
@@ -23,6 +25,20 @@ function pageHarness() {
     audioWorklet = { async addModule() {} };
     async resume() {}
     createGain() { return { gain: { value: 1 }, connect() {} }; }
+    createBuffer(_channels: number, length: number) {
+      const buffer = { samples: new Float32Array(length), copyToChannel(data: Float32Array) { buffer.samples.set(data); } };
+      return buffer;
+    }
+    async decodeAudioData(bytes: ArrayBuffer) { return { samples: new Float32Array(bytes) }; }
+    createBufferSource() {
+      return {
+        buffer: null as { samples: Float32Array } | null,
+        onended: null,
+        connect() {},
+        start() { played.push(this.buffer!); },
+        stop() {},
+      };
+    }
     createMediaStreamSource(stream: unknown) {
       return { connect: () => connected.push(stream), disconnect() {} };
     }
@@ -37,6 +53,10 @@ function pageHarness() {
   const context = vm.createContext({
     document, AudioContext, AudioWorkletNode, HoldReleaseGate,
     Float32Array, URLSearchParams,
+    fetch: async (url: string) => {
+      fetched.push(url);
+      return { ok: true, arrayBuffer: async () => new Float32Array([0.5, -0.5]).buffer };
+    },
     navigator: { mediaDevices: { getUserMedia: (options: unknown) => {
       constraints.push(options);
       return new Promise((resolve, reject) => { pending.push(resolve); denied.push(reject); });
@@ -47,7 +67,7 @@ function pageHarness() {
   vm.runInContext(source, context);
   const reader = new context.Reader();
   reader.prompts = [{ id: "p001", stratum: "short", text: "read this" }];
-  return { reader, pending, denied, connected, constraints, expectedConstraints: vm.runInContext("CAPTURE_AUDIO_CONSTRAINTS", context) };
+  return { reader, pending, denied, connected, constraints, played, fetched, expectedConstraints: vm.runInContext("CAPTURE_AUDIO_CONSTRAINTS", context) };
 }
 
 function mic() {
@@ -110,4 +130,50 @@ test("a stale mic denial cannot cancel the current take", async () => {
   assert.equal(reader.gate.capturing, true);
   assert.equal(current.track.stopped, false);
   reader.cancelTake("done");
+});
+
+test("play replays the unsaved take without opening the mic or changing it", async () => {
+  const { reader, pending, played, fetched } = pageHarness();
+  const opening = reader.press();
+  await waitForRequests(pending, 1);
+  pending[0]!(mic());
+  await opening;
+  reader.onFrame({ kind: "frame", samples: new Float32Array(6_400).fill(0.3), level: 0.2 });
+  reader.gate.cancel();
+  reader.finishTake();
+  const take = reader.take;
+  const before = Array.from(take.samples);
+  await reader.play();
+  assert.equal(pending.length, 1, "playback must not request the mic");
+  assert.equal(reader.gate.capturing, false);
+  assert.equal(reader.take, take);
+  assert.deepEqual(Array.from(take.samples), before);
+  assert.deepEqual(Array.from(played[0]!.samples), before);
+  assert.deepEqual(fetched, []);
+  assert.equal(reader.elements.play.disabled, false);
+});
+
+test("play on a revisited prompt fetches the latest saved take; T steps to earlier ones", async () => {
+  const { reader, pending, played, fetched } = pageHarness();
+  reader.prompts = [{ id: "p001", stratum: "short", text: "read this", recorded: true, takes: ["utt-p001-a.wav", "utt-p001-b.wav"] }];
+  reader.render();
+  assert.equal(reader.elements.play.disabled, false);
+  assert.equal(reader.elements.playLabel.textContent, "Play take 2 of 2");
+  assert.equal(reader.elements.earlier.hidden, false);
+  await reader.play();
+  assert.deepEqual(fetched, ["/prompt-reader/takes/utt-p001-b.wav"]);
+  assert.equal(played.length, 1);
+  reader.stepTake();
+  await reader.play();
+  assert.deepEqual(fetched, ["/prompt-reader/takes/utt-p001-b.wav", "/prompt-reader/takes/utt-p001-a.wav"]);
+  assert.equal(pending.length, 0, "playback must not request the mic");
+  assert.equal(reader.take, null);
+});
+
+test("play is disabled on a prompt with no take", () => {
+  const { reader } = pageHarness();
+  reader.prompts = [{ id: "p001", stratum: "short", text: "read this", recorded: false, takes: [] }];
+  reader.render();
+  assert.equal(reader.elements.play.disabled, true);
+  assert.equal(reader.elements.earlier.hidden, true);
 });

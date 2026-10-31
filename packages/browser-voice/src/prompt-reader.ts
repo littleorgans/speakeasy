@@ -33,7 +33,8 @@ export type Prompt = { id: string; stratum: string; text: string };
 export type PromptListing = {
   set: string | null;
   outputDir: string;
-  prompts: Array<Prompt & { recorded: boolean }>;
+  /** `takes` lists the prompt's saved audio file names, oldest first. */
+  prompts: Array<Prompt & { recorded: boolean; takes: string[] }>;
 };
 
 export class UnknownPromptError extends Error {}
@@ -68,21 +69,36 @@ export class PromptReader {
     return new PromptReader(set, prompts, outputDir);
   }
 
-  /** Prompts in id order, each marked when the output folder holds a take for it. */
+  /** Prompts in id order, each with the takes the output folder holds for it. */
   async listing(): Promise<PromptListing> {
-    const recorded = new Set(
-      (await readEntriesIfPresent(this.#outputDir)).map(
-        (entry) => entry.sidecar.promptId,
-      ),
-    );
+    const takes = await this.#takes();
     return {
       set: this.#set,
       outputDir: this.#outputDir,
-      prompts: this.#prompts.map((prompt) => ({
-        ...prompt,
-        recorded: recorded.has(prompt.id),
-      })),
+      prompts: this.#prompts.map((prompt) => {
+        const audio = takes.filter((take) => take.promptId === prompt.id).map((take) => take.audio);
+        return { ...prompt, recorded: audio.length > 0, takes: audio };
+      }),
     };
+  }
+
+  /**
+   * The path of a saved take, only when `audio` is exactly the file a
+   * sidecar for one of this set's prompts names; anything else is undefined.
+   */
+  async takePath(audio: string): Promise<string | undefined> {
+    const take = (await this.#takes()).find((candidate) => candidate.audio === audio);
+    return take && basename(take.wavPath) === audio ? take.wavPath : undefined;
+  }
+
+  /** Saved takes for this set's prompts, sorted by file name (oldest first). */
+  async #takes(): Promise<Array<{ promptId: string; audio: string; wavPath: string }>> {
+    const ids = new Set(this.#prompts.map((prompt) => prompt.id));
+    return (await readEntriesIfPresent(this.#outputDir)).flatMap(({ sidecar, wavPath }) =>
+      sidecar.promptId !== null && ids.has(sidecar.promptId)
+        ? [{ promptId: sidecar.promptId, audio: sidecar.audio, wavPath }]
+        : [],
+    );
   }
 
   async save(
