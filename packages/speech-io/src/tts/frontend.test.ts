@@ -27,7 +27,7 @@ test("the CMU dictionary is pinned at the vendored commit", () => {
 
 test("normalizeText reads clocks, am/pm, dotted names, hyphens and initialisms", () => {
   assert.equal(normalizeText("Leave at 7:05 pm.", false), "Leave at 7 oh 5 p m.");
-  assert.equal(normalizeText("Back by 9 a.m. today", false), "Back by 9 a m. today");
+  assert.equal(normalizeText("Back by 9 a.m. today", false), "Back by 9 ay m. today");
   assert.equal(normalizeText("Open notes.md now", false), "Open notes dot m d now");
   assert.equal(normalizeText("a well-known API", false), "a well known ay p i");
   assert.equal(normalizeText("I am here", false), "I am here");
@@ -38,6 +38,13 @@ test("normalizeText reads clocks, am/pm, dotted names, hyphens and initialisms",
 test("adaptIpa keeps U.S. rhotics and lengthens LOT for American voices", () => {
   const ipa = g2p.phonemize("march car").tokens.join("");
   assert.equal(adaptIpa(ipa, false), "mˈɑːɹtʃ kˈɑːɹ");
+});
+
+test("morning times use the letter A rather than the article", () => {
+  const clockG2p = new EnglishG2P({ cmuDict: { a: "AH0", ay: "EY1", m: "EH1 M" } });
+  const spoken = clockG2p.phonemize(normalizeText("9 am", false)).tokens.join("");
+  assert.ok(spoken.includes("ˈeɪ"), spoken);
+  assert.equal(normalizeText("9 am", false), "9 ay m");
 });
 
 test("adaptIpa applies the RP rules for British voices", () => {

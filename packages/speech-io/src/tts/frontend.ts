@@ -90,7 +90,8 @@ export function normalizeText(text: string, british: boolean): string {
   return text
     .replace(/(\d+):(\d+)/g, (_match, hours: string, minutes: string) =>
       `${Number(hours)} ${Number(minutes) < 10 ? "oh " : ""}${Number(minutes)}`)
-    .replace(/(?<=\d)\s*([ap])\.?m(?![A-Za-z])/gi, (_match, half: string) => ` ${half.toLowerCase()} m`)
+    .replace(/(?<=\d)\s*([ap])\.?m(?![A-Za-z])/gi, (_match, half: string) =>
+      ` ${letters[half.toLowerCase()] ?? half.toLowerCase()} m`)
     .replace(/(?<=[A-Za-z])\.(?=[A-Za-z])/g, " dot ")
     .replace(/-/g, " ")
     .replace(/\b[A-Za-z]{1,8}\b/g, (word) =>
