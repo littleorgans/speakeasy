@@ -32,8 +32,8 @@ export {
   createSherpaEngine,
   type AnySherpaEngine,
 } from "./engines/sherpa-factory.ts";
-export type { Hotwords } from "./engines/hotwords.ts";
 export type {
+  Hotwords,
   RecognizerResult,
   SherpaBinding,
 } from "./engines/sherpa-api.ts";

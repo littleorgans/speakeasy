@@ -2,6 +2,8 @@ import { readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hasNonEmptyFile } from "./assets.ts";
+import type { Hotwords } from "./sherpa-api.ts";
+export type { Hotwords } from "./sherpa-api.ts";
 
 /**
  * Optional contextual-biasing hotwords for the SherpaEngine (experimental).
@@ -21,14 +23,6 @@ import { hasNonEmptyFile } from "./assets.ts";
 export const HOTWORDS_SCORE = 2.0;
 
 const HOTWORDS_FILENAME = "hotwords.txt";
-
-export type Hotwords = {
-  /** Cleaned phrases, one per hotword. */
-  phrases: string[];
-  /** Path to the cleaned file handed to sherpa (comments/blanks stripped). */
-  file: string;
-  score: number;
-};
 
 /**
  * Load `hotwords.txt` from the project root if it has usable terms, else

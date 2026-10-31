@@ -40,7 +40,6 @@ test("stt closure holds the engines and contract only", () => {
   assert.deepEqual(files, [
     "contract.ts",
     "engines/assets.ts",
-    "engines/hotwords.ts",
     "engines/result.ts",
     "engines/sherpa-api.ts",
     "engines/sherpa-factory.ts",
@@ -60,6 +59,12 @@ test("stt closure imports node builtins only, never a native package", () => {
   const { packages } = importClosure("stt.ts");
   const external = packages.filter((name) => !name.startsWith("node:"));
   assert.deepEqual(external, []);
+});
+
+test("stt closure never reads the host working directory", () => {
+  for (const file of importClosure("stt.ts").files) {
+    assert.doesNotMatch(readFileSync(join(SRC, file), "utf8"), /\bprocess\.cwd\s*\(/, file);
+  }
 });
 
 test("the closure scan sees requires, so the CLI binding stays outside", () => {

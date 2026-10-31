@@ -10,6 +10,15 @@ export type Waveform = {
   sampleRate: number;
 };
 
+/** Prepared contextual biasing supplied by the host. */
+export type Hotwords = {
+  /** Cleaned phrases, one per hotword. */
+  phrases: string[];
+  /** Path to the cleaned file handed to sherpa. */
+  file: string;
+  score: number;
+};
+
 /**
  * Recognizer result JSON. Streaming fills `ys_probs` and `start_time`;
  * offline fills `ys_log_probs` and `durations` for models that report them.

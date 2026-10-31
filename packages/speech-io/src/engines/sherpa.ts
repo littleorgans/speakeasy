@@ -11,9 +11,9 @@ import type {
   VoiceToText,
 } from "../contract.ts";
 import { ensureAsset, type AssetSpec } from "./assets.ts";
-import type { Hotwords } from "./hotwords.ts";
 import { resultDetail, resultText } from "./result.ts";
 import type {
+  Hotwords,
   OnlineRecognizer,
   OnlineRecognizerConfig,
   OnlineStream,
