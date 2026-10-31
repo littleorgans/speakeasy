@@ -34,6 +34,7 @@ class PromptReaderPage {
     this.context = null;
     this.capture = null;
     this.stream = null;
+    this.micGeneration = 0;
     this.source = null;
     this.frames = [];
     this.take = null;
@@ -101,24 +102,27 @@ class PromptReaderPage {
 
   async press() {
     if (this.saving || !this.current() || !this.gate.press()) return;
+    const generation = ++this.micGeneration;
     this.frames = [];
     this.take = null;
     this.setStatus("Recording. Release when you finish the prompt.");
     try {
-      await this.openMic();
+      await this.openMic(generation);
     } catch (error) {
+      if (generation !== this.micGeneration) return;
       this.gate.cancel();
       this.closeMic();
       this.fail(describeMicError(error));
     }
   }
 
-  async openMic() {
+  async openMic(generation) {
     // AudioContext and worklet are created once, at the first press, and
     // resumed at every press; the mic itself opens per press.
     this.context ??= new AudioContext({ latencyHint: "interactive" });
     if (!this.capture) {
       await this.context.audioWorklet.addModule("/capture-worklet.js");
+      if (generation !== this.micGeneration) return;
       this.capture = new AudioWorkletNode(this.context, "speak-easy-capture");
       this.capture.port.onmessage = (event) => this.onFrame(event.data);
       const silent = this.context.createGain();
@@ -126,11 +130,12 @@ class PromptReaderPage {
       this.capture.connect(silent).connect(this.context.destination);
     }
     await this.context.resume();
+    if (generation !== this.micGeneration) return;
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: { ...CAPTURE_AUDIO_CONSTRAINTS },
     });
-    if (!this.gate.capturing) {
-      // Released and committed before the mic opened.
+    if (generation !== this.micGeneration || !this.gate.capturing) {
+      // This press ended before its mic opened; a later press owns capture.
       for (const track of stream.getTracks()) track.stop();
       return;
     }
@@ -146,6 +151,7 @@ class PromptReaderPage {
   }
 
   closeMic() {
+    this.micGeneration += 1;
     this.source?.disconnect();
     this.source = null;
     for (const track of this.stream?.getTracks() ?? []) track.stop();
