@@ -2,6 +2,7 @@
   "name": "@speakeasy/browser-voice",
   "private": true,
   "version": "0.0.0",
+  "license": "Apache-2.0",
   "description": "Browser microphone, playback, and conversation UI for speak-easy.",
   "type": "module",
   "engines": {

@@ -2,6 +2,7 @@
   "name": "@speakeasy/llm",
   "private": true,
   "version": "0.0.0",
+  "license": "Apache-2.0",
   "description": "Provider-agnostic streaming chat models over OpenAI-compatible APIs.",
   "type": "module",
   "exports": {
