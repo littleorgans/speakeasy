@@ -1,2 +1,13 @@
 speak-easy
 Copyright 2026 Stuart Robinson
+
+This product includes data from the Carnegie Mellon Pronouncing Dictionary,
+which is freely available at <http://www.speech.cs.cmu.edu/cgi-bin/cmudict>.
+Copyright (C) 1993-2015 Carnegie Mellon University. All rights reserved.
+speak-easy downloads it at install time for text to speech; its full terms
+are in packages/speech-io/src/tts/vendor/piper-plus-g2p/THIRD_PARTY_LICENSES.md.
+
+packages/speech-io/src/tts/vendor/piper-plus-g2p/ vendors the English G2P of
+Piper Plus (MIT, Copyright (c) 2022 Michael Hansen, Copyright (c) 2025 ayutaz),
+with notices for its g2p-en (Apache-2.0) and Tacotron (MIT) lineage; see its
+NOTICE.

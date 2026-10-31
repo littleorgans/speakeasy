@@ -30,15 +30,19 @@ voices and the int8 Kokoro were added in the 2026-07-04 streamable-quality pass 
 
 `OfflineTts` config (per family, see `packages/speech-io/src/tts/synth.ts`):
 
-- **vits**: `model`, `tokens`, `dataDir` (espeak-ng phoneme data), plus
-  `noiseScale`, `noiseScaleW`, `lengthScale` knobs.
-- **kokoro**: `model`, `voices` (speaker embedding bank), `tokens`, `dataDir`,
-  plus `lengthScale`, `lexicon`, `lang`.
+- **vits**: `model`, `tokens`, plus `noiseScale`, `noiseScaleW`, `lengthScale`
+  knobs.
+- **kokoro**: `model`, `voices` (speaker embedding bank), `tokens`, plus
+  `lengthScale`, `lexicon`, `lang`.
 - **shared**: `numThreads`, `provider`, `debug` (under `model`), and top-level
   `maxNumSentences`, `silenceScale`.
 
-Per-request (`generate`/`generateAsync`): `text`, `sid` (speaker id, 0..10 for
-kokoro, 0 for single-voice piper), `speed` (rate multiplier). Sweep flags:
+Per-request (`generate`/`generateAsync`): `sid` (speaker id, 0..10 for
+kokoro, 0 for single-voice piper), `speed` (rate multiplier), and the input.
+The sweep ran on sherpa-onnx-node 1.13.3, which phonemized `text` with its
+built in espeak-ng from a `dataDir`. 2.x removed espeak-ng and ignores
+`dataDir`: speak-easy now phonemizes in `tts/frontend.ts` (Piper Plus G2P)
+and passes `generationConfig.phonemeCodepoints` with empty `text`. Sweep flags:
 `--model <id>` narrows to one model, `--speed <rate>` passes through.
 
 ## Streaming: exposed but unusable in 1.13.3

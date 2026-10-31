@@ -1,0 +1,27 @@
+Piper Plus English G2P (@piper-plus/g2p, JavaScript), vendored unmodified.
+
+Source: https://github.com/ayutaz/piper-plus
+Commit: 4fd95c24d364fcaeba200ee606c0902e9bb70768, directory src/wasm/g2p/
+Licence: MIT, Copyright (c) 2022 Michael Hansen, Copyright (c) 2025 ayutaz; full text in LICENSE.md.
+Dictionary: CMU Pronouncing Dictionary 0.7b (data/cmudict_data.json at the same
+commit), BSD style terms in THIRD_PARTY_LICENSES.md. speak-easy downloads it,
+pinned by sha256, instead of vendoring it (tts/frontend.ts).
+This product includes data from the Carnegie Mellon Pronouncing Dictionary,
+which is freely available at <http://www.speech.cs.cmu.edu/cgi-bin/cmudict>.
+Normalizer lineage (en/normalize.js): g2p-en, Apache-2.0, and Keith Ito's
+Tacotron number normalizer, MIT; notices in notices/g2p_en/, copied from
+src/python/g2p/piper_plus_g2p/_vendor/g2p_en/ at the same commit.
+Licences checked 2026-11-01.
+
+Files and SHA256, identical to the source commit:
+  en/index.js              24aa801a62b32b4132dbbe7c519c94b1871d8d028eb4a0a902c7ce8637a19f6f
+  en/cmudict.js            73e5ecafa9dfb6ee01572b999f4a1a0ce260e640c9f3d009c3d83196f9813eb7
+  en/normalize.js          3fc95d79229d5d35b8c81b2429a8c48edd06455ebff6c8a9063cb889ec2739bd
+  LICENSE.md               76ba36eda217be072bfd1cf0855b8c705bbdcaaec49e1b2e0ca081e89165159a
+  THIRD_PARTY_LICENSES.md  721349a9fbf554b61c316f04ba940ab21f021e77024aaca62e063f0a1d2b4421
+  notices/g2p_en/LICENSE.txt           b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1
+  notices/g2p_en/NOTICE.txt            4b24f89add0ae449941fc338ebf6486e2378809e881fc1d3e2e740ae0af26c74
+  notices/g2p_en/TACOTRON-LICENSE.txt  f89accd9d66f6a011f19997d7a21cf71a35ffe2e2d0911b5460cbd0cab52a581
+
+The *.d.ts files beside them are speak-easy additions: type declarations for
+the symbols speak-easy calls. They change no behaviour.
