@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after } from "node:test";
-import { COMPLETE_MARKER } from "./assets.ts";
+import { COMPLETE_MARKER, completeMarkerValue } from "./assets.ts";
 import type { SherpaBinding } from "./sherpa-api.ts";
 import {
   resolveModelPaths,
@@ -20,7 +20,7 @@ export async function seededModelRoot(model: SherpaModelId): Promise<string> {
   after(() => rm(root, { recursive: true, force: true }));
   const paths = resolveModelPaths(SHERPA_MODELS[model], root);
   await mkdir(paths.dir, { recursive: true });
-  await writeFile(join(paths.dir, COMPLETE_MARKER), paths.sha256 ?? "");
+  await writeFile(join(paths.dir, COMPLETE_MARKER), completeMarkerValue(paths));
   return root;
 }
 

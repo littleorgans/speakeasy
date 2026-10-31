@@ -44,11 +44,14 @@ export {
   resolveModelPaths,
   resolveSherpaModel,
   SHERPA_MODELS,
+  type CanaryModel,
   type ModelArchive,
+  type ModelFile,
   type ModelLicence,
   type MoonshineModel,
   type NemoTransducerModel,
   type OfflineSherpaModel,
+  type Qwen3AsrModel,
   type SherpaModel,
   type SherpaModelId,
   type StreamingSherpaModel,
@@ -56,9 +59,12 @@ export {
 
 export {
   COMPLETE_MARKER,
+  completeMarkerValue,
   ensureAsset,
   isAssetComplete,
   sha256File,
+  type AssetFile,
   type AssetSpec,
   type FetchArchive,
+  type FileSetSpec,
 } from "./engines/assets.ts";

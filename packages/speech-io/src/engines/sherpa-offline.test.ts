@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import { join } from "node:path";
 import { test } from "node:test";
 import type { EmptyEvent, FinalEvent } from "../contract.ts";
 import { SherpaOfflineEngine } from "./sherpa-offline.ts";
@@ -126,6 +127,60 @@ test("Moonshine final has text and no invented tokens", async () => {
   assert.deepEqual(final.tokens, []);
   assert.ok(fake.configs[0]?.modelConfig.moonshine);
   assert.equal(fake.configs[0]?.modelConfig.transducer, undefined);
+});
+
+test("Canary transcribes English to English with punctuation", async () => {
+  const { fake, session } = await openSession("en-canary-180m-flash-int8", [
+    { text: " Open the file.", tokens: [" Open", " the", " file", "."] },
+  ]);
+  session.pushAudio(new Float32Array(1_600));
+  session.flush();
+  const [final] = (await once(session, "final")) as [FinalEvent];
+  assert.equal(final.text, "Open the file.");
+  assert.deepEqual(final.tokens, []);
+  const { modelConfig } = fake.configs[0]!;
+  const dir = SHERPA_MODELS["en-canary-180m-flash-int8"].name;
+  const { encoder, decoder, ...options } = modelConfig.canary!;
+  assert.deepEqual(options, { srcLang: "en", tgtLang: "en", usePnc: 1 });
+  assert.ok(encoder.endsWith(join(dir, "encoder.int8.onnx")));
+  assert.ok(decoder.endsWith(join(dir, "decoder.int8.onnx")));
+  assert.ok(modelConfig.tokens.endsWith(join(dir, "tokens.txt")));
+  assert.equal(modelConfig.transducer, undefined);
+});
+
+test("Qwen3 ASR loads its tokenizer directory and reports no tokens", async () => {
+  const { fake, session } = await openSession("en-qwen3-asr-0.6b-int8-2026-03-25", [
+    { text: "Okay, Charles.", tokens: ["Okay", ",", " Charles", "."], timestamps: [] },
+  ]);
+  session.pushAudio(new Float32Array(1_600));
+  session.flush();
+  const [final] = (await once(session, "final")) as [FinalEvent];
+  assert.equal(final.text, "Okay, Charles.");
+  assert.deepEqual(final.tokens, []);
+  const { modelConfig } = fake.configs[0]!;
+  const dir = SHERPA_MODELS["en-qwen3-asr-0.6b-int8-2026-03-25"].name;
+  const qwen = modelConfig.qwen3Asr!;
+  assert.ok(qwen.convFrontend.endsWith(join(dir, "conv_frontend.onnx")));
+  assert.ok(qwen.encoder.endsWith(join(dir, "encoder.int8.onnx")));
+  assert.ok(qwen.decoder.endsWith(join(dir, "decoder.int8.onnx")));
+  assert.ok(qwen.tokenizer.endsWith(join(dir, "tokenizer")));
+  assert.equal(modelConfig.tokens, "");
+  assert.equal(modelConfig.transducer, undefined);
+});
+
+test("Parakeet Ultra opens from its file set as a NeMo transducer", async () => {
+  const { fake, session } = await openSession("en-parakeet-ultra-int8", [
+    { text: " Hi.", tokens: [" Hi", "."], timestamps: [0.1, 0.3], ys_log_probs: [-0.1, -0.2] },
+  ]);
+  session.pushAudio(new Float32Array(1_600));
+  session.flush();
+  const [final] = (await once(session, "final")) as [FinalEvent];
+  assert.deepEqual(final.tokens?.map((token) => token.startMs), [100, 300]);
+  const { modelConfig } = fake.configs[0]!;
+  const dir = SHERPA_MODELS["en-parakeet-ultra-int8"].name;
+  assert.equal(modelConfig.modelType, "nemo_transducer");
+  assert.ok(modelConfig.transducer!.encoder.endsWith(join(dir, "encoder.int8.onnx")));
+  assert.ok(modelConfig.tokens.endsWith(join(dir, "tokens.txt")));
 });
 
 test("a decode failure surfaces as an error event", async () => {

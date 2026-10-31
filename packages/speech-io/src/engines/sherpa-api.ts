@@ -77,11 +77,31 @@ export type OfflineMoonshineModelConfig = {
   cachedDecoder: string;
 };
 
+export type OfflineCanaryModelConfig = {
+  encoder: string;
+  decoder: string;
+  srcLang: string;
+  tgtLang: string;
+  usePnc: number;
+};
+
+export type OfflineQwen3AsrModelConfig = {
+  convFrontend: string;
+  encoder: string;
+  decoder: string;
+  /** Tokenizer directory. */
+  tokenizer: string;
+  hotwords?: string;
+};
+
 export type OfflineRecognizerConfig = {
   featConfig: FeatureConfig;
   modelConfig: {
     transducer?: TransducerModelConfig;
     moonshine?: OfflineMoonshineModelConfig;
+    canary?: OfflineCanaryModelConfig;
+    qwen3Asr?: OfflineQwen3AsrModelConfig;
+    /** Empty for models whose vocabulary lives elsewhere (Qwen3 ASR). */
     tokens: string;
     numThreads?: number;
     provider?: string;

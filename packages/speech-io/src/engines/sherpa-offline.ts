@@ -25,7 +25,7 @@ import { resolveSherpaModel, type OfflineSherpaModel } from "./sherpa-models.ts"
 
 /**
  * SherpaOfflineEngine: push to talk STT on sherpa's OfflineRecognizer for
- * whole utterance models (Parakeet TDT, Moonshine).
+ * whole utterance models (Parakeet TDT, Moonshine, Canary, Qwen3 ASR).
  *
  * Frames are buffered while the key is held, up to the model's `maxAudioMs`
  * (later audio is dropped), and decoded once on flush() with `decodeAsync`,
@@ -181,39 +181,65 @@ class SherpaOfflineSession extends EventEmitter implements STTSession {
 function createOfflineConfig(
   asset: SherpaModelAsset<OfflineSherpaModel>,
 ): OfflineRecognizerConfig {
-  const { model } = asset;
-  const shared = {
-    tokens: asset.file(model.tokens),
-    numThreads: 2,
-    provider: "cpu",
-    debug: 0,
-  };
-  const modelConfig =
-    model.family === "nemo-transducer"
-      ? {
-          ...shared,
-          modelType: "nemo_transducer",
-          transducer: {
-            encoder: asset.file(model.encoder),
-            decoder: asset.file(model.decoder),
-            joiner: asset.file(model.joiner),
-          },
-        }
-      : {
-          ...shared,
-          moonshine: {
-            preprocessor: asset.file(model.preprocessor),
-            encoder: asset.file(model.encoder),
-            uncachedDecoder: asset.file(model.uncachedDecoder),
-            cachedDecoder: asset.file(model.cachedDecoder),
-          },
-        };
   return {
     featConfig: {
       sampleRate: SHERPA_SAMPLE_RATE,
       featureDim: SHERPA_FEATURE_DIM,
     },
-    modelConfig,
+    modelConfig: {
+      tokens: "tokens" in asset.model ? asset.file(asset.model.tokens) : "",
+      numThreads: 2,
+      provider: "cpu",
+      debug: 0,
+      ...familyConfig(asset),
+    },
     decodingMethod: "greedy_search",
   };
+}
+
+function familyConfig(
+  asset: SherpaModelAsset<OfflineSherpaModel>,
+): Partial<OfflineRecognizerConfig["modelConfig"]> {
+  const { model } = asset;
+  switch (model.family) {
+    case "nemo-transducer":
+      return {
+        modelType: "nemo_transducer",
+        transducer: {
+          encoder: asset.file(model.encoder),
+          decoder: asset.file(model.decoder),
+          joiner: asset.file(model.joiner),
+        },
+      };
+    case "moonshine":
+      return {
+        moonshine: {
+          preprocessor: asset.file(model.preprocessor),
+          encoder: asset.file(model.encoder),
+          uncachedDecoder: asset.file(model.uncachedDecoder),
+          cachedDecoder: asset.file(model.cachedDecoder),
+        },
+      };
+    case "canary":
+      // Transcription, not translation: the same language in and out.
+      return {
+        canary: {
+          encoder: asset.file(model.encoder),
+          decoder: asset.file(model.decoder),
+          srcLang: model.language,
+          tgtLang: model.language,
+          usePnc: 1,
+        },
+      };
+    case "qwen3-asr":
+      return {
+        qwen3Asr: {
+          convFrontend: asset.file(model.convFrontend),
+          encoder: asset.file(model.encoder),
+          decoder: asset.file(model.decoder),
+          tokenizer: asset.file(model.tokenizer),
+          hotwords: "",
+        },
+      };
+  }
 }

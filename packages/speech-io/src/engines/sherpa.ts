@@ -10,7 +10,7 @@ import type {
   STTSession,
   VoiceToText,
 } from "../contract.ts";
-import { ensureAsset, type AssetSpec } from "./assets.ts";
+import { ensureAsset, type AssetSpec, type FileSetSpec } from "./assets.ts";
 import { resultDetail, resultText } from "./result.ts";
 import type {
   Hotwords,
@@ -69,7 +69,7 @@ export type SherpaEngineOptions = {
 /** Shared by the streaming and offline engines. */
 export class SherpaModelAsset<M extends SherpaModel> {
   readonly model: M;
-  readonly paths: AssetSpec;
+  readonly paths: AssetSpec | FileSetSpec;
   readonly #binding: SherpaBinding;
 
   constructor(model: M, options: SherpaEngineOptions) {
