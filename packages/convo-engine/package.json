@@ -2,6 +2,7 @@
   "name": "@speakeasy/convo-engine",
   "private": true,
   "version": "0.0.0",
+  "license": "Apache-2.0",
   "description": "Half-duplex speech-to-speech conversation loop over the STT, LLM, and TTS contracts.",
   "type": "module",
   "exports": {

@@ -2,6 +2,7 @@
   "name": "speak-easy",
   "private": true,
   "version": "0.0.0",
+  "license": "Apache-2.0",
   "description": "Cascaded speech-to-speech engine (STT -> LLM -> TTS). Local-first, sub-200ms finalization.",
   "type": "module",
   "engines": {
