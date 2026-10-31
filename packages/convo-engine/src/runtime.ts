@@ -1,10 +1,10 @@
 import {
   CartesiaTextToSpeech,
+  createLocalSherpaEngine,
   DEFAULT_CARTESIA_MODEL,
   DEFAULT_CARTESIA_VOICE,
   DEFAULT_RULES,
   parseTtsModelId,
-  SherpaEngine,
   SherpaTextToSpeech,
   withRewrite,
   type TextToSpeech,
@@ -65,7 +65,7 @@ export async function createConversationRuntime(
       label: `shared STT · ${responder.label}`,
     };
   }
-  const engine = new SherpaEngine();
+  const engine = await createLocalSherpaEngine();
   await engine.prepare();
   return {
     stt: withRewrite(engine, { rules: DEFAULT_RULES, numbers: "off" }),

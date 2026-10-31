@@ -23,7 +23,7 @@ import type {
   VoiceToText,
 } from "../contract.ts";
 import { saveCorpusPair, type CorpusSidecarMeta } from "../corpus/store.ts";
-import { SherpaEngine } from "../engines/sherpa.ts";
+import { createLocalSherpaEngine } from "../engines/sherpa-binding.ts";
 import { withRewrite } from "../rewrite/decorator.ts";
 import { DEFAULT_RULES } from "../rewrite/rules.ts";
 import {
@@ -78,7 +78,7 @@ async function main(): Promise<void> {
     ? await readWavFrames(options.wavPath, CAPTURE_FRAME_MS)
     : undefined;
 
-  const engine = new SherpaEngine(options.model);
+  const engine = await createLocalSherpaEngine(options.model);
   await engine.prepare();
   // Product default: wrap with the rewrite decorator (domain rules on). The
   // engine stays pure; --no-rewrite gets raw output. --numbers adds the number

@@ -1,7 +1,7 @@
 import { performance } from "node:perf_hooks";
 import type { STTSession, VoiceToText } from "../contract.ts";
 import { MoonshineEngine } from "../engines/moonshine.ts";
-import { SherpaEngine } from "../engines/sherpa.ts";
+import { createLocalSherpaEngine } from "../engines/sherpa-binding.ts";
 import type { SherpaModelId } from "../engines/sherpa-models.ts";
 import { StubEngine } from "../engines/stub.ts";
 import { FLUSH_FINAL_TIMEOUT_MS, SESSION_TIMEOUT_MS } from "./config.ts";
@@ -30,10 +30,10 @@ export type SessionObservers = {
   throwIfError: () => void;
 };
 
-export function createEngine(
+export async function createEngine(
   name: EngineName,
   model?: SherpaModelId,
-): BenchEngine {
+): Promise<BenchEngine> {
   if (model && name !== "sherpa") {
     throw new Error(`--model only applies to --engine sherpa, not ${name}`);
   }
@@ -44,7 +44,7 @@ export function createEngine(
     return new MoonshineEngine();
   }
   if (name === "sherpa") {
-    return new SherpaEngine(model);
+    return createLocalSherpaEngine(model);
   }
   throw new Error(`Unsupported engine ${name}`);
 }

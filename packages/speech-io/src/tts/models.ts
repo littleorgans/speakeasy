@@ -116,8 +116,9 @@ export function resolveTtsModelPaths(model: TtsModel): TtsModelPaths {
 export async function ensureTtsModel(paths: TtsModelPaths): Promise<void> {
   await ensureAsset({
     url: paths.url,
+    sha256: null, // not yet pinned
     archive: paths.archive,
-    extractTo: TTS_ROOT,
+    dir: paths.dir,
     sentinel: paths.model,
   });
 }
