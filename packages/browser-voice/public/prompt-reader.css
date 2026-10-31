@@ -57,6 +57,39 @@ code,
   white-space: pre-wrap;
 }
 
+.heard {
+  margin: -0.75rem 0 1.25rem;
+  padding-left: 0.9rem;
+  border-left: 2px solid var(--line);
+}
+
+.heard[hidden] {
+  display: none;
+}
+
+.heard-text {
+  margin: 0;
+  font-size: 1.15rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.heard-text:empty {
+  display: none;
+}
+
+.heard-text .differs {
+  color: var(--accent);
+  text-decoration: underline dotted;
+  text-underline-offset: 0.2em;
+}
+
+.heard-note {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
 meter {
   width: 100%;
   height: 0.6rem;

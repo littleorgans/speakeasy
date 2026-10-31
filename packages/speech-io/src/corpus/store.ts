@@ -18,7 +18,7 @@ export const CORPUS_SCHEMA_VERSION = 2;
 export const DEFAULT_CORPUS_DIR = "corpus";
 
 /** Prompt ids become filename stems, so they stay path safe. */
-const PROMPT_ID = /^[A-Za-z0-9_-]+$/;
+export const PROMPT_ID = /^[A-Za-z0-9_-]+$/;
 
 export type CorpusSidecar = {
   schema: typeof CORPUS_SCHEMA_VERSION;

@@ -20,6 +20,7 @@ import {
   type PromptReaderConfig,
 } from "./prompt-reader.ts";
 import { BrowserConversationSession, type RuntimeFactory } from "./session.ts";
+import { ChildTranscriber, type Transcriber } from "./transcriber.ts";
 
 const PUBLIC_ROOT = fileURLToPath(new URL("../public/", import.meta.url));
 const STATIC_FILES = new Map([
@@ -57,9 +58,14 @@ export async function startBrowserVoiceServer(options: {
   createRuntime?: RuntimeFactory;
   /** Serve the prompt reader's API, saving takes to an outside folder. */
   promptReader?: PromptReaderConfig;
+  /** Display only take transcription; defaults to the Canary child process. */
+  transcriber?: Transcriber;
 } = {}): Promise<BrowserVoiceServer> {
   const promptReader = options.promptReader
     ? await PromptReader.load(options.promptReader)
+    : undefined;
+  const transcriber = promptReader
+    ? (options.transcriber ?? new ChildTranscriber())
     : undefined;
   const server = createServer((request, response) => {
     if (request.url === "/health") {
@@ -68,7 +74,7 @@ export async function startBrowserVoiceServer(options: {
       return;
     }
     if (request.url?.startsWith(PROMPT_READER_API)) {
-      void servePromptReader(request, response, promptReader);
+      void servePromptReader(request, response, promptReader, transcriber);
       return;
     }
     void serveStatic(request.url ?? "/", response);
@@ -122,6 +128,7 @@ export async function startBrowserVoiceServer(options: {
     server,
     url,
     close: async () => {
+      transcriber?.close();
       for (const socket of sockets.clients) socket.close();
       sockets.close();
       await new Promise<void>((resolveClose, rejectClose) => {
@@ -135,6 +142,7 @@ async function servePromptReader(
   request: IncomingMessage,
   response: ServerResponse,
   reader: PromptReader | undefined,
+  transcriber: Transcriber | undefined,
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
   try {
@@ -146,6 +154,8 @@ async function servePromptReader(
       sendJson(response, 200, await reader.listing());
     } else if (url.pathname === "/prompt-reader/recordings" && request.method === "POST") {
       await saveTake(request, response, reader, url.searchParams);
+    } else if (url.pathname === "/prompt-reader/transcriptions" && request.method === "POST" && transcriber) {
+      await transcribeTake(request, response, transcriber);
     } else if (url.pathname.startsWith(PROMPT_READER_TAKES) && request.method === "GET") {
       await serveTake(request, response, reader, url.pathname.slice(PROMPT_READER_TAKES.length));
     } else {
@@ -158,38 +168,16 @@ async function servePromptReader(
   }
 }
 
-/**
- * Save route: the body is the take as 16 kHz mono Float32 samples. Writes
- * to disk, so only a same origin page on a loopback host may call it: a
- * browser always sends Origin on POST, and the Host check defeats DNS
- * rebinding.
- */
+/** Save route: writes the posted take to disk as a corpus pair. */
 async function saveTake(
   request: IncomingMessage,
   response: ServerResponse,
   reader: PromptReader,
   query: URLSearchParams,
 ): Promise<void> {
-  if (!isLoopbackHost(request) || request.headers.origin !== hostOrigin(request)) {
-    sendJson(response, 403, { error: "same origin loopback pages only" });
-    return;
-  }
-  if (request.headers["content-type"] !== "application/octet-stream") {
-    sendJson(response, 415, { error: "body must be application/octet-stream Float32 samples" });
-    return;
-  }
-  const body = await readBody(request, PROMPT_MAX_TAKE_BYTES);
-  if (body === null) {
-    sendJson(response, 413, { error: `take exceeds ${PROMPT_MAX_TAKE_BYTES} bytes` });
-    return;
-  }
-  if (body.length === 0 || body.length % Float32Array.BYTES_PER_ELEMENT !== 0) {
-    sendJson(response, 400, { error: "body must be a non-empty whole number of Float32 samples" });
-    return;
-  }
+  const samples = await readTakeSamples(request, response);
+  if (!samples) return;
   try {
-    // Copy into a fresh buffer: pooled Buffers need not be 4 byte aligned.
-    const samples = new Float32Array(new Uint8Array(body).buffer);
     const saved = await reader.save(
       query.get("promptId") ?? "",
       samples,
@@ -200,6 +188,57 @@ async function saveTake(
     if (!(error instanceof UnknownPromptError)) throw error;
     sendJson(response, 404, { error: error.message });
   }
+}
+
+/**
+ * Transcription route: display only text for the posted take. Nothing is
+ * written; a failed or slow transcription answers 503 and the host serves on.
+ */
+async function transcribeTake(
+  request: IncomingMessage,
+  response: ServerResponse,
+  transcriber: Transcriber,
+): Promise<void> {
+  const samples = await readTakeSamples(request, response);
+  if (!samples) return;
+  try {
+    sendJson(response, 200, await transcriber.transcribe(samples));
+  } catch (error) {
+    sendJson(response, 503, {
+      error: `transcription unavailable: ${error instanceof Error ? error.message : String(error)}`,
+    });
+  }
+}
+
+/**
+ * A posted take as 16 kHz mono Float32 samples, or undefined once an error
+ * response is sent. Only a same origin page on a loopback host may post: a
+ * browser always sends Origin on POST, and the Host check defeats DNS
+ * rebinding.
+ */
+async function readTakeSamples(
+  request: IncomingMessage,
+  response: ServerResponse,
+): Promise<Float32Array | undefined> {
+  if (!isLoopbackHost(request) || request.headers.origin !== hostOrigin(request)) {
+    sendJson(response, 403, { error: "same origin loopback pages only" });
+    return undefined;
+  }
+  if (request.headers["content-type"] !== "application/octet-stream") {
+    sendJson(response, 415, { error: "body must be application/octet-stream Float32 samples" });
+    return undefined;
+  }
+  const body = await readBody(request, PROMPT_MAX_TAKE_BYTES);
+  if (body === null) {
+    sendJson(response, 413, { error: `take exceeds ${PROMPT_MAX_TAKE_BYTES} bytes` });
+    return undefined;
+  }
+  if (body.length === 0 || body.length % Float32Array.BYTES_PER_ELEMENT !== 0) {
+    sendJson(response, 400, { error: "body must be a non-empty whole number of Float32 samples" });
+    return undefined;
+  }
+  // Copy into a fresh buffer: pooled Buffers need not be 4 byte aligned.
+  return new Float32Array(new Uint8Array(body).buffer);
 }
 
 /**

@@ -85,6 +85,7 @@ export { pacedFrames, readWavFrames, type WavAudio } from "./bench/wav.ts";
 export { upsertReportSection } from "./bench/report.ts";
 export {
   DEFAULT_CORPUS_DIR,
+  PROMPT_ID,
   readCorpusEntries,
   saveCorpusPair,
   type CorpusEntry,
