@@ -70,6 +70,11 @@ export type AssetSpec = {
   /** Top directory inside the archive; defaults to the basename of `dir`. */
   archiveRoot?: string;
   /**
+   * Paths under the archive root to extract, `/` separated; omit to extract
+   * everything. A listed path missing from the archive fails the install.
+   */
+  members?: readonly string[];
+  /**
    * Unpinned assets only: a file whose presence marks an extraction made
    * before completion markers existed.
    */
@@ -186,12 +191,15 @@ async function installArchive(spec: AssetSpec): Promise<void> {
   await mkdir(parent, { recursive: true });
   const temp = await mkdtemp(join(parent, `.${basename(spec.dir)}.extract-`));
   try {
-    await extractArchive(spec.archive, temp);
-    const extracted = join(temp, spec.archiveRoot ?? basename(spec.dir));
+    const root = spec.archiveRoot ?? basename(spec.dir);
+    await extractArchive(
+      spec.archive,
+      temp,
+      spec.members?.map((member) => `${root}/${member}`),
+    );
+    const extracted = join(temp, root);
     if (!(await stat(extracted).catch(() => undefined))?.isDirectory()) {
-      throw new Error(
-        `Archive ${spec.archive} has no ${spec.archiveRoot ?? basename(spec.dir)} directory`,
-      );
+      throw new Error(`Archive ${spec.archive} has no ${root} directory`);
     }
     await writeFile(join(extracted, COMPLETE_MARKER), completeMarkerValue(spec), "utf8");
     await publishDir(extracted, spec, join(temp, "stale"));
@@ -267,15 +275,20 @@ export async function sha256File(path: string): Promise<string> {
   return hash.digest("hex");
 }
 
-/** Extract a .tar.bz2 or .tgz archive; tar output is captured, not inherited. */
+/**
+ * Extract a .tar.bz2 or .tgz archive, or only `members` of it when given;
+ * tar output is captured, not inherited.
+ */
 export async function extractArchive(
   archivePath: string,
   destinationDir: string,
+  members: readonly string[] = [],
 ): Promise<void> {
   await mkdir(destinationDir, { recursive: true });
   const flags = tarFlags(archivePath);
   await new Promise<void>((resolve, reject) => {
-    const child = spawn("tar", [flags, archivePath, "-C", destinationDir], {
+    const args = [flags, archivePath, "-C", destinationDir, ...members];
+    const child = spawn("tar", args, {
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stderr = "";

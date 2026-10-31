@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
-import { resolveTtsModelPaths, TTS_MODELS, type TtsModel } from "./models.ts";
+import { COMPLETE_MARKER } from "../engines/assets.ts";
+import { ensureTtsModel, resolveTtsModelPaths, TTS_MODELS, type TtsModel } from "./models.ts";
 
 const entries = Object.entries(TTS_MODELS) as [string, TtsModel][];
 
@@ -22,5 +29,33 @@ test("no descriptor hands sherpa espeak-ng data", () => {
   for (const [id, model] of entries) {
     assert.ok(!("dataDir" in model), id);
     assert.ok(!("dataDir" in resolveTtsModelPaths(model)), id);
+  }
+});
+
+test("a TTS install extracts only the files synthesis reads", async () => {
+  const work = await mkdtemp(join(tmpdir(), "speak-easy-tts-models-"));
+  try {
+    for (const id of ["piper-amy", "kokoro-int8"] as const) {
+      const descriptor: TtsModel = TTS_MODELS[id];
+      const source = join(work, `source-${id}`, descriptor.name);
+      await mkdir(join(source, "espeak-ng-data"), { recursive: true });
+      await writeFile(join(source, "espeak-ng-data", "en_dict"), "dict");
+      await writeFile(join(source, "LICENSE"), "licence");
+      const read = [descriptor.model, descriptor.tokens, descriptor.voices].filter((name) => name !== undefined);
+      for (const name of read) await writeFile(join(source, name), name);
+      const bytes = execFileSync("tar", ["-cjf", "-", "-C", join(source, ".."), descriptor.name]);
+      const sha256 = createHash("sha256").update(bytes).digest("hex");
+      const paths = resolveTtsModelPaths({ ...descriptor, sha256 }, join(work, `root-${id}`));
+      await mkdir(join(paths.archive, ".."), { recursive: true });
+      await writeFile(paths.archive, bytes);
+      await ensureTtsModel(paths);
+      assert.deepEqual((await readdir(paths.dir)).sort(), [COMPLETE_MARKER, ...read].sort(), id);
+      assert.ok(!existsSync(join(paths.dir, "espeak-ng-data")), id);
+      for (const path of [paths.model, paths.tokens, paths.voices]) {
+        if (path !== undefined) assert.ok(existsSync(path), `${id} ${path}`);
+      }
+    }
+  } finally {
+    await rm(work, { recursive: true, force: true });
   }
 });

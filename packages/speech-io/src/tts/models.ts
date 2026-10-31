@@ -107,29 +107,40 @@ export type TtsModelPaths = {
   model: string;
   tokens: string;
   voices?: string;
+  /** Archive files synthesis reads; install skips the rest, espeak-ng-data included. */
+  members: readonly string[];
 };
 
 /** Resolve a descriptor to absolute on-disk paths and the download URL. */
-export function resolveTtsModelPaths(model: TtsModel): TtsModelPaths {
-  const dir = join(TTS_ROOT, model.name);
+export function resolveTtsModelPaths(
+  model: TtsModel,
+  root: string = TTS_ROOT,
+): TtsModelPaths {
+  const dir = join(root, model.name);
   return {
     dir,
-    archive: join(TTS_ROOT, `${model.name}.tar.bz2`),
+    archive: join(root, `${model.name}.tar.bz2`),
     url: `${TTS_MODELS_BASE}/${model.name}.tar.bz2`,
     sha256: model.sha256,
     model: join(dir, model.model),
     tokens: join(dir, model.tokens),
     voices: model.voices ? join(dir, model.voices) : undefined,
+    members: [model.model, model.tokens, ...(model.voices ? [model.voices] : [])],
   };
 }
 
-/** Download + extract the model tarball unless already present. */
+/**
+ * Download the model tarball and extract its members unless already present.
+ * An install made before members were listed keeps its files: the completion
+ * marker is the archive digest either way.
+ */
 export async function ensureTtsModel(paths: TtsModelPaths): Promise<void> {
   await ensureAsset({
     url: paths.url,
     sha256: paths.sha256,
     archive: paths.archive,
     dir: paths.dir,
+    members: paths.members,
   });
 }
 
