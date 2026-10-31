@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ByteLevelVocab, greedyCtc } from "./ctc-decode.ts";
 import { logitsFor, TINY_TOKENIZER } from "./ctc-test-support.ts";
+import { resultDetail } from "./result.ts";
 
 const vocab = ByteLevelVocab.fromTokenizerJson(TINY_TOKENIZER, "<|blank|>");
 
@@ -29,6 +30,19 @@ test("all blank frames decode to no text", () => {
 
 test("bytes join across tokens before UTF-8 decoding", () => {
   assert.equal(vocab.decode([1, 5, 6, 4]), "opené's");
+});
+
+test("greedy CTC token text joins bytes across tokens before UTF-8 decoding", () => {
+  const result = greedyCtc(logitsFor([5, 6], vocab.size), vocab, 0.08);
+  assert.equal(result.text, "é");
+  assert.ok(result.tokens!.every((token) => !token.includes("\uFFFD")));
+  assert.equal(result.tokens!.join(""), result.text);
+  const detail = resultDetail(result);
+  assert.deepEqual(
+    detail.tokens.map((token) => [token.text, token.startMs]),
+    [["", 0], ["é", 80]],
+  );
+  assert.deepEqual(detail.tokens.map((token) => token.logProb), result.ys_log_probs);
 });
 
 test("logits that disagree with the vocabulary are refused", () => {

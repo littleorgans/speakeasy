@@ -56,14 +56,15 @@ export class ByteLevelVocab {
   }
 
   decode(ids: readonly number[]): string {
-    const parts = ids.map((id) => this.#token(id));
-    const joined = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
-    let offset = 0;
-    for (const part of parts) {
-      joined.set(part, offset);
-      offset += part.length;
-    }
-    return UTF8.decode(joined);
+    return this.decodeTokens(ids).join("");
+  }
+
+  /** Incomplete UTF-8 bytes carry into the token that completes the character. */
+  decodeTokens(ids: readonly number[]): string[] {
+    const decoder = new TextDecoder("utf-8");
+    return ids.map((id, index) =>
+      decoder.decode(this.#token(id), { stream: index < ids.length - 1 }),
+    );
   }
 
   #token(id: number): Uint8Array {
@@ -100,9 +101,10 @@ export function greedyCtc(
     }
     previous = id;
   }
+  const tokens = vocab.decodeTokens(ids);
   return {
-    text: vocab.decode(ids),
-    tokens: ids.map((id) => vocab.decode([id])),
+    text: tokens.join(""),
+    tokens,
     timestamps,
     ys_log_probs: logProbs,
   };
@@ -112,8 +114,6 @@ type TokenizerJson = {
   model?: { type?: string; vocab?: Record<string, number> };
   decoder?: { type?: string };
 };
-
-const UTF8 = new TextDecoder("utf-8");
 
 /** GPT-2 `bytes_to_unicode`, inverted: printable stand in character to byte. */
 const UNICODE_TO_BYTE = (() => {

@@ -1,8 +1,8 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
 import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { get } from "node:https";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { spawn } from "node:child_process";
@@ -12,6 +12,7 @@ const STDERR_LIMIT = 4_096;
 /** Written into the extracted directory last; holds the archive digest. */
 export const COMPLETE_MARKER = ".complete";
 const UNPINNED_MARKER = "unpinned";
+const publications = new Map<string, Promise<void>>();
 
 export async function hasNonEmptyFile(path: string): Promise<boolean> {
   const existing = await stat(path).catch(() => undefined);
@@ -97,12 +98,12 @@ export type FetchArchive = (url: string) => Promise<Readable>;
  * Idempotent, crash safe download and extract shared by the STT and TTS
  * registries. Done when `dir` holds a completion marker for this digest.
  * Otherwise reuse the archive if its digest matches, else stream it to
- * `<archive>.part` hashing as it goes, verify, and rename. Extract into a
- * temp folder beside `dir`, rename into place, and write the marker last, so
- * an interrupted run never leaves a directory that looks complete. A file set
- * verifies each file the same way, in place under `dir`, then writes the
- * marker; verified files already there are kept, so a repeat after partial
- * failure fetches only what is missing.
+ * `<archive>.<unique>.part` hashing as it goes, verify, and rename. Extract into a
+ * temp folder beside `dir`, write the marker there, and rename into place, so
+ * `dir` appears only complete and a concurrent install that loses the rename
+ * finds the asset done. A file set verifies each file the same way, in place
+ * under `dir`, then writes the marker; verified files already there are kept,
+ * so a repeat after partial failure fetches only what is missing.
  */
 export async function ensureAsset(
   spec: AssetSpec | FileSetSpec,
@@ -155,7 +156,7 @@ async function ensureVerifiedFile(
     }
   }
   await mkdir(dirname(path), { recursive: true });
-  const part = `${path}.part`;
+  const part = `${path}.${randomUUID()}.part`;
   try {
     const hash = createHash("sha256");
     await pipeline(
@@ -192,11 +193,43 @@ async function installArchive(spec: AssetSpec): Promise<void> {
         `Archive ${spec.archive} has no ${spec.archiveRoot ?? basename(spec.dir)} directory`,
       );
     }
-    await rm(spec.dir, { recursive: true, force: true });
-    await rename(extracted, spec.dir);
-    await writeFile(join(spec.dir, COMPLETE_MARKER), completeMarkerValue(spec), "utf8");
+    await writeFile(join(extracted, COMPLETE_MARKER), completeMarkerValue(spec), "utf8");
+    await publishDir(extracted, spec, join(temp, "stale"));
   } finally {
     await rm(temp, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Rename a marked extraction into `dir`. A concurrent install of the same
+ * asset may win the rename. Serialize publication within this process so a
+ * stale check cannot move a peer's completed install out from under readers.
+ * A stale `dir` is moved aside whole, never deleted in place.
+ */
+async function publishDir(source: string, spec: AssetSpec, aside: string): Promise<void> {
+  const key = resolve(spec.dir);
+  const previous = publications.get(key);
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => { release = resolve; });
+  publications.set(key, current);
+  try {
+    await previous;
+    if (await isAssetComplete(spec)) return;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await rename(source, spec.dir);
+        return;
+      } catch (error) {
+        if (await isAssetComplete(spec)) return;
+        if (attempt > 0) throw error;
+      }
+      await rename(spec.dir, aside).catch((error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      });
+    }
+  } finally {
+    release();
+    if (publications.get(key) === current) publications.delete(key);
   }
 }
 
