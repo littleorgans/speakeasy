@@ -4,7 +4,7 @@ import type { TtsRequest } from "sherpa-onnx-node";
 import { ensureAsset, type FileSetSpec } from "../engines/assets.ts";
 import type { ModelLicence } from "../engines/sherpa-models.ts";
 import { TTS_ROOT } from "./models.ts";
-import { EnglishG2P } from "./vendor/piper-plus-g2p/en/index.js";
+import { EnglishG2P, normalizeNumbers } from "./vendor/piper-plus-g2p/en/index.js";
 
 /**
  * Text frontend for every sherpa voice, Piper and Kokoro alike: the one swap
@@ -81,13 +81,15 @@ const RP_RULES: readonly [RegExp, string][] = (
 ).map(([pattern, replacement]) => [new RegExp(pattern, "gu"), replacement]);
 
 /**
- * Text rules applied before G2P: clock times, dotted names, hyphens, am/pm
+ * Text rules applied before G2P: clock times, versions, dotted names, hyphens, am/pm
  * after a number, and initialisms spelled by letter name. Piper Plus spells
  * the remaining numbers itself.
  */
 export function normalizeText(text: string, british: boolean): string {
   const letters: Record<string, string> = british ? { ...LETTER_NAMES, z: "zed" } : LETTER_NAMES;
   return text
+    .replace(/\b\d+(?:\.\d+){2,}\b/g, (version) =>
+      version.split(".").map(normalizeNumbers).join(" point "))
     .replace(/(\d+):(\d+)/g, (_match, hours: string, minutes: string) =>
       `${Number(hours)} ${Number(minutes) < 10 ? "oh " : ""}${Number(minutes)}`)
     .replace(/(?<=\d)\s*([ap])\.?m(?![A-Za-z])/gi, (_match, half: string) =>

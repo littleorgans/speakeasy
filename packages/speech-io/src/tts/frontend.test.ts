@@ -47,6 +47,17 @@ test("morning times use the letter A rather than the article", () => {
   assert.equal(normalizeText("9 am", false), "9 ay m");
 });
 
+test("version numbers retain every separator through G2P", () => {
+  const versionG2p = new EnglishG2P({ cmuDict: {
+    two: "T UW1", dot: "D AA1 T", zero: "Z IH1 R OW0", one: "W AH1 N", point: "P OY1 N T",
+  } });
+  assert.deepEqual(
+    versionG2p.phonemize(normalizeText("2.0.1", false)).tokens,
+    versionG2p.phonemize("two point zero point one").tokens,
+  );
+  assert.equal(normalizeText("Version 2.0.1, decimal 2.5.", false), "Version two point zero point one, decimal 2.5.");
+});
+
 test("adaptIpa applies the RP rules for British voices", () => {
   const ipa = g2p.phonemize("march car stuart").tokens.join("");
   assert.equal(adaptIpa(ipa, true), "mˈɑːtʃ kˈɑː stˈuːət");
