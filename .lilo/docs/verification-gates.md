@@ -1,7 +1,7 @@
 # Verification gates
 <!-- lilo-page kind=gates schema=1 -->
 <!-- lilo-covers package.json pnpm-workspace.yaml packages/*/package.json packages/*/tsconfig.json -->
-<!-- lilo-verified digest=e88e454f8487d0cd commit=0251c0defed3 date=2026-10-23 -->
+<!-- lilo-verified digest=33f664cebba75e23 commit=8899f03fb703 date=2026-11-01 -->
 
 Up: [speak-easy system map](index.md)
 

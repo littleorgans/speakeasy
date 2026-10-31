@@ -10,12 +10,12 @@ Hazards and conventions:
 - Never pass `onProgress` to sherpa TTS `generateAsync`; it aborts the process. Stream via the sentence pipeline.
 - TTS stays on the `cpu` provider.
 - Conversation states change only through `LEGAL_TRANSITIONS` in convo-engine `state.ts`.
-- API keys come only from `process.env` or the gitignored `.env`; live tests need `SPEAKEASY_LIVE_<PROVIDER>=1` plus the key.
+- API keys come only from `process.env` or the gitignored `.env`; live tests need `SPEAKEASY_LIVE_<PROVIDER>=1`, plus the key where the provider has one.
 - Size convention, unverified: files under 700 lines, functions under 150 lines.
 
 Docs: `.lilo/docs/`, start at `index.md`.
 - `index.md`: purpose, packages, vocabulary, rules, sources.
 - `verification-gates.md`: gate commands, live test flags, hooks and CI.
 <!-- lilo-onboarding status=complete-quick date=2026-10-23 schema=1 -->
-<!-- lilo-digest sha256:8a81b8edf64b029f .lilo/docs/verification-gates.md -->
-<!-- lilo-digest sha256:891f6354b995c92f .lilo/docs/index.md -->
+<!-- lilo-digest sha256:f7d010823125e446 .lilo/docs/verification-gates.md -->
+<!-- lilo-digest sha256:c40c6940ae5506dd .lilo/docs/index.md -->
