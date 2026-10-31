@@ -160,11 +160,10 @@ test("an output folder inside the repo is refused before the host starts", async
   const inside = join(repoRoot, "corpus-should-not-exist");
   try {
     await writeFile(promptsPath, JSON.stringify(PROMPTS));
-    for (const outputDir of [repoRoot, inside]) {
-      await assert.rejects(
-        startBrowserVoiceServer({ port: 0, promptReader: { promptsPath, outputDir } }),
-        /must be outside the repo/,
-      );
+    for (const outputDir of [repoRoot, inside, join(repoRoot, "..takes")]) {
+      const starting = startBrowserVoiceServer({ port: 0, promptReader: { promptsPath, outputDir } });
+      await starting.then((host) => host.close(), () => {});
+      await assert.rejects(starting, /must be outside the repo/);
     }
     await assert.rejects(stat(inside), { code: "ENOENT" });
   } finally {

@@ -1,5 +1,5 @@
 import { readFile, realpath } from "node:fs/promises";
-import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readCorpusEntries, saveCorpusPair } from "@speakeasy/speech-io";
 
@@ -56,7 +56,7 @@ export class PromptReader {
   ): Promise<PromptReader> {
     const outputDir = await canonicalPath(resolve(config.outputDir));
     const inside = relative(await realpath(repoRoot), outputDir);
-    if (inside === "" || (!inside.startsWith("..") && !isAbsolute(inside))) {
+    if (inside === "" || (inside !== ".." && !inside.startsWith(`..${sep}`) && !isAbsolute(inside))) {
       throw new Error(
         `prompt reader output folder must be outside the repo (${repoRoot}); received ${outputDir}`,
       );
