@@ -24,10 +24,6 @@ import { pacedFrames, type WavAudio } from "./wav.ts";
 export type SessionObservers = {
   readonly firstPartialAt?: number;
   finals: FinalObservation[];
-  finalAtIndex: (
-    index: number,
-    timeoutMs: number,
-  ) => Promise<FinalObservation | undefined>;
   throwIfError: () => void;
 };
 
@@ -54,7 +50,6 @@ export function attachSessionObservers(session: STTSession): SessionObservers {
   const endpointEvents: number[] = [];
   const finalTexts: string[] = [];
   const finals: FinalObservation[] = [];
-  const finalWaiters: Array<() => void> = [];
   const state: { firstPartialAt?: number; error?: unknown } = {};
 
   session.on("partial", () => {
@@ -74,9 +69,6 @@ export function attachSessionObservers(session: STTSession): SessionObservers {
       finalAt,
       text: finalTexts.join(" ").trim(),
     });
-    for (const notify of finalWaiters.splice(0)) {
-      notify();
-    }
   });
   session.on("error", ({ err }: { err: unknown }) => {
     state.error = err;
@@ -87,23 +79,6 @@ export function attachSessionObservers(session: STTSession): SessionObservers {
       return state.firstPartialAt;
     },
     finals,
-    // Resolves with finals[index] as soon as it exists (immediately if the
-    // engine committed synchronously, on the event if it commits async),
-    // or undefined after timeoutMs.
-    finalAtIndex(index, timeoutMs) {
-      if (finals.length > index) {
-        return Promise.resolve(finals[index]);
-      }
-      return new Promise((resolve) => {
-        const timer = setTimeout(() => {
-          resolve(undefined);
-        }, timeoutMs);
-        finalWaiters.push(() => {
-          clearTimeout(timer);
-          resolve(finals[index]);
-        });
-      });
-    },
     throwIfError() {
       if (state.error) {
         throw state.error;
