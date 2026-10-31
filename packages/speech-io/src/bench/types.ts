@@ -1,5 +1,5 @@
 import type { EndpointConfig, NumbersMode, VoiceToText } from "../contract.ts";
-import type { SherpaModelId } from "../engines/sherpa-models.ts";
+import type { BenchModelId } from "./models.ts";
 
 /** Shared bench harness types. */
 
@@ -22,10 +22,10 @@ export type BenchEngine = VoiceToText & {
 
 export type CliOptions = {
   engine: EngineName;
-  /** Sherpa model registry id; ignored by non-sherpa engines. */
-  model?: SherpaModelId;
+  /** Registry id, sherpa-onnx or onnxruntime; needs --engine sherpa. */
+  model?: BenchModelId;
   /** Corpus scorer: one column per registry id, scored on the same takes. */
-  models?: SherpaModelId[];
+  models?: BenchModelId[];
   /** Corpus scorer: add a rewrite column (domain rules + numbers). Default false. */
   rewrite: boolean;
   /** Corpus scorer: print the report as JSON on stdout. Default false. */

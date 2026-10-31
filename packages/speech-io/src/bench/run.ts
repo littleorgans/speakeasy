@@ -16,11 +16,6 @@ import {
 } from "./config.ts";
 import { runCorpusBench } from "./corpus.ts";
 import {
-  parseSherpaModelId,
-  SHERPA_MODELS,
-  type SherpaModelId,
-} from "../engines/sherpa-models.ts";
-import {
   formatBoolean,
   formatEndpoint,
   formatMs,
@@ -32,6 +27,7 @@ import {
   runPttOnce,
   withTimeout,
 } from "./harness.ts";
+import { BENCH_MODEL_IDS, parseBenchModelId, type BenchModelId } from "./models.ts";
 import { writePttReport, writeSherpaSweep } from "./report.ts";
 import { detectSpeechProfile, type SpeechProfile } from "./speech.ts";
 import { median, medianOptional } from "./stats.ts";
@@ -55,7 +51,7 @@ import { pacedFrames, readWavFrames, type WavAudio } from "./wav.ts";
 const USAGE = [
   "usage: pnpm bench --wav <path> [--engine stub|moonshine|sherpa] [--model <id>] [--mode sweep|ptt] [--runs <n>] [--frame-ms <n>]",
   "       pnpm bench --corpus <dir> [--engine stub|moonshine|sherpa] [--model <id> | --models <id,id,...>] [--rewrite on|off] [--numbers digits|words|off] [--json] [--frame-ms <n>]  (corpus scorer)",
-  `       --model ids (sherpa only): ${Object.keys(SHERPA_MODELS).join(", ")}`,
+  `       --model ids (--engine sherpa; sherpa-onnx or onnxruntime, the id picks the runtime): ${BENCH_MODEL_IDS.join(", ")}`,
   "       --models (corpus only): one column per id over the same takes; implies --engine sherpa",
   "       --rewrite (corpus only): off=raw engine output only (default), on=add a rewrite column (domain rules + --numbers)",
   "       --json (corpus only): print the report as JSON on stdout; progress goes to stderr",
@@ -372,7 +368,7 @@ function parseArgs(args: string[]): CliOptions {
       engineGiven = true;
       index += 1;
     } else if (arg === "--model") {
-      options.model = parseSherpaModelId(requireValue(args, index));
+      options.model = parseBenchModelId(requireValue(args, index));
       index += 1;
     } else if (arg === "--models") {
       options.models = parseModelList(requireValue(args, index));
@@ -436,8 +432,8 @@ function requireValue(args: string[], index: number): string {
   return value;
 }
 
-function parseModelList(value: string): SherpaModelId[] {
-  const ids = value.split(",").map((id) => parseSherpaModelId(id.trim()));
+function parseModelList(value: string): BenchModelId[] {
+  const ids = value.split(",").map((id) => parseBenchModelId(id.trim()));
   if (new Set(ids).size !== ids.length) {
     throw new Error(`--models lists a model twice: ${value}`);
   }

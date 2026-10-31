@@ -1,11 +1,11 @@
 import type { NumbersMode, RewriteConfig } from "../contract.ts";
 import { readCorpusEntries, type CorpusEntry } from "../corpus/store.ts";
-import type { SherpaModelId } from "../engines/sherpa-models.ts";
 import { rewriteText } from "../rewrite/pipeline.ts";
 import { DEFAULT_RULES } from "../rewrite/rules.ts";
 import { formatMs } from "./format.ts";
 import { createEngine, runPttOnce } from "./harness.ts";
 import { scoreIdentifiers } from "./identifiers.ts";
+import type { BenchModelId } from "./models.ts";
 import { median } from "./stats.ts";
 import { wordErrorAlignment, type WordSubstitution } from "./transcript.ts";
 import type { BenchEngine, CliOptions } from "./types.ts";
@@ -38,7 +38,7 @@ export const NO_STRATUM = "unstratified";
 export type CorpusBenchDeps = {
   /** Engine for one model column; undefined is the engine's default model. */
   createEngine: (
-    model: SherpaModelId | undefined,
+    model: BenchModelId | undefined,
   ) => BenchEngine | Promise<BenchEngine>;
   /** Human-readable lines; stderr under --json so stdout is only the report. */
   log: (line: string) => void;

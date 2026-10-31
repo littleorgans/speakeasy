@@ -7,13 +7,13 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { STTSession } from "../contract.ts";
 import { saveCorpusPair, type CorpusSidecarMeta } from "../corpus/store.ts";
-import type { SherpaModelId } from "../engines/sherpa-models.ts";
 import { NO_STRATUM, runCorpusBench, type CorpusBenchDeps } from "./corpus.ts";
+import type { BenchModelId } from "./models.ts";
 import type { BenchEngine, CliOptions } from "./types.ts";
 
 const FRAME_MS = 20;
-const MODEL_A: SherpaModelId = "en-2023-06-21";
-const MODEL_B: SherpaModelId = "en-kroko-2025-08-06";
+const MODEL_A: BenchModelId = "en-2023-06-21";
+const MODEL_B: BenchModelId = "en-kroko-2025-08-06";
 
 /** Takes in filename order: the schema 1 free take sorts before prompted ones. */
 const TAKES = [
@@ -103,7 +103,7 @@ function cliOptions(corpus: string, overrides: Partial<CliOptions>): CliOptions 
 
 async function bench(overrides: Partial<CliOptions>) {
   const dir = await mkdtemp(join(tmpdir(), "speakeasy-corpus-"));
-  const created: Array<SherpaModelId | undefined> = [];
+  const created: Array<BenchModelId | undefined> = [];
   const stdout: string[] = [];
   const log: string[] = [];
   try {
