@@ -53,8 +53,6 @@ export type OrtBinding = {
   ): OrtTensor;
 };
 
-/** Encoder threads; matches SherpaOfflineEngine's numThreads for bench parity. */
-const ENCODER_THREADS = 2;
 /** The per step graphs are small; the Fluid runner gives them one thread. */
 const STEP_THREADS = 1;
 
@@ -72,25 +70,28 @@ export interface TdtGraphs {
   release(): Promise<void>;
 }
 
+/** `threads` runs the front end and encoder graphs; per step graphs get one. */
 export async function loadTdtGraphs(
   model: OrtTdtModel,
   dir: string,
   binding: OrtBinding,
+  threads: number,
 ): Promise<TdtGraphs> {
   return model.layout === "fused"
-    ? loadFusedGraphs(model, dir, binding)
-    : loadSplitGraphs(model, dir, binding);
+    ? loadFusedGraphs(model, dir, binding, threads)
+    : loadSplitGraphs(model, dir, binding, threads);
 }
 
 async function loadFusedGraphs(
   model: FusedTdtModel,
   dir: string,
   { createSession, tensor }: OrtBinding,
+  threads: number,
 ): Promise<TdtGraphs> {
   const [vocabulary, preprocessor, encoder, decoderJoint] = await Promise.all([
     readFile(join(dir, model.vocab), "utf8").then(parseVocabTxt),
-    createSession(join(dir, model.preprocessor), { threads: ENCODER_THREADS }),
-    createSession(join(dir, model.encoder), { threads: ENCODER_THREADS }),
+    createSession(join(dir, model.preprocessor), { threads }),
+    createSession(join(dir, model.encoder), { threads }),
     createSession(join(dir, model.decoderJoint), { threads: STEP_THREADS }),
   ]);
   const { blankId, predictor } = model.decoding;
@@ -147,12 +148,13 @@ async function loadSplitGraphs(
   model: SplitTdtModel,
   dir: string,
   { createSession, tensor }: OrtBinding,
+  threads: number,
 ): Promise<TdtGraphs> {
   const [vocabulary, filters, frontend, encoder, decoder, joint] = await Promise.all([
     readFile(join(dir, model.tokenizer), "utf8").then(parseTokenizerJson),
     readFile(join(dir, model.melFilters)).then(parseMelFilters),
-    createSession(join(dir, model.frontend), { threads: ENCODER_THREADS }),
-    createSession(join(dir, model.encoder), { threads: ENCODER_THREADS }),
+    createSession(join(dir, model.frontend), { threads }),
+    createSession(join(dir, model.encoder), { threads }),
     createSession(join(dir, model.decoder), { threads: STEP_THREADS }),
     createSession(join(dir, model.joint), { threads: STEP_THREADS }),
   ]);

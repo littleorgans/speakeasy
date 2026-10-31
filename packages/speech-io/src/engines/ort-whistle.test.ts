@@ -17,12 +17,14 @@ import {
   resolveWhistleFiles,
   type WhistleModelId,
 } from "./ort-whistle-models.ts";
+import { ORT_THREADS } from "./ort-models.ts";
 import { LANGS, type TranscribeResult } from "./vendor/whistle/whistle.js";
 
 const MODEL: WhistleModelId = "whistle-onnx-fp32";
 
 type FakeRuntime = WhistleRuntime & {
   created: WhistleFiles[];
+  threads: number[];
   calls: { samples: number; language: string | undefined }[];
   maxConcurrent: number;
 };
@@ -37,11 +39,13 @@ function fakeRuntime(
   const runtime: FakeRuntime = {
     version: "fake",
     created: [],
+    threads: [],
     calls: [],
     maxConcurrent: 0,
-    createRecognizer: async (files) => {
+    createRecognizer: async (files, { threads }) => {
       if (failures-- > 0) throw new Error("load failed");
       runtime.created.push(files);
+      runtime.threads.push(threads);
       return {
         transcribe: async (pcm, language) => {
           runtime.calls.push({ samples: pcm.length, language });
@@ -218,6 +222,14 @@ test("open rejects a sample rate other than 16 kHz", async () => {
 test("the label names the runtime version and model", async () => {
   const engine = await engineWith(fakeRuntime());
   assert.equal(engine.label, "onnxruntime-node-fake:whistle-onnx-fp32-14fc92c");
+});
+
+test("the recognizer loads on the engine's intra op threads", async () => {
+  const runtime = fakeRuntime();
+  const engine = await engineWith(runtime);
+  await engine.open();
+  assert.equal(engine.threads, ORT_THREADS);
+  assert.deepEqual(runtime.threads, [ORT_THREADS]);
 });
 
 test("words without timestamps give text and no tokens", () => {

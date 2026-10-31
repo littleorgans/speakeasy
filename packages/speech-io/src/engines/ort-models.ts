@@ -1,6 +1,7 @@
 import { GRANITE_MODELS, type GraniteCtcModel } from "./ort-granite-models.ts";
 import { ORT_TDT_MODELS, type OrtTdtModel } from "./ort-tdt-models.ts";
 import { ORT_WHISTLE_MODELS, type WhistleModel } from "./ort-whistle-models.ts";
+import { SHERPA_NUM_THREADS } from "./sherpa.ts";
 
 /**
  * Every onnxruntime-node STT model in one view, keyed by id across the
@@ -17,6 +18,16 @@ export const ORT_MODELS = {
 
 export type OrtModelId = keyof typeof ORT_MODELS;
 export type OrtModel = WhistleModel | GraniteCtcModel | OrtTdtModel;
+
+/**
+ * Intra op threads for an engine's main graphs unless its descriptor sets
+ * `threads`: sherpa's count, so bench timings compare like for like.
+ */
+export const ORT_THREADS = SHERPA_NUM_THREADS;
+
+export function ortThreads(model: OrtModel): number {
+  return model.threads ?? ORT_THREADS;
+}
 
 export function isOrtModelId(value: string): value is OrtModelId {
   return Object.hasOwn(ORT_MODELS, value);

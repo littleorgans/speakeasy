@@ -94,6 +94,8 @@ export type ScoreTable = {
 export type ModelSummary = {
   model: string;
   engineLabel: string;
+  /** The engine's thread setting, null when its runtime picks. */
+  threads: number | null;
   raw: ScoreTable;
   rewrite: ScoreTable | null;
   flushToFinalMs: { median: number | null; max: number | null };
@@ -161,15 +163,16 @@ export async function runCorpusBench(
     await engine.prepare?.();
     const column = model ?? options.engine;
     const engineLabel = engine.label ?? options.engine;
+    const threads = engine.threads ?? null;
     log(
-      `model=${column} engine=${engineLabel} endpoint=manual cadence=${options.frameMs}ms/frame release=end-of-capture rewrite=${rewrite ? `column(rules=${rewrite.rules.length},numbers=${rewrite.numbers})` : "off"}`,
+      `model=${column} engine=${engineLabel} threads=${threads ?? "runtime-default"} endpoint=manual cadence=${options.frameMs}ms/frame release=end-of-capture rewrite=${rewrite ? `column(rules=${rewrite.rules.length},numbers=${rewrite.numbers})` : "off"}`,
     );
     for (const [index, entry] of labeled.entries()) {
       const row = report.utterances[index]!;
       row.models[column] = await scoreTake(engine, entry, options.frameMs, rewrite);
       log(formatTake(column, row));
     }
-    report.models.push(summarize(column, engineLabel, report.utterances));
+    report.models.push(summarize(column, engineLabel, threads, report.utterances));
   }
 
   for (const summary of report.models) {
@@ -226,6 +229,7 @@ function scoreText(hypothesis: string, expected: string): TextScore {
 function summarize(
   column: string,
   engineLabel: string,
+  threads: number | null,
   rows: CorpusRow[],
 ): ModelSummary {
   const takes = rows.map((row) => ({ row, take: row.models[column]! }));
@@ -243,6 +247,7 @@ function summarize(
   return {
     model: column,
     engineLabel,
+    threads,
     raw: tabulate(takes.map(({ row, take }) => ({ row, score: take.raw }))),
     rewrite: hasRewrite
       ? tabulate(takes.map(({ row, take }) => ({ row, score: take.rewrite! })))

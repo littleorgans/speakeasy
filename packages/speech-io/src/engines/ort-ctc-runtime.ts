@@ -15,7 +15,7 @@ export type CtcGraph = {
 
 export type CtcRuntime = {
   version: string;
-  loadGraph(path: string): Promise<CtcGraph>;
+  loadGraph(path: string, options: { threads: number }): Promise<CtcGraph>;
 };
 
 const INPUT = "input_features";
@@ -23,9 +23,10 @@ const OUTPUT = "logits";
 
 export const ortCtcRuntime: CtcRuntime = {
   version: ort.env.versions.common,
-  async loadGraph(path) {
+  async loadGraph(path, { threads }) {
     const session = await ort.InferenceSession.create(path, {
       executionProviders: ["cpu"],
+      intraOpNumThreads: threads,
       graphOptimizationLevel: "all",
       logSeverityLevel: 3,
     });

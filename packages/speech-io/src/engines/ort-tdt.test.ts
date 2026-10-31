@@ -7,6 +7,7 @@ import { after, test } from "node:test";
 import type { EmptyEvent, FinalEvent } from "../contract.ts";
 import { COMPLETE_MARKER, completeMarkerValue } from "./assets.ts";
 import type { OrtBinding, OrtGraph, OrtTensor } from "./ort-tdt-graphs.ts";
+import { ORT_THREADS } from "./ort-models.ts";
 import { OrtTdtEngine } from "./ort-tdt.ts";
 import {
   ORT_TDT_MODELS,
@@ -30,6 +31,8 @@ type Fake = {
   runs: Record<string, Feeds[]>;
   steps: Float32Array[];
   created: string[];
+  /** Intra op threads per graph file. */
+  threads: Record<string, number>;
   failure?: Error;
 };
 
@@ -114,8 +117,9 @@ function fakeGraph(file: string, fake: Fake): (feeds: Feeds) => Feeds {
 function fakeBinding(fake: Fake): OrtBinding {
   return {
     version: "fake",
-    createSession: async (path) => {
+    createSession: async (path, { threads }) => {
       fake.created.push(basename(path));
+      fake.threads[basename(path)] = threads;
       const run = fakeGraph(basename(path), fake);
       const graph: OrtGraph = { run: async (feeds) => run(feeds), release: async () => {} };
       return graph;
@@ -155,7 +159,7 @@ async function seededRoot(id: OrtTdtModelId): Promise<string> {
 }
 
 async function openSession(id: OrtTdtModelId, steps: Float32Array[] = []) {
-  const fake: Fake = { runs: {}, steps, created: [] };
+  const fake: Fake = { runs: {}, steps, created: [], threads: {} };
   const engine = new OrtTdtEngine({ model: id, modelRoot: await seededRoot(id), binding: fakeBinding(fake) });
   const session = await engine.open({ endpoint: { mode: "manual" } });
   return { engine, fake, session };
@@ -257,6 +261,23 @@ test("a decode failure surfaces as an error event", async () => {
   session.flush();
   const [error] = (await once(session, "error")) as [{ err: unknown }];
   assert.equal((error.err as Error).message, "joint failed");
+});
+
+test("front end and encoder take the engine's threads; per step graphs take one", async () => {
+  const fused = await openSession("en-phonon-2-int8");
+  assert.equal(fused.engine.threads, ORT_THREADS);
+  assert.deepEqual(fused.fake.threads, {
+    "preprocessor-model.onnx": ORT_THREADS,
+    "encoder-model.int8.onnx": ORT_THREADS,
+    "decoder_joint-model.onnx": 1,
+  });
+  const split = await openSession("en-fluid-speech-mini");
+  assert.deepEqual(split.fake.threads, {
+    "frontend.onnx": ORT_THREADS,
+    "encoder.onnx": ORT_THREADS,
+    "decoder.onnx": 1,
+    "joint.onnx": 1,
+  });
 });
 
 test("the engine loads each graph once across sessions and refuses other rates", async () => {

@@ -30,6 +30,8 @@ export type GraniteCtcModel = {
   licence: ModelLicence;
   /** Longest utterance a host should hold open for this model. */
   maxAudioMs: number;
+  /** onnxruntime intra op threads; omit for `ort-models.ts::ORT_THREADS`. */
+  threads?: number;
 };
 
 export const GRANITE_MODELS = {

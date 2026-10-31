@@ -33,6 +33,7 @@ function scriptedEngine(texts: string[]): BenchEngine {
   let next = 0;
   return {
     label: "scripted",
+    threads: 2,
     async open(): Promise<STTSession> {
       const session = new EventEmitter() as STTSession;
       Object.assign(session, {
@@ -153,6 +154,7 @@ test("summaries split WER and the raw identifier rate by stratum", async () => {
 
   // Model A: "ten" for "10" is clean normalized WER but a raw identifier miss.
   assert.equal(a?.model, MODEL_A);
+  assert.deepEqual(report.models.map((summary) => summary.threads), [2, 2]);
   assert.deepEqual(a?.raw.all.wer, { errors: 0, total: 14, rate: 0 });
   assert.deepEqual(a?.raw.all.identifiers, { errors: 1, total: 2, rate: 0.5 });
   assert.deepEqual(a?.raw.all.caseSensitiveIdentifiers, { errors: 2, total: 2, rate: 1 });
@@ -207,6 +209,7 @@ test("the real --json CLI emits stable scoring data across repeated runs", async
       ]);
       assert.deepEqual(report.utterances.map((row: { expected: string }) => row.expected), TAKES.map((take) => take.expected));
       assert.ok(report.models[0].raw.all.caseSensitiveIdentifiers);
+      assert.equal(report.models[0].threads, null, "the stub sets no threads");
       // Timings are measured anew; every other field and its order is stable.
       return JSON.stringify(JSON.parse(result.stdout, (key, value) => key === "flushToFinalMs" ? undefined : value));
     };

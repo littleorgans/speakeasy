@@ -18,6 +18,7 @@ import {
   type GraniteCtcModel,
   type GraniteModelId,
 } from "./ort-granite-models.ts";
+import { ortThreads } from "./ort-models.ts";
 import { resultDetail, type ResultDetail } from "./result.ts";
 import { assertSampleRate, SHERPA_SAMPLE_RATE } from "./sherpa.ts";
 
@@ -66,6 +67,10 @@ export class OrtGraniteEngine implements VoiceToText {
     return `onnxruntime-node-${this.#runtime.version}:${this.model.name}`;
   }
 
+  get threads(): number {
+    return ortThreads(this.model);
+  }
+
   async prepare(): Promise<void> {
     await this.#load();
   }
@@ -92,7 +97,9 @@ export class OrtGraniteEngine implements VoiceToText {
       await readFile(join(this.#files.dir, this.model.tokenizer.name), "utf8"),
       this.model.blankToken,
     );
-    const graph = await this.#runtime.loadGraph(join(this.#files.dir, this.model.graph.name));
+    const graph = await this.#runtime.loadGraph(join(this.#files.dir, this.model.graph.name), {
+      threads: this.threads,
+    });
     return { graph, vocab };
   }
 }

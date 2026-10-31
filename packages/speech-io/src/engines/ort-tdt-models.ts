@@ -52,6 +52,11 @@ type OrtTdtCommon = {
   licence: ModelLicence;
   /** Longest utterance a host should hold open for this model. */
   maxAudioMs: number;
+  /**
+   * onnxruntime intra op threads for the front end and encoder; omit for
+   * `ort-models.ts::ORT_THREADS`. Per step graphs always run on one.
+   */
+  threads?: number;
   decoding: TdtDecoding;
   encoder: string;
 };

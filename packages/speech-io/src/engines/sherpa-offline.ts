@@ -4,6 +4,7 @@ import { resultDetail } from "./result.ts";
 import {
   assertSampleRate,
   SHERPA_FEATURE_DIM,
+  SHERPA_NUM_THREADS,
   SHERPA_SAMPLE_RATE,
   SherpaModelAsset,
   type SherpaEngineOptions,
@@ -49,6 +50,10 @@ export class SherpaOfflineEngine implements VoiceToText {
     return this.#asset.model;
   }
 
+  get threads(): number {
+    return SHERPA_NUM_THREADS;
+  }
+
   async prepare(): Promise<void> {
     await this.#asset.ensure();
   }
@@ -80,7 +85,7 @@ function createOfflineConfig(
     },
     modelConfig: {
       tokens: "tokens" in asset.model ? asset.file(asset.model.tokens) : "",
-      numThreads: 2,
+      numThreads: SHERPA_NUM_THREADS,
       provider: "cpu",
       debug: 0,
       ...familyConfig(asset),

@@ -10,6 +10,7 @@ import {
   type WhistleModel,
   type WhistleModelId,
 } from "./ort-whistle-models.ts";
+import { ortThreads } from "./ort-models.ts";
 import type { TranscribeResult } from "./vendor/whistle/whistle.js";
 
 /**
@@ -37,7 +38,10 @@ export type WhistleRecognizer = {
 
 export type WhistleRuntime = {
   version: string;
-  createRecognizer(files: WhistleFiles): Promise<WhistleRecognizer>;
+  createRecognizer(
+    files: WhistleFiles,
+    options: { threads: number },
+  ): Promise<WhistleRecognizer>;
 };
 
 export type OrtWhistleEngineOptions = {
@@ -64,6 +68,10 @@ export class OrtWhistleEngine implements VoiceToText {
     return `onnxruntime-node-${this.#runtime.version}:${this.model.name}`;
   }
 
+  get threads(): number {
+    return ortThreads(this.model);
+  }
+
   async prepare(): Promise<void> {
     await ensureAsset(this.paths);
   }
@@ -82,11 +90,14 @@ export class OrtWhistleEngine implements VoiceToText {
 
   #load(): Promise<WhistleRecognizer> {
     this.#recognizer ??= this.prepare().then(() =>
-      this.#runtime.createRecognizer({
-        encoder: this.#file(this.model.encoder),
-        decoder: this.#file(this.model.decoder),
-        pack: this.#file(this.model.pack),
-      }),
+      this.#runtime.createRecognizer(
+        {
+          encoder: this.#file(this.model.encoder),
+          decoder: this.#file(this.model.decoder),
+          pack: this.#file(this.model.pack),
+        },
+        { threads: this.threads },
+      ),
     );
     // A failed load is retried on the next open.
     this.#recognizer.catch(() => {

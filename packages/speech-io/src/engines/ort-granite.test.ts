@@ -9,6 +9,7 @@ import { COMPLETE_MARKER, completeMarkerValue } from "./assets.ts";
 import { logitsFor, TINY_TOKENIZER } from "./ctc-test-support.ts";
 import type { CtcRuntime } from "./ort-ctc-runtime.ts";
 import { OrtGraniteEngine } from "./ort-granite.ts";
+import { ORT_THREADS } from "./ort-models.ts";
 import {
   GRANITE_MODELS,
   resolveGraniteFiles,
@@ -20,6 +21,7 @@ const VOCAB_SIZE = 7;
 
 type FakeRuntime = CtcRuntime & {
   loads: string[];
+  threads: number[];
   runs: { frames: number; featureDim: number }[];
   /** Argmax id per output frame for the next run; missing frames are blank. */
   script: (number[] | Error)[];
@@ -30,11 +32,13 @@ function fakeRuntime(script: (number[] | Error)[] = []): FakeRuntime {
   const fake: FakeRuntime = {
     version: "fake",
     loads: [],
+    threads: [],
     runs: [],
     script,
     failLoads: 0,
-    async loadGraph(path) {
+    async loadGraph(path, { threads }) {
       fake.loads.push(path);
+      fake.threads.push(threads);
       if (fake.failLoads > 0) {
         fake.failLoads -= 1;
         throw new Error("graph failed to load");
@@ -134,6 +138,8 @@ test("one graph serves every session; a failed load is retried", async () => {
   await engine.open();
   assert.equal(runtime.loads.length, 2);
   assert.match(runtime.loads[1]!, /granite-speech-5\.0-470m-turboctc-onnx-int8\/model_int8\.onnx$/);
+  assert.deepEqual(runtime.threads, [ORT_THREADS, ORT_THREADS]);
+  assert.equal(engine.threads, ORT_THREADS);
   assert.equal(engine.label, "onnxruntime-node-fake:granite-speech-5.0-470m-turboctc-onnx-int8");
 });
 

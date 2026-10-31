@@ -17,6 +17,8 @@ export type PttVariant = "strict" | "loose";
 
 export type BenchEngine = VoiceToText & {
   label?: string;
+  /** Intra op threads of the engine's main graphs; absent when the runtime picks. */
+  threads?: number;
   prepare?: () => Promise<void>;
 };
 

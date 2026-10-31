@@ -7,8 +7,9 @@ import { Engram, Tokenizer, transcribe } from "./vendor/whistle/whistle.js";
 
 /**
  * onnxruntime-node wiring for OrtWhistleEngine: the package from this
- * package's node_modules on the CPU provider with its default threads.
- * Loading follows the reference `js/example.mjs` at the vendored revision.
+ * package's node_modules on the CPU provider, with the engine's intra op
+ * threads. Loading follows the reference `js/example.mjs` at the vendored
+ * revision.
  */
 
 /** Mel filterbank shape packed in whistle.pack: 257 FFT bins x 80 mels. */
@@ -21,7 +22,10 @@ export function loadWhistleRuntime(): WhistleRuntime {
   };
 }
 
-async function createWhistleRecognizer(files: WhistleFiles): Promise<WhistleRecognizer> {
+async function createWhistleRecognizer(
+  files: WhistleFiles,
+  { threads }: { threads: number },
+): Promise<WhistleRecognizer> {
   const bytes = await readFile(files.pack);
   const pack = parsePack(
     bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length),
@@ -34,7 +38,7 @@ async function createWhistleRecognizer(files: WhistleFiles): Promise<WhistleReco
     ),
     engram: new Engram(pack),
   };
-  const options = { executionProviders: ["cpu"] };
+  const options = { executionProviders: ["cpu"], intraOpNumThreads: threads };
   const [encoder, decoder] = await Promise.all([
     ort.InferenceSession.create(files.encoder, options),
     ort.InferenceSession.create(files.decoder, options),

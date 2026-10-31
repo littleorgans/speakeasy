@@ -9,6 +9,7 @@ import {
   type OrtTdtModel,
   type OrtTdtModelId,
 } from "./ort-tdt-models.ts";
+import { ortThreads } from "./ort-models.ts";
 import { resultDetail, type ResultDetail } from "./result.ts";
 import { assertSampleRate, SHERPA_SAMPLE_RATE } from "./sherpa.ts";
 
@@ -46,6 +47,10 @@ export class OrtTdtEngine implements VoiceToText {
     return `onnxruntime-node-${this.#binding.version}:${this.model.name}`;
   }
 
+  get threads(): number {
+    return ortThreads(this.model);
+  }
+
   async prepare(): Promise<void> {
     await ensureAsset(this.paths);
   }
@@ -67,7 +72,7 @@ export class OrtTdtEngine implements VoiceToText {
   #load(): Promise<TdtGraphs> {
     // One set of graphs serves every session; a failed load is retried.
     this.#graphs ??= this.prepare()
-      .then(() => loadTdtGraphs(this.model, this.paths.dir, this.#binding))
+      .then(() => loadTdtGraphs(this.model, this.paths.dir, this.#binding, this.threads))
       .catch((err: unknown) => {
         this.#graphs = undefined;
         throw err;

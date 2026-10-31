@@ -32,6 +32,8 @@ export type WhistleModel = {
   languages: readonly string[];
   /** Longest utterance a host should hold open for this model. */
   maxAudioMs: number;
+  /** onnxruntime intra op threads; omit for `ort-models.ts::ORT_THREADS`. */
+  threads?: number;
   encoder: string;
   decoder: string;
   pack: string;
