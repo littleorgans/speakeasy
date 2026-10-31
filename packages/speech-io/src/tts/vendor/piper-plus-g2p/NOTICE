@@ -2,6 +2,8 @@ Piper Plus English G2P (@piper-plus/g2p, JavaScript), vendored unmodified.
 
 Source: https://github.com/ayutaz/piper-plus
 Commit: 4fd95c24d364fcaeba200ee606c0902e9bb70768, directory src/wasm/g2p/
+The vendored en/*.js files come from src/en/ beneath that directory;
+LICENSE.md and THIRD_PARTY_LICENSES.md come from its root.
 Licence: MIT, Copyright (c) 2022 Michael Hansen, Copyright (c) 2025 ayutaz; full text in LICENSE.md.
 Dictionary: CMU Pronouncing Dictionary 0.7b (data/cmudict_data.json at the same
 commit), BSD style terms in THIRD_PARTY_LICENSES.md. speak-easy downloads it,
