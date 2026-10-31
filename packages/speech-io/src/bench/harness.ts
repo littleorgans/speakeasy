@@ -4,6 +4,7 @@ import { MoonshineEngine } from "../engines/moonshine.ts";
 import { createLocalSherpaEngine } from "../engines/sherpa-binding.ts";
 import type { SherpaModelId } from "../engines/sherpa-models.ts";
 import { StubEngine } from "../engines/stub.ts";
+import { nextCommit } from "./commit.ts";
 import { FLUSH_FINAL_TIMEOUT_MS, SESSION_TIMEOUT_MS } from "./config.ts";
 import { isWordTolerantTranscript, wordErrorCount } from "./transcript.ts";
 import type {
@@ -121,7 +122,7 @@ export async function runPttOnce(input: {
 }): Promise<PttRunResult> {
   // Push-to-talk: the consumer finalizes externally (button release), so the
   // engine's own silence endpointing is disabled and flush() is the commit
-  // path. The final is awaited as an EVENT because the contract makes no
+  // path. The commit is awaited as an EVENT because the contract makes no
   // synchrony guarantee for flush(): sherpa commits synchronously, moonshine
   // commits from an async task.
   const session = await input.engine.open({
@@ -141,11 +142,11 @@ export async function runPttOnce(input: {
     }
   }
 
-  const finalsBefore = state.finals.length;
+  const committed = nextCommit(session, FLUSH_FINAL_TIMEOUT_MS);
   const flushAt = performance.now();
   session.flush();
-  const final = await state.finalAtIndex(finalsBefore, FLUSH_FINAL_TIMEOUT_MS);
-  const flushToFinalMs = final ? final.finalAt - flushAt : Number.NaN;
+  const final = await committed;
+  const flushToFinalMs = final ? final.at - flushAt : Number.NaN;
   const finalText = final?.text ?? "";
 
   await withTimeout(session.end(), SESSION_TIMEOUT_MS);
