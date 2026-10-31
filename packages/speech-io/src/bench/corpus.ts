@@ -18,7 +18,8 @@ import { readWavFrames } from "./wav.ts";
  * takes, so rows pair up per utterance for model comparison.
  *
  * Scores: normalized WER (`wordErrorAlignment`) and the identifier error rate
- * on raw tokens (`scoreIdentifiers`), overall and per sidecar stratum. With
+ * on raw tokens (`scoreIdentifiers`), ignoring casing with a case sensitive
+ * second column, overall and per sidecar stratum. With
  * `--rewrite on` each take also gets a rewrite column: the same decode passed
  * through `rewriteText`, the function the production `withRewrite` decorator
  * applies, so raw and rewritten scores never differ by decoder noise.
@@ -53,8 +54,10 @@ export type TextScore = {
   insertions: string[];
   deletions: string[];
   identifierErrors: number;
+  caseSensitiveIdentifierErrors: number;
   identifiers: number;
   missedIdentifiers: string[];
+  missedCaseSensitiveIdentifiers: string[];
 };
 
 export type ModelTake = {
@@ -79,6 +82,7 @@ export type CorpusAggregate = {
   utterances: number;
   wer: Tally;
   identifiers: Tally;
+  caseSensitiveIdentifiers: Tally;
 };
 
 export type ScoreTable = {
@@ -203,6 +207,7 @@ async function scoreTake(
 function scoreText(hypothesis: string, expected: string): TextScore {
   const alignment = wordErrorAlignment(hypothesis, expected);
   const identifiers = scoreIdentifiers(hypothesis, expected);
+  const caseSensitive = scoreIdentifiers(hypothesis, expected, { caseSensitive: true });
   return {
     hypothesis,
     wordErrors: alignment.errors,
@@ -211,8 +216,10 @@ function scoreText(hypothesis: string, expected: string): TextScore {
     insertions: alignment.insertions,
     deletions: alignment.deletions,
     identifierErrors: identifiers.errors,
+    caseSensitiveIdentifierErrors: caseSensitive.errors,
     identifiers: identifiers.identifiers,
     missedIdentifiers: identifiers.missed,
+    missedCaseSensitiveIdentifiers: caseSensitive.missed,
   };
 }
 
@@ -269,12 +276,13 @@ function aggregate(scores: TextScore[]): CorpusAggregate {
     utterances: scores.length,
     wer: tally(scores, "wordErrors", "referenceWords"),
     identifiers: tally(scores, "identifierErrors", "identifiers"),
+    caseSensitiveIdentifiers: tally(scores, "caseSensitiveIdentifierErrors", "identifiers"),
   };
 }
 
 function tally(
   scores: TextScore[],
-  errorsKey: "wordErrors" | "identifierErrors",
+  errorsKey: "wordErrors" | "identifierErrors" | "caseSensitiveIdentifierErrors",
   totalKey: "referenceWords" | "identifiers",
 ): Tally {
   const errors = scores.reduce((sum, score) => sum + score[errorsKey], 0);
@@ -290,6 +298,7 @@ function formatTake(column: string, row: CorpusRow): string {
     `stratum=${row.stratum ?? NO_STRATUM}`,
     `WER=${formatRate({ errors: take.raw.wordErrors, total: take.raw.referenceWords })}`,
     `ident=${formatRate({ errors: take.raw.identifierErrors, total: take.raw.identifiers })}`,
+    `ident-case=${formatRate({ errors: take.raw.caseSensitiveIdentifierErrors, total: take.raw.identifiers })}`,
     ...(take.rewrite
       ? [`WER+rewrite=${formatRate({ errors: take.rewrite.wordErrors, total: take.rewrite.referenceWords })}`]
       : []),
@@ -317,8 +326,9 @@ function printSummary(summary: ModelSummary, log: (line: string) => void): void 
         `utterances=${raw.utterances}`,
         `WER=${formatRate(raw.wer)}`,
         `ident=${formatRate(raw.identifiers)}`,
+        `ident-case=${formatRate(raw.caseSensitiveIdentifiers)}`,
         ...(rewrite
-          ? [`WER+rewrite=${formatRate(rewrite.wer)}`, `ident+rewrite=${formatRate(rewrite.identifiers)}`]
+          ? [`WER+rewrite=${formatRate(rewrite.wer)}`, `ident+rewrite=${formatRate(rewrite.identifiers)}`, `ident-case+rewrite=${formatRate(rewrite.caseSensitiveIdentifiers)}`]
           : []),
       ].join(" "),
     );

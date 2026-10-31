@@ -11,7 +11,8 @@ import { alignWords } from "./transcript.ts";
  * "dev-up/down" and "dev up down" would collide. Raw tokens split on
  * whitespace and shed only sentence punctuation at their edges ("now." ->
  * "now", "gpt-6.1-sol." -> "gpt-6.1-sol"); a leading "." stays (".kilo").
- * Comparison is exact and case sensitive. A reference identifier counts as
+ * Comparison ignores casing by default; caseSensitive retains the exact rate.
+ * A reference identifier counts as
  * an error unless the raw word alignment matches it to an identical
  * hypothesis token.
  */
@@ -46,10 +47,13 @@ export function rawTokens(text: string): string[] {
 export function scoreIdentifiers(
   hypothesis: string,
   expected: string,
+  { caseSensitive = false }: { caseSensitive?: boolean } = {},
 ): IdentifierScore {
   const reference = rawTokens(expected);
+  const comparisonTokens = (tokens: string[]) =>
+    caseSensitive ? tokens : tokens.map((token) => token.toLowerCase());
   const matched = new Set(
-    alignWords(rawTokens(hypothesis), reference).matchedReference,
+    alignWords(comparisonTokens(rawTokens(hypothesis)), comparisonTokens(reference)).matchedReference,
   );
   const identifierIndices = reference
     .map((token, index) => (isIdentifier(token) ? index : -1))

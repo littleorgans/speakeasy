@@ -33,7 +33,7 @@ test("exact identifiers score clean; sentence words never count", () => {
   });
 });
 
-test("split, spelled or recased identifiers are errors the normalized WER misses", () => {
+test("split or spelled identifiers are errors the normalized WER misses", () => {
   // normalizeTranscript makes these pairs identical; raw scoring does not.
   const score = scoreIdentifiers(
     "Set TM CHECK ONLY equals one and rerun. Open lilo docs index md first.",
@@ -54,11 +54,23 @@ test("split, spelled or recased identifiers are errors the normalized WER misses
     errors: 1,
     missed: ["561"],
   });
-  assert.equal(scoreIdentifiers("open readme.md", "open README.md").errors, 1);
+  assert.equal(scoreIdentifiers("open readme.md", "open README.md").errors, 0);
+  assert.equal(scoreIdentifiers("open readme.md", "open README.md", { caseSensitive: true }).errors, 1);
 });
 
 test("an identifier matched out of alignment order still counts as missed", () => {
   // The hypothesis carries 561 but in a position the alignment cannot match.
   const score = scoreIdentifiers("561 yes do 563", "yes do 561 and 563");
   assert.deepEqual(score.missed, ["561"]);
+});
+
+test("primary alignment ignores casing and preserves raw identifier spelling", () => {
+  const expected = "Open README.md beside run_id and .lilo/docs/index.md.";
+  const hypothesis = "OPEN README.MD BESIDE RUN_ID AND .LILO/DOCS/INDEX.MD.";
+  assert.deepEqual(scoreIdentifiers(hypothesis, expected), {
+    identifiers: 3, errors: 0, missed: [],
+  });
+  assert.deepEqual(scoreIdentifiers(hypothesis, expected, { caseSensitive: true }), {
+    identifiers: 3, errors: 3, missed: ["README.md", "run_id", ".lilo/docs/index.md"],
+  });
 });

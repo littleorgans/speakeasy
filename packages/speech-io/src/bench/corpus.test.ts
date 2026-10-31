@@ -23,7 +23,7 @@ const TAKES = [
 
 /** Per model, the hypothesis each take decodes to, in take order. */
 const HYPOTHESES: Record<string, string[]> = {
-  [MODEL_A]: ["and so my fellow americans", "spawn ten agents", "Open .lilo/docs/index.md first."],
+  [MODEL_A]: ["and so my fellow americans", "spawn ten agents", "OPEN .LILO/DOCS/INDEX.MD FIRST."],
   [MODEL_B]: ["and saw my fellow americans", "spawn 10 agents", "open lilo docs index md first"],
 };
 
@@ -154,6 +154,12 @@ test("summaries split WER and the raw identifier rate by stratum", async () => {
   assert.equal(a?.model, MODEL_A);
   assert.deepEqual(a?.raw.all.wer, { errors: 0, total: 14, rate: 0 });
   assert.deepEqual(a?.raw.all.identifiers, { errors: 1, total: 2, rate: 0.5 });
+  assert.deepEqual(a?.raw.all.caseSensitiveIdentifiers, { errors: 2, total: 2, rate: 1 });
+  assert.deepEqual(a?.raw.strata.long?.caseSensitiveIdentifiers, { errors: 1, total: 1, rate: 1 });
+  const path = report.utterances[2]!.models[MODEL_A]!.raw;
+  assert.equal(path.identifierErrors, 0);
+  assert.equal(path.caseSensitiveIdentifierErrors, 1);
+  assert.deepEqual(path.missedCaseSensitiveIdentifiers, [".lilo/docs/index.md"]);
   assert.deepEqual(Object.keys(a?.raw.strata ?? {}), [NO_STRATUM, "short", "long"]);
   assert.deepEqual(a?.raw.strata.short?.identifiers, { errors: 1, total: 1, rate: 1 });
   assert.deepEqual(a?.raw.strata[NO_STRATUM]?.identifiers, { errors: 0, total: 0, rate: null });
