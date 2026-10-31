@@ -252,6 +252,8 @@ export const SHERPA_MODELS = {
     },
     // Card: "designed to handle input audio smaller than 40 seconds".
     maxAudioMs: 40_000,
+    // Says "Yeah." on 1 s of zeros; Silero keeps speech without a score floor.
+    silenceGate: { logProbFloor: null },
     encoder: "encoder.int8.onnx",
     decoder: "decoder.int8.onnx",
     tokens: "tokens.txt",
