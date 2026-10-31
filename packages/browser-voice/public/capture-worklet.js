@@ -10,7 +10,9 @@ class SpeakEasyCapture extends AudioWorkletProcessor {
     this.sourceLength = 0;
   }
 
-  ingest(input) {
+  // endFrame: context frame just past `input`. Each frame message carries
+  // audioTime, the context time (s) at that frame's last source sample.
+  ingest(input, endFrame) {
     if (this.sourceLength + input.length > this.source.length) {
       const expanded = new Float32Array(this.source.length * 2);
       expanded.set(this.source.subarray(0, this.sourceLength));
@@ -50,7 +52,12 @@ class SpeakEasyCapture extends AudioWorkletProcessor {
       this.source.copyWithin(0, consumed, this.sourceLength);
       this.sourceLength -= consumed;
       this.port.postMessage(
-        { kind: "frame", samples: frame, level: Math.sqrt(energy / frame.length) },
+        {
+          kind: "frame",
+          samples: frame,
+          level: Math.sqrt(energy / frame.length),
+          audioTime: (endFrame - this.sourceLength) / sampleRate,
+        },
         [frame.buffer],
       );
     }
@@ -58,7 +65,7 @@ class SpeakEasyCapture extends AudioWorkletProcessor {
 
   process(inputs, outputs) {
     const input = inputs[0]?.[0];
-    if (input?.length) this.ingest(input);
+    if (input?.length) this.ingest(input, currentFrame + input.length);
     for (const channel of outputs[0] ?? []) channel.fill(0);
     return true;
   }

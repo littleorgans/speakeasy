@@ -50,7 +50,7 @@ export async function runCorpusBench(options: CliOptions): Promise<void> {
     return;
   }
 
-  const engine = createEngine(options.engine, options.model);
+  const engine = await createEngine(options.engine, options.model);
   await engine.prepare?.();
   // Wrap with the production rewrite decorator when --rewrite on, so the
   // scored hypothesis is exactly what a consumer receives (hypothesis-only:

@@ -1,5 +1,7 @@
 import { createInterface } from "node:readline/promises";
 import { setTimeout as delay } from "node:timers/promises";
+import { nextCommit, type CommitObservation } from "../bench/commit.ts";
+import { FLUSH_FINAL_TIMEOUT_MS } from "../bench/config.ts";
 import { formatMs } from "../bench/format.ts";
 import {
   pacedFrames,
@@ -16,14 +18,13 @@ import {
   type MicCapture,
 } from "../capture/ffmpeg.ts";
 import type {
-  FinalEvent,
   NumbersMode,
   PartialEvent,
   STTSession,
   VoiceToText,
 } from "../contract.ts";
 import { saveCorpusPair, type CorpusSidecarMeta } from "../corpus/store.ts";
-import { SherpaEngine } from "../engines/sherpa.ts";
+import { createLocalSherpaEngine } from "../engines/sherpa-binding.ts";
 import { withRewrite } from "../rewrite/decorator.ts";
 import { DEFAULT_RULES } from "../rewrite/rules.ts";
 import {
@@ -50,12 +51,9 @@ import {
  * directory, --no-save disarms, --save-all skips the prompts.
  */
 
-const FINAL_TIMEOUT_MS = 2_000;
 const LEVEL_WINDOW_FRAMES = 25; // 500ms rolling peak
 const LEVEL_RENDER_INTERVAL_MS = 100;
 const LEVEL_BAR_CELLS = 10;
-
-type FinalObservation = { text: string; at: number };
 
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
@@ -78,7 +76,7 @@ async function main(): Promise<void> {
     ? await readWavFrames(options.wavPath, CAPTURE_FRAME_MS)
     : undefined;
 
-  const engine = new SherpaEngine(options.model);
+  const engine = await createLocalSherpaEngine(options.model);
   await engine.prepare();
   // Product default: wrap with the rewrite decorator (domain rules on). The
   // engine stays pure; --no-rewrite gets raw output. --numbers adds the number
@@ -299,14 +297,14 @@ class PttDemo {
     this.#clearLiveLine();
     this.#throwIfFatal();
 
-    // Register the final waiter BEFORE flush(): the contract makes no
+    // Register the commit waiter BEFORE flush(): the contract makes no
     // synchrony guarantee (sherpa emits during flush, others may not).
-    const finalPromise = this.#nextFinal(FINAL_TIMEOUT_MS);
+    const finalPromise = nextCommit(this.#session, FLUSH_FINAL_TIMEOUT_MS);
     const releaseAt = performance.now();
     this.#session.flush();
     const final = await finalPromise;
 
-    if (final) {
+    if (final?.text) {
       console.log(
         `utterance ${this.#utterance}: final=${JSON.stringify(final.text)} release->final=${formatMs(final.at - releaseAt)}`,
       );
@@ -331,7 +329,7 @@ class PttDemo {
    * is accepted or corrected on one line.
    */
   async #saveUtterance(
-    final: FinalObservation,
+    final: CommitObservation,
     releaseAt: number,
   ): Promise<void> {
     const frames = this.#utteranceFrames;
@@ -476,20 +474,6 @@ class PttDemo {
       this.#utteranceFrames.push(frame);
     }
     this.#session.pushAudio(frame);
-  }
-
-  #nextFinal(timeoutMs: number): Promise<FinalObservation | undefined> {
-    return new Promise((resolve) => {
-      const handler = (event: FinalEvent): void => {
-        clearTimeout(timer);
-        resolve({ text: event.text, at: performance.now() });
-      };
-      const timer = setTimeout(() => {
-        this.#session.off("final", handler);
-        resolve(undefined);
-      }, timeoutMs);
-      this.#session.once("final", handler);
-    });
   }
 
   /** One overwriting status line: [level bar] peak + latest partial. */

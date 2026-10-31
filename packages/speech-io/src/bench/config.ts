@@ -9,7 +9,7 @@ export const DEFAULT_FRAME_MS = 20;
 export const PASS_THRESHOLD_MS = 200;
 export const SOFT_THRESHOLD_MS = 300;
 export const SESSION_TIMEOUT_MS = 30_000;
-/** How long the ptt harness waits for the final event after flush(). */
+/** How long the ptt harness and demo wait for final or empty after flush(). */
 export const FLUSH_FINAL_TIMEOUT_MS = 10_000;
 export const EXPECTED_JFK_TRANSCRIPT = "and so my fellow americans";
 export const SHERPA_SWEEP_PATH = "results/sherpa-sweep.txt";

@@ -17,6 +17,8 @@ export type {
   EndpointMode,
   PartialEvent,
   FinalEvent,
+  FinalToken,
+  EmptyEvent,
   EndpointEvent,
   STTErrorEvent,
   RewriteRule,
@@ -32,8 +34,14 @@ export type {
   AudioSegment,
 } from "./tts/contract.ts";
 
-// Concrete STT engine + the rewrite decorator.
+// Concrete STT engines + the rewrite decorator.
 export { SherpaEngine } from "./engines/sherpa.ts";
+export { SherpaOfflineEngine } from "./engines/sherpa-offline.ts";
+export {
+  createLocalSherpaEngine,
+  loadSherpaBinding,
+  SHERPA_ROOT,
+} from "./engines/sherpa-binding.ts";
 export { withRewrite } from "./rewrite/decorator.ts";
 export { DEFAULT_RULES } from "./rewrite/rules.ts";
 export {

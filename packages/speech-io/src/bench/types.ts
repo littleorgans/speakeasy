@@ -70,7 +70,7 @@ export type Summary = {
 
 export type PttRunResult = {
   run: number;
-  /** NaN when the engine never emitted a final after flush(). */
+  /** NaN when the engine never emitted final or empty after flush(). */
   flushToFinalMs: number;
   firstPartialMs?: number;
   wordErrors: number;

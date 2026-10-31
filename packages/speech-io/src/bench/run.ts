@@ -153,7 +153,7 @@ async function runEngineSummary(
   speechProfile: SpeechProfile,
   endpoint: Required<EndpointConfig> | undefined,
 ): Promise<Summary> {
-  const engine = createEngine(cli.engine, cli.model);
+  const engine = await createEngine(cli.engine, cli.model);
   await engine.prepare?.();
   const engineLabel = engine.label ?? cli.engine;
   const results: RunResult[] = [];
@@ -266,7 +266,7 @@ async function runPttSummary(
   speechProfile: SpeechProfile,
   variant: PttVariant,
 ): Promise<PttSummary> {
-  const engine = createEngine(cli.engine, cli.model);
+  const engine = await createEngine(cli.engine, cli.model);
   await engine.prepare?.();
   const engineLabel = engine.label ?? cli.engine;
   const releaseMs =

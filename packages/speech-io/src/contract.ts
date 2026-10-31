@@ -28,7 +28,29 @@ export type EndpointConfig = {
   minUtteranceMs?: number;
 };
 export type PartialEvent = { text: string };
-export type FinalEvent = { text: string };
+/** One recognizer token; a leading space marks a word start. */
+export type FinalToken = {
+  text: string;
+  /** Token start within the utterance. */
+  startMs: number;
+  /** Natural log probability, or null when the model reports none. */
+  logProb: number | null;
+};
+/**
+ * Detail fields are optional so engines without them stay valid. `tokens` is
+ * empty when the model gives no per token timing (Moonshine); engines never
+ * invent timing or scores.
+ */
+export type FinalEvent = {
+  text: string;
+  tokens?: FinalToken[];
+  /** Audio the utterance decoded, excluding engine padding. */
+  audioMs?: number;
+  /** Time from commit request to result. */
+  decodeMs?: number;
+};
+/** A flush that decoded no text (silence or an empty hold). */
+export type EmptyEvent = { audioMs?: number; decodeMs?: number };
 export type EndpointEvent = Record<string, never>;
 export type STTErrorEvent = { err: unknown };
 
@@ -39,6 +61,7 @@ export type STTErrorEvent = { err: unknown };
  * Events:
  *   "partial"  (PartialEvent)   incremental hypothesis, may be revised
  *   "final"    (FinalEvent)     committed segment
+ *   "empty"    (EmptyEvent)     flush() committed no text
  *   "endpoint" (EndpointEvent)  advisory end-of-speech detected
  *   "error"    (STTErrorEvent)
  *

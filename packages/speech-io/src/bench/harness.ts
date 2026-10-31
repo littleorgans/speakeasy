@@ -1,9 +1,10 @@
 import { performance } from "node:perf_hooks";
 import type { STTSession, VoiceToText } from "../contract.ts";
 import { MoonshineEngine } from "../engines/moonshine.ts";
-import { SherpaEngine } from "../engines/sherpa.ts";
+import { createLocalSherpaEngine } from "../engines/sherpa-binding.ts";
 import type { SherpaModelId } from "../engines/sherpa-models.ts";
 import { StubEngine } from "../engines/stub.ts";
+import { nextCommit } from "./commit.ts";
 import { FLUSH_FINAL_TIMEOUT_MS, SESSION_TIMEOUT_MS } from "./config.ts";
 import { isWordTolerantTranscript, wordErrorCount } from "./transcript.ts";
 import type {
@@ -23,17 +24,13 @@ import { pacedFrames, type WavAudio } from "./wav.ts";
 export type SessionObservers = {
   readonly firstPartialAt?: number;
   finals: FinalObservation[];
-  finalAtIndex: (
-    index: number,
-    timeoutMs: number,
-  ) => Promise<FinalObservation | undefined>;
   throwIfError: () => void;
 };
 
-export function createEngine(
+export async function createEngine(
   name: EngineName,
   model?: SherpaModelId,
-): BenchEngine {
+): Promise<BenchEngine> {
   if (model && name !== "sherpa") {
     throw new Error(`--model only applies to --engine sherpa, not ${name}`);
   }
@@ -44,7 +41,7 @@ export function createEngine(
     return new MoonshineEngine();
   }
   if (name === "sherpa") {
-    return new SherpaEngine(model);
+    return createLocalSherpaEngine(model);
   }
   throw new Error(`Unsupported engine ${name}`);
 }
@@ -53,7 +50,6 @@ export function attachSessionObservers(session: STTSession): SessionObservers {
   const endpointEvents: number[] = [];
   const finalTexts: string[] = [];
   const finals: FinalObservation[] = [];
-  const finalWaiters: Array<() => void> = [];
   const state: { firstPartialAt?: number; error?: unknown } = {};
 
   session.on("partial", () => {
@@ -73,9 +69,6 @@ export function attachSessionObservers(session: STTSession): SessionObservers {
       finalAt,
       text: finalTexts.join(" ").trim(),
     });
-    for (const notify of finalWaiters.splice(0)) {
-      notify();
-    }
   });
   session.on("error", ({ err }: { err: unknown }) => {
     state.error = err;
@@ -86,23 +79,6 @@ export function attachSessionObservers(session: STTSession): SessionObservers {
       return state.firstPartialAt;
     },
     finals,
-    // Resolves with finals[index] as soon as it exists (immediately if the
-    // engine committed synchronously, on the event if it commits async),
-    // or undefined after timeoutMs.
-    finalAtIndex(index, timeoutMs) {
-      if (finals.length > index) {
-        return Promise.resolve(finals[index]);
-      }
-      return new Promise((resolve) => {
-        const timer = setTimeout(() => {
-          resolve(undefined);
-        }, timeoutMs);
-        finalWaiters.push(() => {
-          clearTimeout(timer);
-          resolve(finals[index]);
-        });
-      });
-    },
     throwIfError() {
       if (state.error) {
         throw state.error;
@@ -121,7 +97,7 @@ export async function runPttOnce(input: {
 }): Promise<PttRunResult> {
   // Push-to-talk: the consumer finalizes externally (button release), so the
   // engine's own silence endpointing is disabled and flush() is the commit
-  // path. The final is awaited as an EVENT because the contract makes no
+  // path. The commit is awaited as an EVENT because the contract makes no
   // synchrony guarantee for flush(): sherpa commits synchronously, moonshine
   // commits from an async task.
   const session = await input.engine.open({
@@ -141,11 +117,11 @@ export async function runPttOnce(input: {
     }
   }
 
-  const finalsBefore = state.finals.length;
+  const committed = nextCommit(session, FLUSH_FINAL_TIMEOUT_MS);
   const flushAt = performance.now();
   session.flush();
-  const final = await state.finalAtIndex(finalsBefore, FLUSH_FINAL_TIMEOUT_MS);
-  const flushToFinalMs = final ? final.finalAt - flushAt : Number.NaN;
+  const final = await committed;
+  const flushToFinalMs = final ? final.at - flushAt : Number.NaN;
   const finalText = final?.text ?? "";
 
   await withTimeout(session.end(), SESSION_TIMEOUT_MS);

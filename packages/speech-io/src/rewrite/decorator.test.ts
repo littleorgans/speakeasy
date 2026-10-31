@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { test } from "node:test";
-import type { STTConfig, STTSession, VoiceToText } from "../contract.ts";
+import type { EmptyEvent, FinalEvent, STTConfig, STTSession, VoiceToText } from "../contract.ts";
 import { withRewrite } from "./decorator.ts";
 
 class FakeSession extends EventEmitter implements STTSession {
@@ -41,6 +41,30 @@ test("rewrites final events through the pipeline", async () => {
 
   engine.last!.emit("final", { text: "open crown ten" });
   assert.deepEqual(finals, ["open chrome 10"]);
+});
+
+test("preserves recognizer detail while rewriting final text", async () => {
+  const engine = new FakeEngine();
+  const session = await withRewrite(engine, config).open();
+  const finals: FinalEvent[] = [];
+  session.on("final", (event: FinalEvent) => finals.push(event));
+  const detail = {
+    tokens: [{ text: " crown", startMs: 120, logProb: -0.1 }],
+    audioMs: 500,
+    decodeMs: 12,
+  };
+  engine.last!.emit("final", { text: "crown", ...detail });
+  assert.deepEqual(finals, [{ text: "chrome", ...detail }]);
+});
+
+test("passes empty utterances through with their timing", async () => {
+  const engine = new FakeEngine();
+  const session = await withRewrite(engine, config).open();
+  const empties: EmptyEvent[] = [];
+  session.on("empty", (event: EmptyEvent) => empties.push(event));
+  const empty = { audioMs: 500, decodeMs: 12 };
+  engine.last!.emit("empty", empty);
+  assert.deepEqual(empties, [empty]);
 });
 
 test("leaves partial events untouched (no flicker)", async () => {
