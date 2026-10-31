@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { readCorpusEntries, readWavFrames } from "@speakeasy/speech-io";
 import { startBrowserVoiceServer, type BrowserVoiceServer } from "./host.ts";
 import { PROMPT_MAX_TAKE_BYTES, type PromptListing } from "./prompt-reader.ts";
+import { ChildTranscriber, type Transcriber } from "./transcriber.ts";
 
 const PROMPTS = {
   set: "T",
@@ -18,15 +19,17 @@ const PROMPTS = {
 };
 
 async function withReader(
-  run: (host: BrowserVoiceServer, outputDir: string) => Promise<void>,
+  run: (host: BrowserVoiceServer, outputDir: string, root: string) => Promise<void>,
+  options: { transcriber?: (root: string) => Promise<Transcriber> } = {},
 ): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), "speakeasy-reader-"));
   const promptsPath = join(root, "prompts.json");
   const outputDir = join(root, "takes");
   await writeFile(promptsPath, JSON.stringify(PROMPTS));
-  const host = await startBrowserVoiceServer({ port: 0, promptReader: { promptsPath, outputDir } });
+  const transcriber = await options.transcriber?.(root);
+  const host = await startBrowserVoiceServer({ port: 0, promptReader: { promptsPath, outputDir }, transcriber });
   try {
-    await run(host, outputDir);
+    await run(host, outputDir, root);
   } finally {
     await host.close();
     await rm(root, { recursive: true, force: true });
@@ -85,6 +88,20 @@ function get(
     outgoing.on("error", reject);
     outgoing.end();
   });
+}
+
+/** Requests every take route refuses, with the status each must answer. */
+function refusedTakes(host: BrowserVoiceServer): Array<[string, Parameters<typeof post>[2], number]> {
+  const port = new URL(host.url).port;
+  return [
+    ["foreign origin", { body: takeBytes(320), headers: { origin: "https://example.com" } }, 403],
+    ["missing origin", { body: takeBytes(320), headers: { origin: "" } }, 403],
+    ["rebound host", { body: takeBytes(320), headers: { host: `evil.test:${port}`, origin: `http://evil.test:${port}` } }, 403],
+    ["wrong content type", { body: takeBytes(320), headers: { "content-type": "text/plain" } }, 415],
+    ["empty body", { body: new Uint8Array(0) }, 400],
+    ["partial sample", { body: new Uint8Array(6) }, 400],
+    ["oversize take", { body: new Uint8Array(PROMPT_MAX_TAKE_BYTES + 4) }, 413],
+  ];
 }
 
 function takeBytes(samples: number, value = 0.25): Uint8Array {
@@ -149,17 +166,7 @@ test("prompts list in id order and a saved take becomes a schema 2 corpus pair",
 test("the save route refuses foreign pages, bad bodies and unknown prompts", async () => {
   await withReader(async (host, outputDir) => {
     const path = "/prompt-reader/recordings?promptId=p001";
-    const port = new URL(host.url).port;
-    const cases: Array<[string, Parameters<typeof post>[2], number]> = [
-      ["foreign origin", { body: takeBytes(320), headers: { origin: "https://example.com" } }, 403],
-      ["missing origin", { body: takeBytes(320), headers: { origin: "" } }, 403],
-      ["rebound host", { body: takeBytes(320), headers: { host: `evil.test:${port}`, origin: `http://evil.test:${port}` } }, 403],
-      ["wrong content type", { body: takeBytes(320), headers: { "content-type": "text/plain" } }, 415],
-      ["empty body", { body: new Uint8Array(0) }, 400],
-      ["partial sample", { body: new Uint8Array(6) }, 400],
-      ["oversize take", { body: new Uint8Array(PROMPT_MAX_TAKE_BYTES + 4) }, 413],
-    ];
-    for (const [label, options, status] of cases) {
+    for (const [label, options, status] of refusedTakes(host)) {
       assert.equal((await post(host, path, options)).status, status, label);
     }
     assert.equal(
@@ -298,4 +305,55 @@ test("the take route is closed when the reader is not configured", async () => {
   } finally {
     await host.close();
   }
+});
+
+test("the transcription route validates like the save route and writes nothing", async () => {
+  const heard: number[] = [];
+  const transcriber: Transcriber = {
+    async transcribe(samples) {
+      heard.push(samples.length);
+      return { text: "Read this.", decodeMs: 12, model: "Fake" };
+    },
+    close() {},
+  };
+  await withReader(async (host, outputDir) => {
+    const path = "/prompt-reader/transcriptions";
+    for (const [label, options, status] of refusedTakes(host)) {
+      assert.equal((await post(host, path, options)).status, status, label);
+    }
+    assert.deepEqual(heard, [], "refused takes never reach the transcriber");
+    const answered = await post(host, path, { body: takeBytes(320) });
+    assert.equal(answered.status, 200);
+    assert.deepEqual(answered.body, { text: "Read this.", decodeMs: 12, model: "Fake" });
+    assert.deepEqual(heard, [320]);
+    await assert.rejects(readdir(outputDir), { code: "ENOENT" }, "nothing was written");
+  }, { transcriber: async () => transcriber });
+});
+
+test("a crashing transcriber child leaves the host serving and is forked again", async () => {
+  // A stand in worker: a take whose first sample is 1 kills the child, as a
+  // native sherpa abort would; any other take answers with its length.
+  const worker = async (root: string) => {
+    const workerPath = join(root, "worker.mjs");
+    await writeFile(workerPath, `
+      process.on("message", ({ id, samples }) => {
+        if (samples[0] === 1) process.kill(process.pid, "SIGKILL");
+        else process.send({ id, text: "heard " + samples.length, decodeMs: 3 });
+      });
+      process.on("disconnect", () => process.exit(0));
+    `);
+    return new ChildTranscriber({ workerPath, label: "Stand in" });
+  };
+  await withReader(async (host) => {
+    const path = "/prompt-reader/transcriptions";
+    const crashed = await post(host, path, { body: takeBytes(320, 1) });
+    assert.equal(crashed.status, 503);
+    assert.match(String(crashed.body.error), /transcriber exited/);
+    assert.equal((await fetch(`${host.url}/health`)).status, 200);
+    const answered = await post(host, path, { body: takeBytes(640) });
+    assert.equal(answered.status, 200);
+    assert.deepEqual(answered.body, { text: "heard 640", decodeMs: 3, model: "Stand in" });
+    const saved = await post(host, "/prompt-reader/recordings?promptId=p001", { body: takeBytes(320) });
+    assert.equal(saved.status, 201);
+  }, { transcriber: worker });
 });

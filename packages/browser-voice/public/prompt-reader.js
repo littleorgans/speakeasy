@@ -9,12 +9,16 @@ import { HoldReleaseGate } from "/hold-release.js";
  * becomes a corpus pair on the host; the prompt text is its expected
  * transcript. Play replays the unsaved take, or a saved take of the
  * current prompt (latest first; Earlier take steps back), without touching
- * the mic or any take.
+ * the mic or any take. A ready take is also transcribed for display only:
+ * the text shows under the prompt with words that differ marked, and is
+ * never saved; saving never waits for it.
  */
 
 const SAMPLE_RATE = 16_000;
 const MIN_TAKE_MS = 300;
 const CLIP_LEVEL = 0.99;
+/** A transcript later than this shows as unavailable. */
+const TRANSCRIBE_TIMEOUT_MS = 15_000;
 
 class PromptReaderPage {
   constructor() {
@@ -23,6 +27,9 @@ class PromptReaderPage {
       progress: document.getElementById("progress"),
       meta: document.getElementById("prompt-meta"),
       text: document.getElementById("prompt-text"),
+      heard: document.getElementById("heard"),
+      heardText: document.getElementById("heard-text"),
+      heardNote: document.getElementById("heard-note"),
       level: document.getElementById("level"),
       status: document.getElementById("status"),
       output: document.getElementById("output"),
@@ -277,7 +284,8 @@ class PromptReaderPage {
       return;
     }
     const peak = samples.reduce((max, sample) => Math.max(max, Math.abs(sample)), 0);
-    this.take = { samples, device: this.device };
+    this.take = { samples, device: this.device, transcript: { state: "pending" } };
+    void this.transcribe(this.take);
     const warnings = [
       peak >= CLIP_LEVEL ? "it clipped" : "",
       this.current()?.recorded ? "this prompt already has a take; saving adds another" : "",
@@ -286,6 +294,31 @@ class PromptReaderPage {
       `Take ready: ${(durationMs / 1_000).toFixed(1)} s, peak ${peak.toFixed(2)}${warnings.length ? `; ${warnings.join("; ")}` : ""}. Enter saves; P plays; hold Space to retake.`,
     );
     this.render();
+  }
+
+  /** Display only; the result lands on its own take, so a later take ignores it. */
+  async transcribe(take) {
+    const settle = (transcript) => {
+      if (take.transcript.state !== "pending") return;
+      take.transcript = transcript;
+      if (this.take === take) this.render();
+    };
+    const timer = window.setTimeout(() => settle({ state: "failed" }), TRANSCRIBE_TIMEOUT_MS);
+    try {
+      const response = await fetch("/prompt-reader/transcriptions", {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream" },
+        body: take.samples.buffer,
+      });
+      const body = await response.json();
+      settle(response.ok && typeof body.text === "string"
+        ? { state: "done", text: body.text, model: String(body.model ?? ""), decodeMs: Number(body.decodeMs) || 0 }
+        : { state: "failed" });
+    } catch {
+      settle({ state: "failed" });
+    } finally {
+      window.clearTimeout(timer);
+    }
   }
 
   cancelTake(message) {
@@ -369,6 +402,7 @@ class PromptReaderPage {
       elements.meta.textContent = "";
       elements.text.textContent = "End of the prompt set. Score the folder with pnpm bench --corpus <dir>.";
     }
+    this.renderTranscript(prompt);
     elements.record.disabled = !prompt || this.saving;
     elements.save.disabled = !this.take || this.saving;
     const saved = this.take ? null : this.savedTake();
@@ -382,6 +416,65 @@ class PromptReaderPage {
     elements.previous.disabled = this.index === 0;
     elements.next.disabled = !prompt;
   }
+
+  renderTranscript(prompt) {
+    const { heard, heardText, heardNote } = this.elements;
+    const transcript = this.take?.transcript;
+    heard.hidden = !transcript || !prompt;
+    if (heard.hidden) return;
+    if (transcript.state !== "done") {
+      heardText.replaceChildren();
+      heardNote.textContent = transcript.state === "pending" ? "Transcribing" : "Transcript unavailable";
+      return;
+    }
+    heardText.replaceChildren(
+      ...diffWords(prompt.text, transcript.text).map(({ word, differs }, index) => {
+        const span = document.createElement("span");
+        span.textContent = `${index ? " " : ""}${word}`;
+        if (differs) span.className = "differs";
+        return span;
+      }),
+    );
+    heardNote.textContent = transcript.text
+      ? `${transcript.model} · ${Math.round(transcript.decodeMs)} ms`
+      : `${transcript.model} heard no speech · ${Math.round(transcript.decodeMs)} ms`;
+  }
+}
+
+/** Case and punctuation insensitive word key; empty for pure punctuation. */
+function wordKey(word) {
+  return word.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+}
+
+/**
+ * The heard words in order, each marked when it is outside the longest
+ * common word sequence shared with the prompt.
+ */
+function diffWords(expected, heard) {
+  const want = expected.split(/\s+/).map(wordKey).filter(Boolean);
+  const words = heard.split(/\s+/).filter(Boolean);
+  const keys = words.map(wordKey);
+  const lengths = Array.from({ length: keys.length + 1 }, () => new Array(want.length + 1).fill(0));
+  for (let i = keys.length - 1; i >= 0; i--) {
+    for (let j = want.length - 1; j >= 0; j--) {
+      lengths[i][j] = keys[i] && keys[i] === want[j]
+        ? lengths[i + 1][j + 1] + 1
+        : Math.max(lengths[i + 1][j], lengths[i][j + 1]);
+    }
+  }
+  const differs = keys.map((key) => key !== "");
+  for (let i = 0, j = 0; i < keys.length && j < want.length; ) {
+    if (keys[i] && keys[i] === want[j]) {
+      differs[i] = false;
+      i++;
+      j++;
+    } else if (lengths[i + 1][j] >= lengths[i][j + 1]) {
+      i++;
+    } else {
+      j++;
+    }
+  }
+  return words.map((word, index) => ({ word, differs: differs[index] }));
 }
 
 function isSpace(event) {
