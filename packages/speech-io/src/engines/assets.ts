@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
 import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { get } from "node:https";
@@ -97,7 +97,7 @@ export type FetchArchive = (url: string) => Promise<Readable>;
  * Idempotent, crash safe download and extract shared by the STT and TTS
  * registries. Done when `dir` holds a completion marker for this digest.
  * Otherwise reuse the archive if its digest matches, else stream it to
- * `<archive>.part` hashing as it goes, verify, and rename. Extract into a
+ * `<archive>.<unique>.part` hashing as it goes, verify, and rename. Extract into a
  * temp folder beside `dir`, rename into place, and write the marker last, so
  * an interrupted run never leaves a directory that looks complete. A file set
  * verifies each file the same way, in place under `dir`, then writes the
@@ -155,7 +155,7 @@ async function ensureVerifiedFile(
     }
   }
   await mkdir(dirname(path), { recursive: true });
-  const part = `${path}.part`;
+  const part = `${path}.${randomUUID()}.part`;
   try {
     const hash = createHash("sha256");
     await pipeline(

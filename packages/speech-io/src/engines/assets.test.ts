@@ -11,6 +11,7 @@ import {
   COMPLETE_MARKER,
   completeMarkerValue,
   ensureAsset,
+  isAssetComplete,
   type AssetSpec,
   type FetchArchive,
   type FileSetSpec,
@@ -79,7 +80,7 @@ test("a digest mismatch fails closed and leaves nothing behind", async () => {
     /Digest mismatch/,
   );
   assert.ok(!existsSync(spec.archive));
-  assert.ok(!existsSync(`${spec.archive}.part`));
+  assert.deepEqual(await readdir(join(spec.archive, "..")), []);
   assert.ok(!existsSync(spec.dir));
 });
 
@@ -178,6 +179,34 @@ test("a file set downloads each pinned file, then marks every digest", async () 
   assert.equal(server.calls.length, 2);
 });
 
+test("concurrent file set installs of the same missing asset both succeed", async () => {
+  const bytes = Buffer.from("fixture model bytes");
+  const spec: FileSetSpec = {
+    dir: await mkdtemp(join(work, "concurrent-")),
+    files: [{
+      name: "model.onnx",
+      url: `${FILE_BASE}model.onnx`,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    }],
+  };
+  let release!: () => void;
+  const barrier = new Promise<void>((resolve) => { release = resolve; });
+  let fetches = 0;
+  const fetch: FetchArchive = async () => {
+    if (++fetches === 2) release();
+    await barrier;
+    return Readable.from([bytes]);
+  };
+  const results = await Promise.allSettled([
+    ensureAsset(spec, fetch),
+    ensureAsset(spec, fetch),
+  ]);
+  assert.deepEqual(results.map((result) => result.status), ["fulfilled", "fulfilled"]);
+  assert.ok(await isAssetComplete(spec));
+  assert.deepEqual(await readFile(join(spec.dir, "model.onnx")), bytes);
+  assert.deepEqual((await readdir(spec.dir)).sort(), [COMPLETE_MARKER, "model.onnx"]);
+});
+
 test("a file set keeps verified files and replaces a stale one", async () => {
   const spec = await fileSetSpec();
   await mkdir(join(spec.dir, "onnx"), { recursive: true });
@@ -210,7 +239,7 @@ test("a file replacement keeps the installed bytes until the new pin is verified
   };
   await assert.rejects(ensureAsset(spec, replacement), /Digest mismatch/);
   assert.equal(await readFile(target, "utf8"), "old pin", "a failed replacement preserves installed bytes");
-  assert.ok(!existsSync(`${target}.part`));
+  assert.deepEqual(await readdir(join(target, "..")), ["encoder.onnx"]);
   assert.ok(!existsSync(join(spec.dir, COMPLETE_MARKER)));
   await ensureAsset(spec, servingFiles().fetch);
   assert.equal(await readFile(target, "utf8"), "weights");
