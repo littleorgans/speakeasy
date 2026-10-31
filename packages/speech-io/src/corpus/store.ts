@@ -1,6 +1,6 @@
 import { access, link, mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { encodeWavPcm16 } from "../bench/wav.ts";
+import { encodeWavFloat32 } from "../bench/wav.ts";
 
 /**
  * Labeled-corpus storage: wav + json sidecar pairs written by the demo and
@@ -68,7 +68,7 @@ export async function saveCorpusPair(
     throw new Error(`promptId must match ${PROMPT_ID}; received ${JSON.stringify(promptId)}`);
   }
   await mkdir(dir, { recursive: true });
-  const wavBytes = encodeWavPcm16(concatFrames(frames), sampleRate);
+  const wavBytes = encodeWavFloat32(concatFrames(frames), sampleRate);
   const stamp = meta.recordedAt.replace(/:/g, "-");
   const base = promptId === null ? `utt-${stamp}` : `utt-${promptId}-${stamp}`;
 

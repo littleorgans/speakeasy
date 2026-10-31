@@ -108,38 +108,55 @@ export function decodeWavFrames(
   };
 }
 
-const PCM16_HEADER_BYTES = 44;
-const PCM16_BYTES_PER_SAMPLE = 2;
+const WAV_HEADER_BYTES = 44;
 
 /** Encode Float32 samples as a mono 16-bit PCM WAV file. */
 export function encodeWavPcm16(
   samples: Float32Array,
   sampleRate: number,
 ): Uint8Array {
-  const dataBytes = samples.length * PCM16_BYTES_PER_SAMPLE;
-  const bytes = new Uint8Array(PCM16_HEADER_BYTES + dataBytes);
+  return encodeWav(samples, sampleRate, PCM_FORMAT);
+}
+
+/** Preserve captured Float32 values for exactly the audio sent to STT. */
+export function encodeWavFloat32(
+  samples: Float32Array,
+  sampleRate: number,
+): Uint8Array {
+  return encodeWav(samples, sampleRate, FLOAT_FORMAT);
+}
+
+function encodeWav(
+  samples: Float32Array,
+  sampleRate: number,
+  format: typeof PCM_FORMAT | typeof FLOAT_FORMAT,
+): Uint8Array {
+  const bytesPerSample = format === FLOAT_FORMAT ? 4 : 2;
+  const dataBytes = samples.length * bytesPerSample;
+  const bytes = new Uint8Array(WAV_HEADER_BYTES + dataBytes);
   const view = new DataView(bytes.buffer);
 
   writeAscii(view, 0, RIFF);
-  view.setUint32(4, PCM16_HEADER_BYTES - 8 + dataBytes, true);
+  view.setUint32(4, WAV_HEADER_BYTES - 8 + dataBytes, true);
   writeAscii(view, 8, WAVE);
   writeAscii(view, 12, FORMAT_CHUNK);
   view.setUint32(16, 16, true);
-  view.setUint16(20, PCM_FORMAT, true);
+  view.setUint16(20, format, true);
   view.setUint16(22, TARGET_CHANNELS, true);
   view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * TARGET_CHANNELS * PCM16_BYTES_PER_SAMPLE, true);
-  view.setUint16(32, TARGET_CHANNELS * PCM16_BYTES_PER_SAMPLE, true);
-  view.setUint16(34, PCM16_BYTES_PER_SAMPLE * 8, true);
+  view.setUint32(28, sampleRate * TARGET_CHANNELS * bytesPerSample, true);
+  view.setUint16(32, TARGET_CHANNELS * bytesPerSample, true);
+  view.setUint16(34, bytesPerSample * 8, true);
   writeAscii(view, 36, DATA_CHUNK);
   view.setUint32(40, dataBytes, true);
 
   for (let index = 0; index < samples.length; index += 1) {
-    view.setInt16(
-      PCM16_HEADER_BYTES + index * PCM16_BYTES_PER_SAMPLE,
-      Math.round(clampSample(samples[index]!) * 32_767),
-      true,
-    );
+    const offset = WAV_HEADER_BYTES + index * bytesPerSample;
+    if (format === FLOAT_FORMAT) {
+      view.setFloat32(offset, samples[index]!, true);
+    } else {
+      view.setInt16(offset, Math.round(clampSample(samples[index]!) * 32_767), true);
+    }
   }
   return bytes;
 }

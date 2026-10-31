@@ -6,6 +6,7 @@ import { basename, dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { readCorpusEntries } from "@speakeasy/speech-io";
+import { readWavFrames } from "../../speech-io/src/bench/wav.ts";
 import { startBrowserVoiceServer, type BrowserVoiceServer } from "./host.ts";
 import { PROMPT_MAX_TAKE_BYTES, type PromptListing } from "./prompt-reader.ts";
 
@@ -112,8 +113,8 @@ test("prompts list in id order and a saved take becomes a schema 2 corpus pair",
     assert.equal(entry?.sidecar.flushToFinalMs, null);
     assert.equal(entry?.sidecar.device, "Desk mic");
     assert.equal(entry?.sidecar.peakLevel, 0.25);
-    // 16 kHz mono PCM16: 44 byte header plus 2 bytes per sample.
-    assert.equal((await stat(entry!.wavPath)).size, 44 + 16_000 * 2);
+    // 16 kHz mono Float32: 44 byte header plus 4 bytes per sample.
+    assert.equal((await stat(entry!.wavPath)).size, 44 + 16_000 * 4);
     assert.equal((await readFile(entry!.wavPath)).readUInt32LE(24), 16_000);
 
     const after = (await (await fetch(`${host.url}/prompt-reader/prompts`)).json()) as PromptListing;
@@ -207,4 +208,21 @@ test("output paths through a symlink into the repo are refused", async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("the saved WAV preserves every captured Float32 sample at 16 kHz", async () => {
+  await withReader(async (host, outputDir) => {
+    const samples = Float32Array.from({ length: 640 }, (_, index) => Math.sin(index / 13) * 0.8);
+    const saved = await post(host, "/prompt-reader/recordings?promptId=p001", {
+      body: new Uint8Array(samples.buffer),
+    });
+    assert.equal(saved.status, 201);
+    const [entry] = await readCorpusEntries(outputDir);
+    const wav = await readWavFrames(entry!.wavPath);
+    assert.equal(wav.sampleRate, 16_000);
+    assert.equal(wav.channels, 1);
+    assert.equal(wav.samples.length, samples.length);
+    assert.equal(wav.samples.findIndex((sample, index) => sample !== samples[index]), -1, "sample values changed");
+    assert.equal(wav.bitsPerSample, 32);
+  });
 });
