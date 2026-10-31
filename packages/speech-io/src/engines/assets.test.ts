@@ -4,14 +4,16 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { Readable } from "node:stream";
 import { after, before, test } from "node:test";
 import {
   COMPLETE_MARKER,
+  completeMarkerValue,
   ensureAsset,
   type AssetSpec,
   type FetchArchive,
+  type FileSetSpec,
 } from "./assets.ts";
 
 let work: string;
@@ -129,5 +131,70 @@ test("an unpinned asset counts an existing sentinel as installed", async () => {
   await mkdir(spec.dir, { recursive: true });
   await writeFile(join(spec.dir, "model.onnx"), "weights");
   await ensureAsset({ ...spec, sentinel: join(spec.dir, "model.onnx") }, offline);
+  assert.ok(!existsSync(join(spec.dir, COMPLETE_MARKER)));
+});
+
+const FILE_BYTES = { "encoder.onnx": Buffer.from("weights"), "tokens.txt": Buffer.from("a 0\n") };
+type FileName = keyof typeof FILE_BYTES;
+
+async function fileSetSpec(digests: Partial<Record<FileName, string>> = {}): Promise<FileSetSpec> {
+  const root = await mkdtemp(join(work, "files-"));
+  return {
+    dir: join(root, "model-y"),
+    files: (Object.keys(FILE_BYTES) as FileName[]).map((name) => ({
+      name,
+      url: `https://example.invalid/model-y/${name}`,
+      sha256: digests[name] ?? createHash("sha256").update(FILE_BYTES[name]).digest("hex"),
+    })),
+  };
+}
+
+function servingFiles(): { fetch: FetchArchive; calls: string[] } {
+  const calls: string[] = [];
+  return {
+    calls,
+    fetch: async (url) => {
+      calls.push(url);
+      return Readable.from([FILE_BYTES[basename(url) as FileName]]);
+    },
+  };
+}
+
+test("a file set downloads each pinned file, then marks every digest", async () => {
+  const spec = await fileSetSpec();
+  const server = servingFiles();
+  await ensureAsset(spec, server.fetch);
+  assert.equal(await readFile(join(spec.dir, "encoder.onnx"), "utf8"), "weights");
+  assert.equal(await readFile(join(spec.dir, "tokens.txt"), "utf8"), "a 0\n");
+  assert.equal(
+    await readFile(join(spec.dir, COMPLETE_MARKER), "utf8"),
+    completeMarkerValue(spec),
+  );
+  await ensureAsset(spec, offline);
+  assert.equal(server.calls.length, 2);
+});
+
+test("a file set keeps verified files and replaces a stale one", async () => {
+  const spec = await fileSetSpec();
+  await mkdir(spec.dir, { recursive: true });
+  await writeFile(join(spec.dir, "encoder.onnx"), "weights");
+  await writeFile(join(spec.dir, "tokens.txt"), "stale");
+  const server = servingFiles();
+  await ensureAsset(spec, server.fetch);
+  assert.deepEqual(server.calls, ["https://example.invalid/model-y/tokens.txt"]);
+  assert.equal(await readFile(join(spec.dir, "tokens.txt"), "utf8"), "a 0\n");
+});
+
+test("a file set digest mismatch fails closed without a marker", async () => {
+  const spec = await fileSetSpec({ "tokens.txt": "0".repeat(64) });
+  await assert.rejects(ensureAsset(spec, servingFiles().fetch), /Digest mismatch/);
+  assert.deepEqual((await readdir(spec.dir)).sort(), ["encoder.onnx"]);
+});
+
+test("a file set drops the marker of another pin before changing files", async () => {
+  const spec = await fileSetSpec();
+  await mkdir(spec.dir, { recursive: true });
+  await writeFile(join(spec.dir, COMPLETE_MARKER), "older pin");
+  await assert.rejects(ensureAsset(spec, offline), /offline/);
   assert.ok(!existsSync(join(spec.dir, COMPLETE_MARKER)));
 });

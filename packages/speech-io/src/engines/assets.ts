@@ -75,6 +75,20 @@ export type AssetSpec = {
   sentinel?: string;
 };
 
+/** One pinned file of a model published as loose files rather than an archive. */
+export type AssetFile = {
+  url: string;
+  sha256: string;
+  /** File name inside `dir`. */
+  name: string;
+};
+
+/** A model published as loose files, each downloaded straight into `dir`. */
+export type FileSetSpec = {
+  dir: string;
+  files: readonly AssetFile[];
+};
+
 export type FetchArchive = (url: string) => Promise<Readable>;
 
 /**
@@ -83,52 +97,64 @@ export type FetchArchive = (url: string) => Promise<Readable>;
  * Otherwise reuse the archive if its digest matches, else stream it to
  * `<archive>.part` hashing as it goes, verify, and rename. Extract into a
  * temp folder beside `dir`, rename into place, and write the marker last, so
- * an interrupted run never leaves a directory that looks complete.
+ * an interrupted run never leaves a directory that looks complete. A file set
+ * verifies each file the same way, in place under `dir`, then writes the
+ * marker.
  */
 export async function ensureAsset(
-  spec: AssetSpec,
+  spec: AssetSpec | FileSetSpec,
   fetchArchive: FetchArchive = openDownload,
 ): Promise<void> {
   if (await isAssetComplete(spec)) {
     return;
   }
-  await ensureArchive(spec, fetchArchive);
+  if ("files" in spec) {
+    await installFileSet(spec, fetchArchive);
+    return;
+  }
+  await ensureVerifiedFile(spec.url, spec.sha256, spec.archive, fetchArchive);
   await installArchive(spec);
 }
 
-export async function isAssetComplete(spec: AssetSpec): Promise<boolean> {
+export async function isAssetComplete(
+  spec: AssetSpec | FileSetSpec,
+): Promise<boolean> {
   const marker = await readFile(join(spec.dir, COMPLETE_MARKER), "utf8").catch(
     () => undefined,
   );
-  if (marker === markerValue(spec)) {
+  if (marker === completeMarkerValue(spec)) {
     return true;
   }
   return (
+    !("files" in spec) &&
     spec.sha256 === null &&
     spec.sentinel !== undefined &&
     (await hasNonEmptyFile(spec.sentinel))
   );
 }
 
-async function ensureArchive(
-  spec: AssetSpec,
+/** Leave a file at `path` whose digest matches, reusing one already there. */
+async function ensureVerifiedFile(
+  url: string,
+  sha256: string | null,
+  path: string,
   fetchArchive: FetchArchive,
 ): Promise<void> {
-  if (await hasNonEmptyFile(spec.archive)) {
-    if (spec.sha256 === null) {
+  if (await hasNonEmptyFile(path)) {
+    if (sha256 === null) {
       return;
     }
-    if ((await sha256File(spec.archive)) === spec.sha256) {
+    if ((await sha256File(path)) === sha256) {
       return;
     }
-    await rm(spec.archive, { force: true });
+    await rm(path, { force: true });
   }
-  await mkdir(dirname(spec.archive), { recursive: true });
-  const part = `${spec.archive}.part`;
+  await mkdir(dirname(path), { recursive: true });
+  const part = `${path}.part`;
   try {
     const hash = createHash("sha256");
     await pipeline(
-      await fetchArchive(spec.url),
+      await fetchArchive(url),
       async function* (source: AsyncIterable<Buffer>) {
         for await (const chunk of source) {
           hash.update(chunk);
@@ -138,12 +164,12 @@ async function ensureArchive(
       createWriteStream(part),
     );
     const actual = hash.digest("hex");
-    if (spec.sha256 !== null && actual !== spec.sha256) {
+    if (sha256 !== null && actual !== sha256) {
       throw new Error(
-        `Digest mismatch for ${spec.url}: expected ${spec.sha256}, received ${actual}`,
+        `Digest mismatch for ${url}: expected ${sha256}, received ${actual}`,
       );
     }
-    await rename(part, spec.archive);
+    await rename(part, path);
   } finally {
     await rm(part, { force: true });
   }
@@ -163,13 +189,29 @@ async function installArchive(spec: AssetSpec): Promise<void> {
     }
     await rm(spec.dir, { recursive: true, force: true });
     await rename(extracted, spec.dir);
-    await writeFile(join(spec.dir, COMPLETE_MARKER), markerValue(spec), "utf8");
+    await writeFile(join(spec.dir, COMPLETE_MARKER), completeMarkerValue(spec), "utf8");
   } finally {
     await rm(temp, { recursive: true, force: true });
   }
 }
 
-function markerValue(spec: AssetSpec): string {
+async function installFileSet(
+  spec: FileSetSpec,
+  fetchArchive: FetchArchive,
+): Promise<void> {
+  // Drop a marker for other pins first: files change in place below.
+  await rm(join(spec.dir, COMPLETE_MARKER), { force: true });
+  for (const file of spec.files) {
+    await ensureVerifiedFile(file.url, file.sha256, join(spec.dir, file.name), fetchArchive);
+  }
+  await writeFile(join(spec.dir, COMPLETE_MARKER), completeMarkerValue(spec), "utf8");
+}
+
+/** Completion marker content: the archive digest, or one line per pinned file. */
+export function completeMarkerValue(spec: AssetSpec | FileSetSpec): string {
+  if ("files" in spec) {
+    return spec.files.map((file) => `${file.sha256}  ${file.name}\n`).join("");
+  }
   return spec.sha256 ?? UNPINNED_MARKER;
 }
 
