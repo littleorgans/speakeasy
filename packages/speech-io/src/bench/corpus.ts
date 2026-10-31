@@ -29,6 +29,10 @@ import { readWavFrames } from "./wav.ts";
  * on (column `<id>+gate`), whatever their descriptor ships, so the report
  * shows what the gate costs on speech and saves on silence.
  *
+ * Re-takes: the prompt reader saves another take per save, so labeled
+ * takes sharing a `promptId` score once, the newest by sidecar `recordedAt`
+ * (the file name stamp when the sidecar lacks one). Unprompted takes all score.
+ *
  * Release point: the last frame of the capture. Demo recordings end at the
  * release keypress by construction, so end-of-file IS the strict release.
  * The bench's RMS speech-end reference is deliberately not used here: its
@@ -111,12 +115,26 @@ export type ModelSummary = {
   worstSubstitutions: Array<[string, number]>;
 };
 
+/** A prompt with several labeled takes; only `chosen` is scored. */
+export type Retake = {
+  promptId: string;
+  takes: number;
+  chosen: string;
+  /** Superseded take audio filenames, sorted. */
+  skipped: string[];
+};
+
 export type CorpusReport = {
   corpus: string;
   sidecars: number;
   labeled: number;
+  /** Labeled takes scored: the newest per prompt plus every unprompted take. */
+  scored: number;
+  /** Labeled takes skipped for a newer take of the same prompt. */
+  superseded: number;
   frameMs: number;
   rewrite: { rules: number; numbers: NumbersMode } | null;
+  retakes: Retake[];
   models: ModelSummary[];
   utterances: CorpusRow[];
 };
@@ -141,14 +159,18 @@ export async function runCorpusBench(
 
   const entries = await readCorpusEntries(dir);
   const labeled = entries.filter((entry) => entry.sidecar.expected !== null);
+  const { scored, retakes } = newestTakes(labeled);
   const report: CorpusReport = {
     corpus: dir,
     sidecars: entries.length,
     labeled: labeled.length,
+    scored: scored.length,
+    superseded: labeled.length - scored.length,
     frameMs: options.frameMs,
     rewrite: rewrite && { rules: rewrite.rules.length, numbers: rewrite.numbers },
+    retakes,
     models: [],
-    utterances: labeled.map((entry) => ({
+    utterances: scored.map((entry) => ({
       audio: entry.sidecar.audio,
       promptId: entry.sidecar.promptId,
       stratum: entry.sidecar.stratum,
@@ -159,15 +181,20 @@ export async function runCorpusBench(
 
   log("speak-easy corpus scorer (normalized WER + raw identifier rate)");
   log(
-    `corpus=${dir} sidecars=${entries.length} labeled=${labeled.length} skipped-unlabeled=${entries.length - labeled.length}`,
+    `corpus=${dir} sidecars=${entries.length} labeled=${labeled.length} skipped-unlabeled=${entries.length - labeled.length} scored=${report.scored} superseded=${report.superseded}`,
   );
+  for (const retake of retakes) {
+    log(
+      `retake prompt=${retake.promptId} takes=${retake.takes} chosen=${retake.chosen} skipped=${retake.skipped.join(",")}`,
+    );
+  }
   if (labeled.length === 0) {
     log(
       "no labeled utterances: set \"expected\" in the sidecars by hand, record with the demo's --save prompt, or read a prompt set in the browser prompt reader",
     );
   }
 
-  const models = labeled.length > 0 ? (options.models ?? [options.model]) : [];
+  const models = scored.length > 0 ? (options.models ?? [options.model]) : [];
   const columns = models.flatMap((model) => gateColumns(model, options.engine));
   for (const { model, gate, column } of columns) {
     const engine = await openEngine(model, gate);
@@ -178,7 +205,7 @@ export async function runCorpusBench(
     log(
       `model=${column} engine=${engineLabel} threads=${threads ?? "runtime-default"} gate=${gateLabel ?? "n/a"} endpoint=manual cadence=${options.frameMs}ms/frame release=end-of-capture rewrite=${rewrite ? `column(rules=${rewrite.rules.length},numbers=${rewrite.numbers})` : "off"}`,
     );
-    for (const [index, entry] of labeled.entries()) {
+    for (const [index, entry] of scored.entries()) {
       const row = report.utterances[index]!;
       row.models[column] = await scoreTake(engine, entry, options.frameMs, rewrite);
       log(formatTake(column, row));
@@ -195,6 +222,52 @@ export async function runCorpusBench(
     writeJson(JSON.stringify(report, null, 2));
   }
   return report;
+}
+
+/**
+ * The newest take per prompt id, in filename order, plus every unprompted
+ * take; prompts with several takes come back as retakes.
+ */
+function newestTakes(labeled: CorpusEntry[]): { scored: CorpusEntry[]; retakes: Retake[] } {
+  const byPrompt = new Map<string, CorpusEntry[]>();
+  for (const entry of labeled) {
+    const { promptId } = entry.sidecar;
+    if (promptId !== null) byPrompt.set(promptId, [...(byPrompt.get(promptId) ?? []), entry]);
+  }
+  const retakes: Retake[] = [];
+  const chosen = new Set<CorpusEntry>();
+  for (const [promptId, takes] of byPrompt) {
+    const newest = takes.reduce((best, take) => (takeTime(take) > takeTime(best) ? take : best));
+    chosen.add(newest);
+    if (takes.length > 1) {
+      retakes.push({
+        promptId,
+        takes: takes.length,
+        chosen: newest.sidecar.audio,
+        skipped: takes
+          .filter((take) => take !== newest)
+          .map((take) => take.sidecar.audio)
+          .sort(),
+      });
+    }
+  }
+  return {
+    scored: labeled.filter((entry) => entry.sidecar.promptId === null || chosen.has(entry)),
+    retakes,
+  };
+}
+
+/** `utt-[<prompt>-]YYYY-MM-DDTHH-MM-SS.mmmZ`, the stamp `saveCorpusPair` writes. */
+const STEM_STAMP = /(\d{4}-\d{2}-\d{2}T\d{2})-(\d{2})-(\d{2}(?:\.\d+)?Z)/;
+
+/** Sidecar recordedAt in epoch ms, else the file name stamp; -Infinity when neither parses. */
+function takeTime(entry: CorpusEntry): number {
+  const { recordedAt, audio } = entry.sidecar as Partial<CorpusEntry["sidecar"]>;
+  const fromSidecar = typeof recordedAt === "string" ? Date.parse(recordedAt) : Number.NaN;
+  if (Number.isFinite(fromSidecar)) return fromSidecar;
+  const stamp = audio?.match(STEM_STAMP);
+  const fromName = stamp ? Date.parse(`${stamp[1]}:${stamp[2]}:${stamp[3]}`) : Number.NaN;
+  return Number.isFinite(fromName) ? fromName : Number.NEGATIVE_INFINITY;
 }
 
 type Column = { model: BenchModelId | undefined; gate: SilenceGateMode; column: string };

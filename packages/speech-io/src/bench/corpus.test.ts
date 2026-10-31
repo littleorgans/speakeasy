@@ -105,7 +105,10 @@ function cliOptions(corpus: string, overrides: Partial<CliOptions>): CliOptions 
   };
 }
 
-async function bench(overrides: Partial<CliOptions>) {
+async function bench(
+  overrides: Partial<CliOptions>,
+  extra: (dir: string) => Promise<void> = async () => {},
+) {
   const dir = await mkdtemp(join(tmpdir(), "speakeasy-corpus-"));
   const created: Array<BenchModelId | undefined> = [];
   const gates: SilenceGateMode[] = [];
@@ -113,6 +116,7 @@ async function bench(overrides: Partial<CliOptions>) {
   const log: string[] = [];
   try {
     await writeCorpus(dir);
+    await extra(dir);
     const deps: CorpusBenchDeps = {
       createEngine: (model, gate) => {
         created.push(model);
@@ -135,6 +139,9 @@ test("every model decodes the same takes and rows pair up per utterance", async 
   assert.deepEqual(created, [MODEL_A, MODEL_B]);
   assert.equal(report.sidecars, 4);
   assert.equal(report.labeled, 3);
+  assert.equal(report.scored, 3);
+  assert.equal(report.superseded, 0);
+  assert.deepEqual(report.retakes, []);
   assert.equal(report.rewrite, null);
   assert.deepEqual(
     report.utterances.map((row) => [row.promptId, row.stratum, Object.keys(row.models)]),
@@ -151,6 +158,73 @@ test("every model decodes the same takes and rows pair up per utterance", async 
     assert.equal(typeof row.models[MODEL_A]?.flushToFinalMs, "number");
   }
   assert.equal(stdout.length, 0, "no JSON without --json");
+});
+
+/** Re-takes of p001: sidecar recordedAt orders them, the file name only when it is missing. */
+async function writeRetakes(dir: string): Promise<{ newest: string; skipped: string[] }> {
+  const retake = (recordedAt: string, expected: string) =>
+    saveCorpusPair(dir, [new Float32Array(320)], 16_000, {
+      recordedAt,
+      hypothesis: "",
+      expected,
+      engineLabel: "none",
+      endpoint: "hold",
+      flushToFinalMs: null,
+      device: "test",
+      peakLevel: 0.1,
+      promptId: "p001",
+      stratum: "short",
+    });
+  const rewriteSidecar = async (path: string, edit: (sidecar: Record<string, unknown>) => void) => {
+    const sidecar = JSON.parse(await readFile(path, "utf8"));
+    edit(sidecar);
+    await writeFile(path, JSON.stringify(sidecar));
+  };
+  // Named early, recorded last: the sidecar time wins over the file name.
+  const newest = await retake("2026-10-31T09:00:00.000Z", "spawn ten agents now");
+  await rewriteSidecar(newest.sidecarPath, (sidecar) => {
+    sidecar.recordedAt = "2026-10-31T13:00:00.000Z";
+  });
+  // No sidecar time: falls back to the file name, 12:00.
+  const undated = await retake("2026-10-31T12:00:00.000Z", "spawn agents");
+  await rewriteSidecar(undated.sidecarPath, (sidecar) => {
+    delete sidecar.recordedAt;
+  });
+  const audio = (path: string) => path.slice(dir.length + 1).replace(/\.json$/, ".wav");
+  return {
+    newest: audio(newest.sidecarPath),
+    skipped: ["utt-p001-2026-10-31T10-00-01.000Z.wav", audio(undated.sidecarPath)],
+  };
+}
+
+test("the bench scores the newest take per prompt and lists the superseded ones", async () => {
+  let takes: { newest: string; skipped: string[] } | undefined;
+  const { report, log } = await bench({ models: [MODEL_A] }, async (dir) => {
+    takes = await writeRetakes(dir);
+  });
+
+  assert.equal(report.sidecars, 6);
+  assert.equal(report.labeled, 5);
+  assert.equal(report.scored, 3);
+  assert.equal(report.superseded, 2);
+  // Unprompted takes stay one row each; p001 keeps only its newest take.
+  assert.deepEqual(
+    report.utterances.map((row) => [row.promptId, row.audio, row.expected]),
+    [
+      [null, report.utterances[0]!.audio, TAKES[0].expected],
+      ["p001", takes!.newest, "spawn ten agents now"],
+      ["p002", report.utterances[2]!.audio, TAKES[2].expected],
+    ],
+  );
+  assert.deepEqual(report.retakes, [
+    { promptId: "p001", takes: 3, chosen: takes!.newest, skipped: [...takes!.skipped].sort() },
+  ]);
+  assert.ok(log.some((line) => / labeled=5 .*scored=3 superseded=2/.test(line)), log.join("\n"));
+  assert.ok(
+    log.some((line) =>
+      line === `retake prompt=p001 takes=3 chosen=${takes!.newest} skipped=${[...takes!.skipped].sort().join(",")}`),
+    log.join("\n"),
+  );
 });
 
 test("an offline model scores a gate off and a gate on column from separate engines", async () => {
@@ -221,7 +295,7 @@ test("the real --json CLI emits stable scoring data across repeated runs", async
       assert.match(result.stderr, /model=stub stratum=all/);
       const report = JSON.parse(result.stdout);
       assert.deepEqual(Object.keys(report), [
-        "corpus", "sidecars", "labeled", "frameMs", "rewrite", "models", "utterances",
+        "corpus", "sidecars", "labeled", "scored", "superseded", "frameMs", "rewrite", "retakes", "models", "utterances",
       ]);
       assert.deepEqual(report.utterances.map((row: { expected: string }) => row.expected), TAKES.map((take) => take.expected));
       assert.ok(report.models[0].raw.all.caseSensitiveIdentifiers);
