@@ -6,11 +6,11 @@ import { samplesToMs } from "./sherpa.ts";
 
 /**
  * Push to talk session for whole utterance engines, independent of the
- * runtime behind `decode`. Behaviour matches `sherpa-offline.ts`'s session:
+ * runtime behind `decode` (sherpa's OfflineRecognizer or onnxruntime graphs):
  * frames are buffered while held, up to `maxSamples` (later audio is
  * dropped), and decoded once on flush(); decodes run in flush order, and
  * flush() always answers with `final` or `empty`. An empty hold never
- * reaches `decode`.
+ * reaches `decode`, so no native decoder is handed an empty waveform.
  */
 
 export type DecodeAudio = (audio: Float32Array) => Promise<ResultDetail>;
