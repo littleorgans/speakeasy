@@ -1,0 +1,15 @@
+Whistle ONNX reference pipeline, vendored unmodified.
+
+Source: https://huggingface.co/mrfakename/whistle-ONNX
+Revision: 14fc92cb09ad5c271fe9a4ec4be70274790050d2, directory js/
+Licence: Apache License 2.0 (model card "license: apache-2.0"); full text in LICENSE.
+Model: Cactus-Compute/whistle, Apache License 2.0
+(https://huggingface.co/Cactus-Compute/whistle/blob/741118687e1f008f06d1351a402a731274789790/LICENSE).
+
+Files and SHA256, identical to the source revision:
+  whistle.js  375372d59f0e7ffe5e62b9b44fd6f37b882adc8fdcca42808e4d6d53edca87c9
+  pack.js     3748051ed36bd01339a50604518e95c3ad60f20384ecac3f2064743b8e683130
+  backend.js  fe2ecc95ba4ca83cd8c7c50ecbd6715068bbac2d7a93e14a277a12aa37d24721
+
+The *.d.ts files beside them are speak-easy additions: type declarations for
+the symbols speak-easy calls. They change no behaviour.
