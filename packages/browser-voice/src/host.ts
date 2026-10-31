@@ -1,6 +1,11 @@
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
-import { createServer, type Server } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import { extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -8,6 +13,12 @@ import {
   type RuntimeConfig,
 } from "@speakeasy/convo-engine";
 import { WebSocket, WebSocketServer } from "ws";
+import {
+  PROMPT_MAX_TAKE_BYTES,
+  PromptReader,
+  UnknownPromptError,
+  type PromptReaderConfig,
+} from "./prompt-reader.ts";
 import { BrowserConversationSession, type RuntimeFactory } from "./session.ts";
 
 const PUBLIC_ROOT = fileURLToPath(new URL("../public/", import.meta.url));
@@ -20,7 +31,13 @@ const STATIC_FILES = new Map([
   ["/hold-release.js", "hold-release.js"],
   ["/capture-worklet.js", "capture-worklet.js"],
   ["/playback-worklet.js", "playback-worklet.js"],
+  ["/capture-constraints.js", "capture-constraints.js"],
+  ["/prompt-reader", "prompt-reader.html"],
+  ["/prompt-reader.css", "prompt-reader.css"],
+  ["/prompt-reader.js", "prompt-reader.js"],
 ]);
+const PROMPT_READER_API = "/prompt-reader/";
+const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost"]);
 const CONTENT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -37,11 +54,20 @@ export async function startBrowserVoiceServer(options: {
   port?: number;
   runtimeConfig?: RuntimeConfig;
   createRuntime?: RuntimeFactory;
+  /** Serve the prompt reader's API, saving takes to an outside folder. */
+  promptReader?: PromptReaderConfig;
 } = {}): Promise<BrowserVoiceServer> {
+  const promptReader = options.promptReader
+    ? await PromptReader.load(options.promptReader)
+    : undefined;
   const server = createServer((request, response) => {
     if (request.url === "/health") {
       response.writeHead(200, { "content-type": "application/json" });
       response.end('{"ok":true}');
+      return;
+    }
+    if (request.url?.startsWith(PROMPT_READER_API)) {
+      void servePromptReader(request, response, promptReader);
       return;
     }
     void serveStatic(request.url ?? "/", response);
@@ -57,10 +83,7 @@ export async function startBrowserVoiceServer(options: {
       return;
     }
     const origin = request.headers.origin;
-    const expectedOrigin = request.headers.host
-      ? `http://${request.headers.host}`
-      : undefined;
-    if (origin !== undefined && origin !== expectedOrigin) {
+    if (origin !== undefined && origin !== hostOrigin(request)) {
       socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
       socket.destroy();
       return;
@@ -107,9 +130,108 @@ export async function startBrowserVoiceServer(options: {
   };
 }
 
+async function servePromptReader(
+  request: IncomingMessage,
+  response: ServerResponse,
+  reader: PromptReader | undefined,
+): Promise<void> {
+  const url = new URL(request.url ?? "/", "http://localhost");
+  try {
+    if (!reader) {
+      sendJson(response, 404, {
+        error: "prompt reader not configured: start with --prompts <file> --out <dir>",
+      });
+    } else if (url.pathname === "/prompt-reader/prompts" && request.method === "GET") {
+      sendJson(response, 200, await reader.listing());
+    } else if (url.pathname === "/prompt-reader/recordings" && request.method === "POST") {
+      await saveTake(request, response, reader, url.searchParams);
+    } else {
+      sendJson(response, 404, { error: "Not found" });
+    }
+  } catch (error) {
+    sendJson(response, 500, {
+      error: `prompt reader failed: ${error instanceof Error ? error.message : String(error)}`,
+    });
+  }
+}
+
+/**
+ * Save route: the body is the take as 16 kHz mono Float32 samples. Writes
+ * to disk, so only a same origin page on a loopback host may call it: a
+ * browser always sends Origin on POST, and the Host check defeats DNS
+ * rebinding.
+ */
+async function saveTake(
+  request: IncomingMessage,
+  response: ServerResponse,
+  reader: PromptReader,
+  query: URLSearchParams,
+): Promise<void> {
+  const host = request.headers.host;
+  if (
+    !host ||
+    !LOOPBACK_HOSTNAMES.has(new URL(`http://${host}`).hostname) ||
+    request.headers.origin !== hostOrigin(request)
+  ) {
+    sendJson(response, 403, { error: "same origin loopback pages only" });
+    return;
+  }
+  if (request.headers["content-type"] !== "application/octet-stream") {
+    sendJson(response, 415, { error: "body must be application/octet-stream Float32 samples" });
+    return;
+  }
+  const body = await readBody(request, PROMPT_MAX_TAKE_BYTES);
+  if (body === null) {
+    sendJson(response, 413, { error: `take exceeds ${PROMPT_MAX_TAKE_BYTES} bytes` });
+    return;
+  }
+  if (body.length === 0 || body.length % Float32Array.BYTES_PER_ELEMENT !== 0) {
+    sendJson(response, 400, { error: "body must be a non-empty whole number of Float32 samples" });
+    return;
+  }
+  try {
+    // Copy into a fresh buffer: pooled Buffers need not be 4 byte aligned.
+    const samples = new Float32Array(new Uint8Array(body).buffer);
+    const saved = await reader.save(
+      query.get("promptId") ?? "",
+      samples,
+      query.get("device") ?? "",
+    );
+    sendJson(response, 201, saved);
+  } catch (error) {
+    if (!(error instanceof UnknownPromptError)) throw error;
+    sendJson(response, 404, { error: error.message });
+  }
+}
+
+/** The request body, or null once it passes `limit` bytes. */
+async function readBody(request: IncomingMessage, limit: number): Promise<Buffer | null> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request as AsyncIterable<Buffer>) {
+    size += chunk.length;
+    if (size > limit) return null;
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
+function sendJson(response: ServerResponse, status: number, body: unknown): void {
+  response.writeHead(status, {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    ...(status === 413 ? { connection: "close" } : {}),
+  });
+  response.end(JSON.stringify(body));
+}
+
+function hostOrigin(request: IncomingMessage): string | undefined {
+  return request.headers.host ? `http://${request.headers.host}` : undefined;
+}
+
 async function serveStatic(
   requestUrl: string,
-  response: import("node:http").ServerResponse,
+  response: ServerResponse,
 ): Promise<void> {
   const pathname = new URL(requestUrl, "http://localhost").pathname;
   const relative = STATIC_FILES.get(pathname);
