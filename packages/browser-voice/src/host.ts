@@ -15,6 +15,7 @@ import {
 import { WebSocket, WebSocketServer } from "ws";
 import {
   PROMPT_MAX_TAKE_BYTES,
+  PROMPT_SAMPLE_RATE,
   PromptReader,
   UnknownPromptError,
   type PromptReaderConfig,
@@ -177,11 +178,19 @@ async function saveTake(
 ): Promise<void> {
   const samples = await readTakeSamples(request, response);
   if (!samples) return;
+  const preRoll = query.get("preRollMs");
+  const preRollMs = preRoll === null ? undefined : Number(preRoll);
+  const takeMs = (samples.length / PROMPT_SAMPLE_RATE) * 1_000;
+  if (preRoll !== null && (!/^\d+$/.test(preRoll) || preRollMs! > takeMs)) {
+    sendJson(response, 400, { error: "preRollMs must be whole milliseconds within the take" });
+    return;
+  }
   try {
     const saved = await reader.save(
       query.get("promptId") ?? "",
       samples,
       query.get("device") ?? "",
+      preRollMs,
     );
     sendJson(response, 201, saved);
   } catch (error) {

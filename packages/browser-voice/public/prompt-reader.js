@@ -4,8 +4,11 @@ import { HoldReleaseGate } from "/hold-release.js";
 /**
  * Prompt reader: walks a prompt set in id order and records one take per
  * prompt through the capture path TM dictation uses: the capture worklet,
- * CAPTURE_AUDIO_CONSTRAINTS, the mic opened at each press and stopped at
- * each commit, and the HoldReleaseGate tail after release. A saved take
+ * CAPTURE_AUDIO_CONSTRAINTS and the HoldReleaseGate tail after release.
+ * The mic opens at the first press and stays open while the page is
+ * visible, so each take starts with the last 300 ms before its press; the
+ * page's first take, and the first after the page was hidden, has none
+ * because the mic was closed. A saved take
  * becomes a corpus pair on the host; the prompt text is its expected
  * transcript. Play replays the unsaved take, or a saved take of the
  * current prompt (latest first; Earlier take steps back), without touching
@@ -16,6 +19,8 @@ import { HoldReleaseGate } from "/hold-release.js";
 
 const SAMPLE_RATE = 16_000;
 const MIN_TAKE_MS = 300;
+const PRE_ROLL_MS = 300;
+const PRE_ROLL_SAMPLES = (SAMPLE_RATE * PRE_ROLL_MS) / 1_000;
 const CLIP_LEVEL = 0.99;
 /** A transcript later than this shows as unavailable. */
 const TRANSCRIBE_TIMEOUT_MS = 15_000;
@@ -44,11 +49,20 @@ class PromptReaderPage {
     this.prompts = [];
     this.index = 0;
     this.context = null;
+    /** Resolves once the capture worklet is loaded and connected. */
+    this.captureReady = null;
     this.capture = null;
     this.stream = null;
+    /** The pending getUserMedia, shared by presses until it settles. */
+    this.opening = null;
+    /** Bumped when the mic stops, so a late acquisition is discarded. */
     this.micGeneration = 0;
     this.source = null;
     this.frames = [];
+    /** Idle frames, the last PRE_ROLL_MS of them, that lead the next take. */
+    this.ring = [];
+    this.ringSamples = 0;
+    this.preRollMs = 0;
     /** Flush requests the worklet has not answered yet. */
     this.flushes = 0;
     /** True while the ended take waits for its flush reply. */
@@ -105,10 +119,12 @@ class PromptReaderPage {
         this.gate.release();
       }
     });
-    // A hidden tab cancels the take, as TM dictation cancels on hidden.
+    // A hidden tab cancels the take, as TM dictation cancels on hidden, and
+    // stops the mic; so does leaving the page. The next press reopens it.
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) this.cancelTake("Take cancelled: the tab was hidden.");
     });
+    window.addEventListener("pagehide", () => this.cancelTake("Take cancelled: the page was left."));
     const record = this.elements.record;
     record.addEventListener("pointerdown", () => void this.press());
     for (const type of ["pointerup", "pointerleave", "pointercancel"]) {
@@ -191,55 +207,97 @@ class PromptReaderPage {
   async press() {
     if (this.saving || this.draining || !this.current() || !this.gate.press()) return;
     this.stopPlayback();
-    const generation = ++this.micGeneration;
-    this.frames = [];
+    const generation = this.micGeneration;
+    // The ring holds only frames after the last take's flush reply, so the
+    // pre roll is the one part of a take that may predate its press.
+    const preRoll = concat(this.ring).slice(-PRE_ROLL_SAMPLES);
+    this.frames = [preRoll];
+    this.preRollMs = Math.round((preRoll.length / SAMPLE_RATE) * 1_000);
+    this.clearRing();
     this.take = null;
     this.setStatus("Recording. Release when you finish the prompt.");
     try {
       await this.openMic(generation);
     } catch (error) {
       if (generation !== this.micGeneration) return;
-      this.gate.cancel();
-      this.closeMic();
+      this.cancelTake("");
       this.fail(describeMicError(error));
     }
   }
 
   async openMic(generation) {
     // AudioContext and worklet are created once, at the first press, and
-    // resumed at every press; the mic itself opens per press.
+    // resumed at every press; the mic stays open until stopMic.
     this.context ??= new AudioContext({ latencyHint: "interactive" });
-    if (!this.capture) {
-      await this.context.audioWorklet.addModule("/capture-worklet.js");
-      if (generation !== this.micGeneration) return;
-      this.capture = new AudioWorkletNode(this.context, "speak-easy-capture");
-      this.capture.port.onmessage = (event) => this.onFrame(event.data);
-      const silent = this.context.createGain();
-      silent.gain.value = 0;
-      this.capture.connect(silent).connect(this.context.destination);
-    }
+    this.captureReady ??= this.connectCapture().catch((error) => {
+      this.captureReady = null;
+      throw error;
+    });
+    await this.captureReady;
     await this.context.resume();
-    if (generation !== this.micGeneration) return;
-    const stream = await navigator.mediaDevices.getUserMedia({
+    if (generation !== this.micGeneration || this.stream) return;
+    this.opening ??= navigator.mediaDevices.getUserMedia({
       audio: { ...CAPTURE_AUDIO_CONSTRAINTS },
     });
-    if (generation !== this.micGeneration || !this.gate.capturing) {
-      // This press ended before its mic opened; a later press owns capture.
+    const stream = await this.opening;
+    if (generation !== this.micGeneration) {
+      // The mic stopped while this one opened; a later press owns capture.
       for (const track of stream.getTracks()) track.stop();
       return;
     }
+    if (this.stream) return;
+    this.opening = null;
     this.stream = stream;
+    this.device = stream.getAudioTracks()[0]?.label ?? "";
     this.source = this.context.createMediaStreamSource(stream);
     this.source.connect(this.capture);
   }
 
-  // Frames before a flush reply belong to the mic that closed: the draining
+  async connectCapture() {
+    await this.context.audioWorklet.addModule("/capture-worklet.js");
+    this.capture = new AudioWorkletNode(this.context, "speak-easy-capture");
+    this.capture.port.onmessage = (event) => this.onFrame(event.data);
+    const silent = this.context.createGain();
+    silent.gain.value = 0;
+    this.capture.connect(silent).connect(this.context.destination);
+  }
+
+  /** Releases the mic and its ring; the next press opens it cold. */
+  stopMic() {
+    this.micGeneration += 1;
+    this.opening = null;
+    this.source?.disconnect();
+    this.source = null;
+    for (const track of this.stream?.getTracks() ?? []) track.stop();
+    this.stream = null;
+    this.clearRing();
+  }
+
+  clearRing() {
+    this.ring = [];
+    this.ringSamples = 0;
+  }
+
+  /** Keeps the last PRE_ROLL_SAMPLES of idle audio, in whole frames. */
+  keepIdle(samples) {
+    this.ring.push(samples);
+    this.ringSamples += samples.length;
+    while (this.ringSamples - this.ring[0].length >= PRE_ROLL_SAMPLES) {
+      this.ringSamples -= this.ring.shift().length;
+    }
+  }
+
+  // Frames before a flush reply belong to the take that ended: the draining
   // take keeps those after any earlier reply; a cancelled one drops them.
+  // Frames after the reply are idle and feed the pre roll ring, so no frame
+  // of one take reaches the next beyond its PRE_ROLL_MS pre roll.
   onFrame(data) {
     if (data?.kind !== "frame" || !(data.samples instanceof Float32Array)) return;
-    this.elements.level.value = Number(data.level) || 0;
+    if (this.gate.capturing || this.draining) this.elements.level.value = Number(data.level) || 0;
     if (this.flushes === 0) {
-      if (this.gate.capturing && this.stream) this.frames.push(data.samples);
+      if (!this.stream) return;
+      if (this.gate.capturing) this.frames.push(data.samples);
+      else this.keepIdle(data.samples);
       return;
     }
     if (this.draining && this.flushes === 1) this.frames.push(data.samples);
@@ -251,13 +309,8 @@ class PromptReaderPage {
     }
   }
 
-  closeMic() {
-    this.micGeneration += 1;
-    this.source?.disconnect();
-    this.source = null;
-    for (const track of this.stream?.getTracks() ?? []) track.stop();
-    this.device = this.stream?.getAudioTracks()[0]?.label ?? this.device ?? "";
-    this.stream = null;
+  /** Ends the take's capture; the mic stays open for the next press. */
+  endCapture() {
     this.elements.level.value = 0;
     // The worklet answers with its buffered partial and clears it, so the
     // next take starts with no samples from this one.
@@ -270,7 +323,7 @@ class PromptReaderPage {
   /** The take ends once the worklet's flush reply has drained its tail. */
   finishTake() {
     this.draining = Boolean(this.capture);
-    this.closeMic();
+    this.endCapture();
     if (!this.draining) this.completeTake();
   }
 
@@ -278,13 +331,14 @@ class PromptReaderPage {
     const samples = concat(this.frames);
     this.frames = [];
     const durationMs = (samples.length / SAMPLE_RATE) * 1_000;
-    if (durationMs < MIN_TAKE_MS) {
+    // The pre roll is not the reading, so a tap stays too short.
+    if (durationMs - this.preRollMs < MIN_TAKE_MS) {
       this.setStatus("Take too short. Hold Space for the whole prompt.");
       this.render();
       return;
     }
     const peak = samples.reduce((max, sample) => Math.max(max, Math.abs(sample)), 0);
-    this.take = { samples, device: this.device, transcript: { state: "pending" } };
+    this.take = { samples, device: this.device, preRollMs: this.preRollMs, transcript: { state: "pending" } };
     void this.transcribe(this.take);
     const warnings = [
       peak >= CLIP_LEVEL ? "it clipped" : "",
@@ -321,11 +375,13 @@ class PromptReaderPage {
     }
   }
 
+  /** Cancels any take and stops the mic. */
   cancelTake(message) {
+    this.stopMic();
     if (!this.gate.capturing && !this.take && !this.draining) return;
     this.gate.cancel();
     this.draining = false;
-    this.closeMic();
+    this.endCapture();
     this.frames = [];
     this.take = null;
     this.setStatus(message);
@@ -339,7 +395,11 @@ class PromptReaderPage {
     this.saving = true;
     this.render();
     try {
-      const query = new URLSearchParams({ promptId: prompt.id, device: this.take.device ?? "" });
+      const query = new URLSearchParams({
+        promptId: prompt.id,
+        device: this.take.device ?? "",
+        preRollMs: String(this.take.preRollMs),
+      });
       const response = await fetch(`/prompt-reader/recordings?${query}`, {
         method: "POST",
         headers: { "content-type": "application/octet-stream" },

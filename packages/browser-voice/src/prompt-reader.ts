@@ -105,6 +105,7 @@ export class PromptReader {
     promptId: string,
     samples: Float32Array,
     device: string,
+    preRollMs?: number,
   ): Promise<{ audio: string }> {
     const prompt = this.#prompts.find((candidate) => candidate.id === promptId);
     if (!prompt) {
@@ -121,6 +122,7 @@ export class PromptReader {
       flushToFinalMs: null,
       device: device.slice(0, MAX_DEVICE_LABEL),
       peakLevel: Number(peakLevel(samples).toFixed(4)),
+      preRollMs,
     });
     return { audio: basename(saved.wavPath) };
   }
