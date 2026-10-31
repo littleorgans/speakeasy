@@ -57,8 +57,8 @@ test("flush posts the buffered partial as a marked short frame", () => {
   const [partial] = messages;
   assert.equal(partial?.kind, "frame");
   assert.equal(partial?.flush, true);
-  // 256 buffered source samples at ratio 3 -> 85 output samples.
-  assert.deepEqual(Array.from(partial?.samples ?? []), Array(85).fill(0.5));
+  // 256 buffered source samples at ratio 3: 85 full groups and one partial.
+  assert.deepEqual(Array.from(partial?.samples ?? []), Array(86).fill(0.5));
   assert.equal(partial?.level, 0.5);
   assert.equal(partial?.audioTime, 256 / 48_000);
 });
@@ -76,6 +76,22 @@ test("a frame after flush carries no earlier samples", () => {
       assert.equal(message.flush, undefined);
       assert.deepEqual(Array.from(message.samples), Array(320).fill(0));
     }
+  }
+});
+
+test("flush keeps the samples of an incomplete last group", () => {
+  for (const rate of [48_000, 44_100]) {
+    const { messages, Processor } = loadCapture(rate);
+    const worklet = new Processor();
+    const input = new Float32Array(128);
+    input[126] = 1;
+    input[127] = 1;
+    worklet.process([[input]], [[new Float32Array(128)]]);
+    flush(worklet);
+    assert.equal(messages.length, 1);
+    const samples = messages[0]?.samples ?? new Float32Array();
+    assert.equal(samples.length, Math.ceil((128 * 16_000) / rate));
+    assert.ok(samples[samples.length - 1] !== 0, `tail dropped at ${rate} Hz`);
   }
 });
 

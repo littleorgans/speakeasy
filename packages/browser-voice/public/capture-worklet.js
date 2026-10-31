@@ -34,10 +34,12 @@ class SpeakEasyCapture extends AudioWorkletProcessor {
   }
 
   // Answers every flush with exactly one frame marked `flush: true`: the
-  // buffered partial resampled, or empty when nothing is buffered. Then the
-  // buffer is cleared, so the next frame holds no earlier samples.
+  // buffered partial resampled, or empty when nothing is buffered. An
+  // incomplete last resampling group still yields one sample from the
+  // samples present, so no source sample is dropped. Then the buffer is
+  // cleared, so the next frame holds no earlier samples.
   flush() {
-    const count = Math.floor(this.sourceLength / this.ratio);
+    const count = Math.ceil((this.sourceLength * TARGET_RATE) / sampleRate);
     this.post(count, this.sourceLength, this.sourceLength, { flush: true });
   }
 
@@ -51,11 +53,12 @@ class SpeakEasyCapture extends AudioWorkletProcessor {
     if (Math.abs(this.ratio - 3) < 0.0001) {
       for (let index = 0; index < frame.length; index += 1) {
         const sourceIndex = index * 3;
-        const sample =
-          (this.source[sourceIndex] +
-            this.source[sourceIndex + 1] +
-            this.source[sourceIndex + 2]) /
-          3;
+        const end = Math.min(sourceIndex + 3, bound);
+        let sum = this.source[sourceIndex];
+        for (let read = sourceIndex + 1; read < end; read += 1) {
+          sum += this.source[read];
+        }
+        const sample = sum / (end - sourceIndex);
         frame[index] = sample;
         energy += sample * sample;
       }
