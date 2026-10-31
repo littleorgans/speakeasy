@@ -5,8 +5,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { readCorpusEntries } from "@speakeasy/speech-io";
-import { readWavFrames } from "../../speech-io/src/bench/wav.ts";
+import { readCorpusEntries, readWavFrames } from "@speakeasy/speech-io";
 import { startBrowserVoiceServer, type BrowserVoiceServer } from "./host.ts";
 import { PROMPT_MAX_TAKE_BYTES, type PromptListing } from "./prompt-reader.ts";
 
