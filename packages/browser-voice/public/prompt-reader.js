@@ -7,7 +7,9 @@ import { HoldReleaseGate } from "/hold-release.js";
  * CAPTURE_AUDIO_CONSTRAINTS, the mic opened at each press and stopped at
  * each commit, and the HoldReleaseGate tail after release. A saved take
  * becomes a corpus pair on the host; the prompt text is its expected
- * transcript.
+ * transcript. Play replays the unsaved take, or a saved take of the
+ * current prompt (latest first; Earlier take steps back), without touching
+ * the mic or any take.
  */
 
 const SAMPLE_RATE = 16_000;
@@ -26,6 +28,9 @@ class PromptReaderPage {
       output: document.getElementById("output"),
       record: document.getElementById("record"),
       save: document.getElementById("save"),
+      play: document.getElementById("play"),
+      playLabel: document.getElementById("play-label"),
+      earlier: document.getElementById("earlier"),
       previous: document.getElementById("previous"),
       next: document.getElementById("next"),
     };
@@ -40,6 +45,9 @@ class PromptReaderPage {
     this.take = null;
     this.saving = false;
     this.failed = false;
+    this.playback = null;
+    /** Saved take offset from the latest; 0 plays the newest. */
+    this.takeOffset = 0;
     this.gate = new HoldReleaseGate({
       onCommit: () => this.finishTake(),
       onChange: () => this.render(),
@@ -70,6 +78,10 @@ class PromptReaderPage {
       } else if (event.key === "Enter" && !event.repeat) {
         event.preventDefault();
         void this.save();
+      } else if ((event.key === "p" || event.key === "P") && !event.repeat) {
+        void this.play();
+      } else if ((event.key === "t" || event.key === "T") && !event.repeat) {
+        this.stepTake();
       } else if (event.key === "ArrowRight") {
         this.move(1);
       } else if (event.key === "ArrowLeft") {
@@ -92,6 +104,8 @@ class PromptReaderPage {
       record.addEventListener(type, () => this.gate.release());
     }
     this.elements.save.addEventListener("click", () => void this.save());
+    this.elements.play.addEventListener("click", () => void this.play());
+    this.elements.earlier.addEventListener("click", () => this.stepTake());
     this.elements.previous.addEventListener("click", () => this.move(-1));
     this.elements.next.addEventListener("click", () => this.move(1));
   }
@@ -100,8 +114,72 @@ class PromptReaderPage {
     return this.prompts[this.index];
   }
 
+  /** The saved take Play would use, or null when the prompt has none. */
+  savedTake() {
+    const takes = this.current()?.takes ?? [];
+    if (!takes.length) return null;
+    const offset = this.takeOffset % takes.length;
+    return { name: takes[takes.length - 1 - offset], number: takes.length - offset, count: takes.length };
+  }
+
+  stepTake() {
+    if (this.take || this.gate.capturing || (this.current()?.takes?.length ?? 0) < 2) return;
+    this.stopPlayback();
+    this.takeOffset += 1;
+    const saved = this.savedTake();
+    this.setStatus(`Take ${saved.number} of ${saved.count} selected. P plays it.`);
+    this.render();
+  }
+
+  /** Play the unsaved take, else the selected saved take; never opens the mic. */
+  async play() {
+    if (this.gate.capturing || this.saving) return;
+    const saved = this.take ? null : this.savedTake();
+    if (!this.take && !saved) return;
+    this.stopPlayback();
+    const token = {};
+    this.playback = token;
+    try {
+      this.context ??= new AudioContext({ latencyHint: "interactive" });
+      await this.context.resume();
+      let buffer;
+      if (this.take) {
+        buffer = this.context.createBuffer(1, this.take.samples.length, SAMPLE_RATE);
+        buffer.copyToChannel(this.take.samples.slice(), 0);
+      } else {
+        const response = await fetch(`/prompt-reader/takes/${encodeURIComponent(saved.name)}`);
+        if (!response.ok) throw new Error(`take unavailable (${response.status})`);
+        buffer = await this.context.decodeAudioData(await response.arrayBuffer());
+      }
+      if (this.playback !== token) return;
+      const source = this.context.createBufferSource();
+      source.buffer = buffer;
+      source.connect(this.context.destination);
+      source.onended = () => {
+        if (this.playback?.source === source) this.playback = null;
+        this.render();
+      };
+      token.source = source;
+      source.start();
+      this.render();
+    } catch (error) {
+      if (this.playback === token) this.playback = null;
+      this.fail(`Playback failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  stopPlayback() {
+    const playing = this.playback;
+    this.playback = null;
+    if (playing?.source) {
+      playing.source.onended = null;
+      playing.source.stop();
+    }
+  }
+
   async press() {
     if (this.saving || !this.current() || !this.gate.press()) return;
+    this.stopPlayback();
     const generation = ++this.micGeneration;
     this.frames = [];
     this.take = null;
@@ -177,7 +255,7 @@ class PromptReaderPage {
       this.current()?.recorded ? "this prompt already has a take; saving adds another" : "",
     ].filter(Boolean);
     this.setStatus(
-      `Take ready: ${(durationMs / 1_000).toFixed(1)} s, peak ${peak.toFixed(2)}${warnings.length ? `; ${warnings.join("; ")}` : ""}. Enter saves; hold Space to retake.`,
+      `Take ready: ${(durationMs / 1_000).toFixed(1)} s, peak ${peak.toFixed(2)}${warnings.length ? `; ${warnings.join("; ")}` : ""}. Enter saves; P plays; hold Space to retake.`,
     );
     this.render();
   }
@@ -195,6 +273,7 @@ class PromptReaderPage {
   async save() {
     const prompt = this.current();
     if (!prompt || !this.take || this.saving) return;
+    this.stopPlayback();
     this.saving = true;
     this.render();
     try {
@@ -207,6 +286,7 @@ class PromptReaderPage {
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? `save failed (${response.status})`);
       prompt.recorded = true;
+      prompt.takes = [...(prompt.takes ?? []), body.audio];
       this.take = null;
       this.index += 1;
       this.setStatus(`Saved ${prompt.id} as ${body.audio}.`);
@@ -222,6 +302,8 @@ class PromptReaderPage {
     if (this.gate.capturing || this.saving) return;
     const next = Math.min(Math.max(this.index + step, 0), this.prompts.length);
     if (next === this.index) return;
+    this.stopPlayback();
+    this.takeOffset = 0;
     this.index = next;
     this.take = null;
     this.setStatus("Hold Space while you read the prompt aloud, then release.");
@@ -260,6 +342,14 @@ class PromptReaderPage {
     }
     elements.record.disabled = !prompt || this.saving;
     elements.save.disabled = !this.take || this.saving;
+    const saved = this.take ? null : this.savedTake();
+    elements.play.disabled = this.gate.capturing || this.saving || (!this.take && !saved);
+    elements.playLabel.textContent = this.playback
+      ? "Playing"
+      : saved && saved.count > 1
+        ? `Play take ${saved.number} of ${saved.count}`
+        : "Play";
+    elements.earlier.hidden = !saved || saved.count < 2;
     elements.previous.disabled = this.index === 0;
     elements.next.disabled = !prompt;
   }
