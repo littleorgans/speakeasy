@@ -36,10 +36,11 @@ class RewriteSession extends EventEmitter implements STTSession {
     super();
     this.#inner = inner;
     inner.on("partial", (event) => this.emit("partial", event));
+    inner.on("empty", (event) => this.emit("empty", event));
     inner.on("endpoint", (event) => this.emit("endpoint", event));
     inner.on("error", (event) => this.emit("error", event));
     inner.on("final", (event: FinalEvent) => {
-      this.emit("final", { text: rewriteText(event.text, config) });
+      this.emit("final", { ...event, text: rewriteText(event.text, config) });
     });
   }
 
