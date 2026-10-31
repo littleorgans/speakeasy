@@ -153,7 +153,6 @@ async function ensureVerifiedFile(
     if (sizeMatches && (await sha256File(path)) === sha256) {
       return;
     }
-    await rm(path, { force: true });
   }
   await mkdir(dirname(path), { recursive: true });
   const part = `${path}.part`;

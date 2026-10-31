@@ -199,6 +199,23 @@ test("a file set replaces a corrupt file of the pinned size", async () => {
   assert.equal(await readFile(join(spec.dir, "onnx/encoder.onnx"), "utf8"), "weights");
 });
 
+test("a file replacement keeps the installed bytes until the new pin is verified", async () => {
+  const spec = await fileSetSpec();
+  const target = join(spec.dir, "onnx/encoder.onnx");
+  await mkdir(join(spec.dir, "onnx"), { recursive: true });
+  await writeFile(target, "old pin");
+  const replacement: FetchArchive = async () => {
+    assert.equal(await readFile(target, "utf8"), "old pin", "the installed file stays during download");
+    return Readable.from([Buffer.from("bad pin")]);
+  };
+  await assert.rejects(ensureAsset(spec, replacement), /Digest mismatch/);
+  assert.equal(await readFile(target, "utf8"), "old pin", "a failed replacement preserves installed bytes");
+  assert.ok(!existsSync(`${target}.part`));
+  assert.ok(!existsSync(join(spec.dir, COMPLETE_MARKER)));
+  await ensureAsset(spec, servingFiles().fetch);
+  assert.equal(await readFile(target, "utf8"), "weights");
+});
+
 test("a file set repeat after partial failure fetches only what is missing", async () => {
   const spec = await fileSetSpec();
   const tampered = servingFiles((name) =>
