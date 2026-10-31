@@ -168,6 +168,28 @@ test("Qwen3 ASR loads its tokenizer directory and reports no tokens", async () =
   assert.equal(modelConfig.transducer, undefined);
 });
 
+test("Qwen3 ASR reserves generation room for a dense 30 second hold", async () => {
+  const model = "en-qwen3-asr-0.6b-int8-2026-03-25";
+  const { fake, session } = await openSession(model, [{ text: "purple bicycle" }]);
+  session.pushAudio(new Float32Array(30 * 16_000));
+  session.flush();
+  const [final] = (await once(session, "final")) as [FinalEvent];
+  assert.equal(final.audioMs, 30_000);
+  assert.deepEqual(fake.decoded, [30 * 16_000]);
+  const qwen = {
+    maxNewTokens: 128,
+    maxTotalLen: 512,
+    ...fake.configs[0]!.modelConfig.qwen3Asr,
+  };
+  // The native 30 s fixture needs over 128 output tokens. Sherpa makes 13
+  // audio tokens per second; reserve the prompt as well as the output budget.
+  assert.ok(qwen.maxNewTokens >= 256, "dense speech needs more than the native 128 token default");
+  assert.ok(
+    qwen.maxTotalLen >= 30 * 13 + 32 + qwen.maxNewTokens,
+    "audio and prompt must leave room for the configured generation budget",
+  );
+});
+
 test("Parakeet Ultra opens from its file set as a NeMo transducer", async () => {
   const { fake, session } = await openSession("en-parakeet-ultra-int8", [
     { text: " Hi.", tokens: [" Hi", "."], timestamps: [0.1, 0.3], ys_log_probs: [-0.1, -0.2] },

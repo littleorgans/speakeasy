@@ -92,6 +92,8 @@ export type OfflineQwen3AsrModelConfig = {
   /** Tokenizer directory. */
   tokenizer: string;
   hotwords?: string;
+  maxTotalLen?: number;
+  maxNewTokens?: number;
 };
 
 export type OfflineRecognizerConfig = {

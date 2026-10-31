@@ -239,6 +239,8 @@ function familyConfig(
           decoder: asset.file(model.decoder),
           tokenizer: asset.file(model.tokenizer),
           hotwords: "",
+          maxTotalLen: model.maxTotalLen,
+          maxNewTokens: model.maxNewTokens,
         },
       };
   }

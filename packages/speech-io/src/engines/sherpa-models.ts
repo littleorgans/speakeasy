@@ -102,6 +102,10 @@ export type Qwen3AsrModel = ModelCommon & {
   encoder: string;
   decoder: string;
   tokenizer: string;
+  /** Combined prompt, audio and generated token budget. */
+  maxTotalLen: number;
+  /** Generated tokens, including the language prefix. */
+  maxNewTokens: number;
 };
 
 export type OfflineSherpaModel =
@@ -270,6 +274,10 @@ export const SHERPA_MODELS = {
     encoder: "encoder.int8.onnx",
     decoder: "decoder.int8.onnx",
     tokenizer: "tokenizer",
+    // A 30 s hold uses 390 audio tokens plus the prompt. Native defaults
+    // (512 total, 128 new) cut dense speech before the end of the hold.
+    maxTotalLen: 1_024,
+    maxNewTokens: 512,
   },
   "en-2023-06-21": {
     kind: "streaming",
