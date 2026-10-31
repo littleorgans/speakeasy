@@ -42,6 +42,10 @@ class PromptReaderPage {
     this.micGeneration = 0;
     this.source = null;
     this.frames = [];
+    /** Flush requests the worklet has not answered yet. */
+    this.flushes = 0;
+    /** True while the ended take waits for its flush reply. */
+    this.draining = false;
     this.take = null;
     this.saving = false;
     this.failed = false;
@@ -178,7 +182,7 @@ class PromptReaderPage {
   }
 
   async press() {
-    if (this.saving || !this.current() || !this.gate.press()) return;
+    if (this.saving || this.draining || !this.current() || !this.gate.press()) return;
     this.stopPlayback();
     const generation = ++this.micGeneration;
     this.frames = [];
@@ -222,10 +226,22 @@ class PromptReaderPage {
     this.source.connect(this.capture);
   }
 
+  // Frames before a flush reply belong to the mic that closed: the draining
+  // take keeps those after any earlier reply; a cancelled one drops them.
   onFrame(data) {
     if (data?.kind !== "frame" || !(data.samples instanceof Float32Array)) return;
     this.elements.level.value = Number(data.level) || 0;
-    if (this.gate.capturing && this.stream) this.frames.push(data.samples);
+    if (this.flushes === 0) {
+      if (this.gate.capturing && this.stream) this.frames.push(data.samples);
+      return;
+    }
+    if (this.draining && this.flushes === 1) this.frames.push(data.samples);
+    if (data.flush !== true) return;
+    this.flushes -= 1;
+    if (this.flushes === 0 && this.draining) {
+      this.draining = false;
+      this.completeTake();
+    }
   }
 
   closeMic() {
@@ -236,10 +252,22 @@ class PromptReaderPage {
     this.device = this.stream?.getAudioTracks()[0]?.label ?? this.device ?? "";
     this.stream = null;
     this.elements.level.value = 0;
+    // The worklet answers with its buffered partial and clears it, so the
+    // next take starts with no samples from this one.
+    if (this.capture) {
+      this.flushes += 1;
+      this.capture.port.postMessage({ kind: "flush" });
+    }
   }
 
+  /** The take ends once the worklet's flush reply has drained its tail. */
   finishTake() {
+    this.draining = Boolean(this.capture);
     this.closeMic();
+    if (!this.draining) this.completeTake();
+  }
+
+  completeTake() {
     const samples = concat(this.frames);
     this.frames = [];
     const durationMs = (samples.length / SAMPLE_RATE) * 1_000;
@@ -261,8 +289,9 @@ class PromptReaderPage {
   }
 
   cancelTake(message) {
-    if (!this.gate.capturing && !this.take) return;
+    if (!this.gate.capturing && !this.take && !this.draining) return;
     this.gate.cancel();
+    this.draining = false;
     this.closeMic();
     this.frames = [];
     this.take = null;
