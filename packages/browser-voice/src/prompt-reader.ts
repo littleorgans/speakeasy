@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises";
-import { basename, isAbsolute, relative, resolve } from "node:path";
+import { readFile, realpath } from "node:fs/promises";
+import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readCorpusEntries, saveCorpusPair } from "@speakeasy/speech-io";
 
@@ -54,8 +54,8 @@ export class PromptReader {
     config: PromptReaderConfig,
     repoRoot: string = REPO_ROOT,
   ): Promise<PromptReader> {
-    const outputDir = resolve(config.outputDir);
-    const inside = relative(resolve(repoRoot), outputDir);
+    const outputDir = await canonicalPath(resolve(config.outputDir));
+    const inside = relative(await realpath(repoRoot), outputDir);
     if (inside === "" || (!inside.startsWith("..") && !isAbsolute(inside))) {
       throw new Error(
         `prompt reader output folder must be outside the repo (${repoRoot}); received ${outputDir}`,
@@ -146,4 +146,14 @@ function peakLevel(samples: Float32Array): number {
   let peak = 0;
   for (const sample of samples) peak = Math.max(peak, Math.abs(sample));
   return peak;
+}
+
+/** Resolve existing ancestors too, since the output directory may be new. */
+async function canonicalPath(path: string): Promise<string> {
+  try {
+    return await realpath(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    return resolve(await canonicalPath(dirname(path)), basename(path));
+  }
 }

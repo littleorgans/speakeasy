@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { readCorpusEntries } from "@speakeasy/speech-io";
@@ -92,7 +92,7 @@ test("prompts list in id order and a saved take becomes a schema 2 corpus pair",
   await withReader(async (host, outputDir) => {
     const before = (await (await fetch(`${host.url}/prompt-reader/prompts`)).json()) as PromptListing;
     assert.equal(before.set, "T");
-    assert.equal(before.outputDir, outputDir);
+    assert.equal(before.outputDir, join(await realpath(dirname(outputDir)), basename(outputDir)));
     assert.deepEqual(
       before.prompts.map((prompt) => [prompt.id, prompt.recorded]),
       [["p001", false], ["p002", false]],
@@ -185,6 +185,24 @@ test("malformed prompt sets are refused", async () => {
         startBrowserVoiceServer({ port: 0, promptReader: { promptsPath, outputDir: join(root, "takes") } }),
         pattern,
       );
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("output paths through a symlink into the repo are refused", async () => {
+  const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
+  const root = await mkdtemp(join(tmpdir(), "speakeasy-reader-"));
+  const promptsPath = join(root, "prompts.json");
+  try {
+    await writeFile(promptsPath, JSON.stringify(PROMPTS));
+    await symlink(repoRoot, join(root, "repo-link"));
+    for (const outputDir of [join(root, "repo-link"), join(root, "repo-link", "missing", "takes")]) {
+      // Close even an incorrectly accepted host, so the regression terminates.
+      const starting = startBrowserVoiceServer({ port: 0, promptReader: { promptsPath, outputDir } });
+      await starting.then((host) => host.close(), () => {});
+      await assert.rejects(starting, /must be outside the repo/);
     }
   } finally {
     await rm(root, { recursive: true, force: true });
