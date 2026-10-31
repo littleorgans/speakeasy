@@ -170,22 +170,20 @@ test("Qwen3 ASR loads its tokenizer directory and reports no tokens", async () =
 
 test("Qwen3 ASR reserves generation room for a dense 30 second hold", async () => {
   const model = "en-qwen3-asr-0.6b-int8-2026-03-25";
+  const { maxAudioMs } = SHERPA_MODELS[model];
+  const capSamples = (maxAudioMs * 16_000) / 1_000;
   const { fake, session } = await openSession(model, [{ text: "purple bicycle" }]);
-  session.pushAudio(new Float32Array(30 * 16_000));
+  session.pushAudio(new Float32Array(capSamples));
   session.flush();
   const [final] = (await once(session, "final")) as [FinalEvent];
-  assert.equal(final.audioMs, 30_000);
-  assert.deepEqual(fake.decoded, [30 * 16_000]);
-  const qwen = {
-    maxNewTokens: 128,
-    maxTotalLen: 512,
-    ...fake.configs[0]!.modelConfig.qwen3Asr,
-  };
+  assert.equal(final.audioMs, maxAudioMs);
+  assert.deepEqual(fake.decoded, [capSamples]);
+  const qwen = fake.configs[0]!.modelConfig.qwen3Asr!;
   // The native 30 s fixture needs over 128 output tokens. Sherpa makes 13
   // audio tokens per second; reserve the prompt as well as the output budget.
-  assert.ok(qwen.maxNewTokens >= 256, "dense speech needs more than the native 128 token default");
+  assert.ok(qwen.maxNewTokens! >= 256, "dense speech needs more than the native 128 token default");
   assert.ok(
-    qwen.maxTotalLen >= 30 * 13 + 32 + qwen.maxNewTokens,
+    qwen.maxTotalLen! >= Math.ceil((maxAudioMs / 1_000) * 13) + 32 + qwen.maxNewTokens!,
     "audio and prompt must leave room for the configured generation budget",
   );
 });
