@@ -31,6 +31,7 @@ const STATIC_FILES = new Map([
   ["/room-controls.css", "room-controls.css"],
   ["/app.js", "app.js"],
   ["/hold-release.js", "hold-release.js"],
+  ["/pre-roll.js", "pre-roll.js"],
   ["/capture-worklet.js", "capture-worklet.js"],
   ["/playback-worklet.js", "playback-worklet.js"],
   ["/capture-constraints.js", "capture-constraints.js"],

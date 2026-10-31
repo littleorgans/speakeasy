@@ -114,7 +114,7 @@ test("the prompt reader page and its scripts are served", async () => {
     const page = await fetch(`${host.url}/prompt-reader`);
     assert.equal(page.status, 200);
     assert.match(await page.text(), /Speak Easy · Prompt reader/);
-    for (const asset of ["/prompt-reader.js", "/prompt-reader.css", "/capture-constraints.js", "/capture-worklet.js", "/hold-release.js"]) {
+    for (const asset of ["/prompt-reader.js", "/prompt-reader.css", "/capture-constraints.js", "/capture-worklet.js", "/hold-release.js", "/pre-roll.js"]) {
       assert.equal((await fetch(`${host.url}${asset}`)).status, 200, asset);
     }
     const prompts = await fetch(`${host.url}/prompt-reader/prompts`);

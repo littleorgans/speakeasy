@@ -1,5 +1,6 @@
 import { CAPTURE_AUDIO_CONSTRAINTS } from "/capture-constraints.js";
 import { HoldReleaseGate } from "/hold-release.js";
+import { PreRollRing } from "/pre-roll.js";
 
 const AUDIO_HEADER_BYTES = 9;
 const AUDIO_PACKET_KIND = 1;
@@ -13,6 +14,8 @@ class SpeakEasyRoom {
     this.micStream = null;
     this.captureNode = null;
     this.playbackNode = null;
+    /** Idle hold mode frames that lead the next hold take. */
+    this.preRoll = new PreRollRing();
     this.sessionPhase = "stopped";
     this.state = "idle";
     this.muted = false;
@@ -183,6 +186,7 @@ class SpeakEasyRoom {
   beginHold() {
     if (!this.usesHoldMode() || this.sessionPhase !== "ready" || !this.hold.press()) return;
     if (this.state === "thinking" || this.state === "speaking") this.interrupt();
+    this.sendAudio(this.preRoll.take());
   }
 
   endHold() {
@@ -234,6 +238,10 @@ class SpeakEasyRoom {
       this.setSession("stopped");
       this.showError("The local voice channel closed");
     });
+  }
+
+  sendAudio(samples) {
+    if (samples.length && this.socket?.readyState === WebSocket.OPEN) this.socket.send(samples.buffer);
   }
 
   send(message) {
@@ -505,17 +513,14 @@ class SpeakEasyRoom {
     silent.gain.value = 0;
     source.connect(this.captureNode).connect(silent).connect(context.destination);
     this.playbackNode.connect(context.destination);
+    // Idle hold mode frames feed the pre roll ring, so each hold take starts
+    // with the last PRE_ROLL_MS before its press.
     this.captureNode.port.onmessage = (event) => {
       this.level = Number(event.data?.level) || 0;
-      if (
-        !this.muted &&
-        (!this.usesHoldMode() || this.hold.capturing) &&
-        this.sessionPhase === "ready" &&
-        this.socket?.readyState === WebSocket.OPEN &&
-        event.data?.samples instanceof Float32Array
-      ) {
-        this.socket.send(event.data.samples.buffer);
-      }
+      const samples = event.data?.samples;
+      if (!(samples instanceof Float32Array) || this.muted || this.sessionPhase !== "ready") return;
+      if (this.usesHoldMode() && !this.hold.capturing) this.preRoll.push(samples);
+      else this.sendAudio(samples);
     };
     this.playbackNode.port.onmessage = (event) => {
       if (event.data?.kind === "drained") {
@@ -532,6 +537,7 @@ class SpeakEasyRoom {
 
   async teardownAudio() {
     this.level = 0;
+    this.preRoll.clear();
     this.micStream?.getTracks().forEach((track) => track.stop());
     this.micStream = null;
     this.captureNode?.disconnect();
