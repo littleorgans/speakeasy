@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import vm from "node:vm";
@@ -107,6 +108,38 @@ test("normal frames around a flush keep their shape", () => {
       "samples",
     ]);
     assert.deepEqual(Array.from(message.samples), Array(320).fill(0.25));
+  }
+});
+
+test("normal frames match the pre flush worklet byte for byte", () => {
+  // SHA-256 over each frame's sample bytes then Float64 level and audioTime,
+  // recorded from capture-worklet.js at 9c0b357 with this same input.
+  const parent: Record<number, [number, string]> = {
+    8_000: [51, "eaa3323de2090ff92199642988b7c5b7c15622ff6365d0012ae506602a874372"],
+    12_000: [34, "cbaafe824c44aeadb5133b01af561e6a534f21dfd053ac204367cacfc0d6948c"],
+    16_000: [25, "0ec9d82e8c373d570541504418a927f9e2f772548b0c2ed3535e3d8d28be53b3"],
+    44_100: [9, "c26832d0b5f14fe0a08a9d6433f8a177b9c6f1138fcc606a3b0298075c0f6d89"],
+    48_000: [8, "98ff2f6d57f9829658cc548144328c3218d52683e033e4e7afd8e64d4f1a861e"],
+  };
+  for (const [rate, expected] of Object.entries(parent)) {
+    const { context, messages, Processor } = loadCapture(Number(rate));
+    const worklet = new Processor();
+    for (let block = 0; block < 64; block += 1) {
+      context.currentFrame = block * 128;
+      const input = Float32Array.from({ length: 128 }, (_, index) => {
+        const n = block * 128 + index;
+        return Math.sin(n * 0.137) * 0.7 + Math.cos(n * 0.811) * 0.2;
+      });
+      worklet.process([[input]], [[new Float32Array(128)]]);
+    }
+    const digest = createHash("sha256");
+    for (const message of messages) {
+      digest.update(new Uint8Array(message.samples.buffer));
+      digest.update(
+        new Uint8Array(Float64Array.of(message.level, message.audioTime).buffer),
+      );
+    }
+    assert.deepEqual([messages.length, digest.digest("hex")], expected, `${rate} Hz`);
   }
 });
 

@@ -29,7 +29,7 @@ class SpeakEasyCapture extends AudioWorkletProcessor {
     const needed = Math.ceil(this.outputSamples * this.ratio);
     while (this.sourceLength >= needed) {
       const consumed = Math.floor(this.outputSamples * this.ratio);
-      this.post(this.outputSamples, consumed);
+      this.post(this.outputSamples, consumed, this.source.length);
     }
   }
 
@@ -38,10 +38,14 @@ class SpeakEasyCapture extends AudioWorkletProcessor {
   // buffer is cleared, so the next frame holds no earlier samples.
   flush() {
     const count = Math.floor(this.sourceLength / this.ratio);
-    this.post(count, this.sourceLength, { flush: true });
+    this.post(count, this.sourceLength, this.sourceLength, { flush: true });
   }
 
-  post(count, consumed, marker = {}) {
+  // bound: first source index the resampler may not read. Normal frames pass
+  // the buffer size, keeping their right neighbour read past the buffered
+  // samples; flush passes the buffered length so its partial reads nothing
+  // stale.
+  post(count, consumed, bound, marker = {}) {
     const frame = new Float32Array(count);
     let energy = 0;
     if (Math.abs(this.ratio - 3) < 0.0001) {
@@ -61,7 +65,7 @@ class SpeakEasyCapture extends AudioWorkletProcessor {
         const left = Math.floor(position);
         const blend = position - left;
         const a = this.source[left];
-        const b = left + 1 < this.sourceLength ? this.source[left + 1] : a;
+        const b = left + 1 < bound ? this.source[left + 1] : a;
         const sample = a + (b - a) * blend;
         frame[index] = sample;
         energy += sample * sample;
