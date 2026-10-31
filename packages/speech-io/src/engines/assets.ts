@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
 import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { get } from "node:https";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { spawn } from "node:child_process";
@@ -12,6 +12,7 @@ const STDERR_LIMIT = 4_096;
 /** Written into the extracted directory last; holds the archive digest. */
 export const COMPLETE_MARKER = ".complete";
 const UNPINNED_MARKER = "unpinned";
+const publications = new Map<string, Promise<void>>();
 
 export async function hasNonEmptyFile(path: string): Promise<boolean> {
   const existing = await stat(path).catch(() => undefined);
@@ -201,21 +202,34 @@ async function installArchive(spec: AssetSpec): Promise<void> {
 
 /**
  * Rename a marked extraction into `dir`. A concurrent install of the same
- * asset may win the rename. A stale `dir` is moved aside whole, never
- * deleted in place, so a published asset is never partly removed.
+ * asset may win the rename. Serialize publication within this process so a
+ * stale check cannot move a peer's completed install out from under readers.
+ * A stale `dir` is moved aside whole, never deleted in place.
  */
 async function publishDir(source: string, spec: AssetSpec, aside: string): Promise<void> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      await rename(source, spec.dir);
-      return;
-    } catch (error) {
-      if (await isAssetComplete(spec)) return;
-      if (attempt > 0) throw error;
+  const key = resolve(spec.dir);
+  const previous = publications.get(key);
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => { release = resolve; });
+  publications.set(key, current);
+  try {
+    await previous;
+    if (await isAssetComplete(spec)) return;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await rename(source, spec.dir);
+        return;
+      } catch (error) {
+        if (await isAssetComplete(spec)) return;
+        if (attempt > 0) throw error;
+      }
+      await rename(spec.dir, aside).catch((error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      });
     }
-    await rename(spec.dir, aside).catch((error: unknown) => {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    });
+  } finally {
+    release();
+    if (publications.get(key) === current) publications.delete(key);
   }
 }
 

@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, renameSync } from "node:fs";
+import fs from "node:fs/promises";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { after, before, test } from "node:test";
 import {
@@ -62,6 +64,12 @@ const offline: FetchArchive = async () => {
   throw new Error("offline");
 };
 
+function deferred(): { promise: Promise<void>; release: () => void } {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => { release = resolve; });
+  return { promise, release };
+}
+
 test("download verifies, installs and marks the digest", async () => {
   const spec = await freshSpec();
   const server = serving(() => archiveBytes);
@@ -76,12 +84,11 @@ test("download verifies, installs and marks the digest", async () => {
 test("concurrent archive installs of the same missing asset all succeed", async () => {
   const spec = await freshSpec();
   const installs = 4;
-  let release!: () => void;
-  const barrier = new Promise<void>((resolve) => { release = resolve; });
+  const barrier = deferred();
   let fetches = 0;
   const fetch: FetchArchive = async () => {
-    if (++fetches === installs) release();
-    await barrier;
+    if (++fetches === installs) barrier.release();
+    await barrier.promise;
     return Readable.from([archiveBytes]);
   };
   const results = await Promise.allSettled(
@@ -94,6 +101,80 @@ test("concurrent archive installs of the same missing asset all succeed", async 
   assert.ok(await isAssetComplete(spec));
   assert.equal(await readFile(join(spec.dir, "tokens.txt"), "utf8"), "a 0\nb 1\n");
   assert.deepEqual((await readdir(join(spec.dir, ".."))).sort(), ["model-x", "model-x.tar.bz2"]);
+});
+
+test("concurrent archive replacements stay readable after each ensure resolves", async (context) => {
+  const spec = await freshSpec();
+  await writeFile(spec.archive, archiveBytes);
+  await mkdir(spec.dir);
+  await writeFile(join(spec.dir, COMPLETE_MARKER), "older pin");
+  await writeFile(join(spec.dir, "tokens.txt"), "old tokens");
+  const write = fs.writeFile;
+  const rename = fs.rename;
+  const staged = deferred();
+  const peerPublished = deferred();
+  const readerFinished = deferred();
+  let markers = 0;
+  let failedPublishes = 0;
+  let firstAside: string | undefined;
+  let raced = false;
+  context.mock.method(fs, "writeFile", async (...args: Parameters<typeof fs.writeFile>) => {
+    await write(...args);
+    if (basename(String(args[0])) === COMPLETE_MARKER) {
+      assert.equal(readFileSync(join(spec.dir, "tokens.txt"), "utf8"), "old tokens");
+      assert.equal(readFileSync(join(spec.dir, COMPLETE_MARKER), "utf8"), "older pin");
+      if (++markers === 2) staged.release();
+      await staged.promise;
+    }
+  });
+  context.mock.method(fs, "rename", async (from: string, to: string) => {
+    if (from === spec.dir) {
+      if (!firstAside) {
+        firstAside = to;
+        // A observed the stale pin. Let B publish before A moves it aside.
+        raced = failedPublishes > 1;
+        if (raced) await peerPublished.promise;
+      }
+      renameSync(from, to);
+      return;
+    }
+    if (to === spec.dir) {
+      if (raced && from === join(dirname(firstAside!), basename(spec.dir))) {
+        // Hold A's retry until B has loaded files after ensureAsset.
+        await readerFinished.promise;
+      }
+      try {
+        renameSync(from, to);
+      } catch (error) {
+        failedPublishes++;
+        throw error;
+      }
+      peerPublished.release();
+      return;
+    }
+    await rename(from, to);
+  });
+  syncBuiltinESMExports();
+  try {
+    const results = await Promise.allSettled(Array.from({ length: 2 }, async () => {
+      await ensureAsset(spec, offline);
+      try {
+        // Native STT and TTS constructors also open paths after ensureAsset.
+        return readFileSync(join(spec.dir, "tokens.txt"), "utf8");
+      } finally {
+        readerFinished.release();
+      }
+    }));
+    assert.deepEqual(results, [
+      { status: "fulfilled", value: "a 0\nb 1\n" },
+      { status: "fulfilled", value: "a 0\nb 1\n" },
+    ]);
+    assert.ok(await isAssetComplete(spec));
+    assert.deepEqual((await readdir(dirname(spec.dir))).sort(), ["model-x", "model-x.tar.bz2"]);
+  } finally {
+    context.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
 });
 
 test("a digest mismatch fails closed and leaves nothing behind", async () => {
@@ -212,12 +293,11 @@ test("concurrent file set installs of the same missing asset both succeed", asyn
       sha256: createHash("sha256").update(bytes).digest("hex"),
     }],
   };
-  let release!: () => void;
-  const barrier = new Promise<void>((resolve) => { release = resolve; });
+  const barrier = deferred();
   let fetches = 0;
   const fetch: FetchArchive = async () => {
-    if (++fetches === 2) release();
-    await barrier;
+    if (++fetches === 2) barrier.release();
+    await barrier.promise;
     return Readable.from([bytes]);
   };
   const results = await Promise.allSettled([
