@@ -109,7 +109,12 @@ export type TtsModelPaths = {
   voices?: string;
   /** Archive files synthesis reads; install skips the rest, espeak-ng-data included. */
   members: readonly string[];
+  /** The model's licence and attribution files, kept when its archive has them. */
+  attribution: readonly string[];
 };
+
+/** Licence and attribution files the release archives carry beside the model. */
+const ATTRIBUTION_FILES = ["LICENSE", "MODEL_CARD", "README.md"] as const;
 
 /** Resolve a descriptor to absolute on-disk paths and the download URL. */
 export function resolveTtsModelPaths(
@@ -126,13 +131,14 @@ export function resolveTtsModelPaths(
     tokens: join(dir, model.tokens),
     voices: model.voices ? join(dir, model.voices) : undefined,
     members: [model.model, model.tokens, ...(model.voices ? [model.voices] : [])],
+    attribution: ATTRIBUTION_FILES,
   };
 }
 
 /**
- * Download the model tarball and extract its members unless already present.
- * An install made before members were listed keeps its files: the completion
- * marker is the archive digest either way.
+ * Download the model tarball and extract its members and attribution unless
+ * already present. An install made before members were listed keeps its
+ * files: the completion marker is the archive digest either way.
  */
 export async function ensureTtsModel(paths: TtsModelPaths): Promise<void> {
   await ensureAsset({
@@ -141,6 +147,7 @@ export async function ensureTtsModel(paths: TtsModelPaths): Promise<void> {
     archive: paths.archive,
     dir: paths.dir,
     members: paths.members,
+    optionalMembers: paths.attribution,
   });
 }
 

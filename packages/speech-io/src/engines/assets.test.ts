@@ -251,6 +251,20 @@ test("archive members limit extraction; without them the whole root installs", a
   assert.equal(await readFile(join(filtered.dir, COMPLETE_MARKER), "utf8"), sha256);
 });
 
+test("optional members extract when present; absent ones are skipped", async () => {
+  const source = await mkdtemp(join(work, "optional-source-"));
+  await mkdir(join(source, "model-x", "espeak-ng-data"), { recursive: true });
+  await writeFile(join(source, "model-x", "tokens.txt"), "a 0\n");
+  await writeFile(join(source, "model-x", "LICENSE"), "licence");
+  await writeFile(join(source, "model-x", "espeak-ng-data", "LICENSE"), "gpl");
+  const bytes = execFileSync("tar", ["-cjf", "-", "-C", source, "model-x"]);
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  const spec = await freshSpec({ sha256, members: ["tokens.txt"], optionalMembers: ["LICENSE", "MODEL_CARD"] });
+  await ensureAsset(spec, serving(() => bytes).fetch);
+  assert.deepEqual((await readdir(spec.dir)).sort(), [COMPLETE_MARKER, "LICENSE", "tokens.txt"]);
+  assert.equal(await readFile(join(spec.dir, "LICENSE"), "utf8"), "licence");
+});
+
 test("a member missing from the archive fails the install", async () => {
   const spec = await freshSpec({ members: ["tokens.txt", "voices.bin"] });
   await assert.rejects(ensureAsset(spec, serving(() => archiveBytes).fetch), /tar exited/);

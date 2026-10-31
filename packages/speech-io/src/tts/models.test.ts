@@ -32,24 +32,29 @@ test("no descriptor hands sherpa espeak-ng data", () => {
   }
 });
 
-test("a TTS install extracts only the files synthesis reads", async () => {
+test("a TTS install extracts the files synthesis reads and the model's attribution", async () => {
   const work = await mkdtemp(join(tmpdir(), "speak-easy-tts-models-"));
+  // Each fixture carries the extra files its real archive does.
+  const fixtures = {
+    "piper-amy": { attribution: ["MODEL_CARD"], other: ["en_US-amy-low.onnx.json"] },
+    "kokoro-int8": { attribution: ["LICENSE", "README.md"], other: [] },
+  } as const;
   try {
     for (const id of ["piper-amy", "kokoro-int8"] as const) {
+      const { attribution, other } = fixtures[id];
       const descriptor: TtsModel = TTS_MODELS[id];
       const source = join(work, `source-${id}`, descriptor.name);
       await mkdir(join(source, "espeak-ng-data"), { recursive: true });
       await writeFile(join(source, "espeak-ng-data", "en_dict"), "dict");
-      await writeFile(join(source, "LICENSE"), "licence");
       const read = [descriptor.model, descriptor.tokens, descriptor.voices].filter((name) => name !== undefined);
-      for (const name of read) await writeFile(join(source, name), name);
+      for (const name of [...read, ...attribution, ...other]) await writeFile(join(source, name), name);
       const bytes = execFileSync("tar", ["-cjf", "-", "-C", join(source, ".."), descriptor.name]);
       const sha256 = createHash("sha256").update(bytes).digest("hex");
       const paths = resolveTtsModelPaths({ ...descriptor, sha256 }, join(work, `root-${id}`));
       await mkdir(join(paths.archive, ".."), { recursive: true });
       await writeFile(paths.archive, bytes);
       await ensureTtsModel(paths);
-      assert.deepEqual((await readdir(paths.dir)).sort(), [COMPLETE_MARKER, ...read].sort(), id);
+      assert.deepEqual((await readdir(paths.dir)).sort(), [COMPLETE_MARKER, ...read, ...attribution].sort(), id);
       assert.ok(!existsSync(join(paths.dir, "espeak-ng-data")), id);
       for (const path of [paths.model, paths.tokens, paths.voices]) {
         if (path !== undefined) assert.ok(existsSync(path), `${id} ${path}`);
