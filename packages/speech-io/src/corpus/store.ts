@@ -12,6 +12,8 @@ import { encodeWavFloat32 } from "../bench/wav.ts";
  * Schema 2 adds `promptId` and `stratum` for takes read from a prompt set,
  * and allows a null `flushToFinalMs` when no engine ran at record time.
  * Schema 1 sidecars still read, as free speech (both fields null).
+ * Optional fields such as `preRollMs` need no schema bump: readers ignore
+ * fields they do not know.
  */
 
 export const CORPUS_SCHEMA_VERSION = 2;
@@ -39,6 +41,8 @@ export type CorpusSidecar = {
   flushToFinalMs: number | null;
   device: string;
   peakLevel: number;
+  /** Audio before the press that leads the take; absent when not recorded. */
+  preRollMs?: number;
 };
 
 export type CorpusSidecarMeta = Omit<
@@ -104,6 +108,7 @@ export async function saveCorpusPair(
       flushToFinalMs: meta.flushToFinalMs,
       device: meta.device,
       peakLevel: meta.peakLevel,
+      ...(meta.preRollMs === undefined ? {} : { preRollMs: meta.preRollMs }),
     };
     // The final sidecar is the commit marker. A crash leaves an unlisted
     // wav or .part, preserving earlier pairs and reserving this stem on retry.

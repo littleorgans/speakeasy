@@ -136,7 +136,7 @@ test("prompts list in id order and a saved take becomes a schema 2 corpus pair",
     );
     assert.deepEqual(before.prompts.map((prompt) => prompt.takes), [[], []]);
 
-    const saved = await post(host, "/prompt-reader/recordings?promptId=p002&device=Desk%20mic", {
+    const saved = await post(host, "/prompt-reader/recordings?promptId=p002&device=Desk%20mic&preRollMs=300", {
       body: takeBytes(16_000),
     });
     assert.equal(saved.status, 201);
@@ -150,6 +150,7 @@ test("prompts list in id order and a saved take becomes a schema 2 corpus pair",
     assert.equal(entry?.sidecar.flushToFinalMs, null);
     assert.equal(entry?.sidecar.device, "Desk mic");
     assert.equal(entry?.sidecar.peakLevel, 0.25);
+    assert.equal(entry?.sidecar.preRollMs, 300);
     // 16 kHz mono Float32: 44 byte header plus 4 bytes per sample.
     assert.equal((await stat(entry!.wavPath)).size, 44 + 16_000 * 4);
     assert.equal((await readFile(entry!.wavPath)).readUInt32LE(24), 16_000);
@@ -177,6 +178,11 @@ test("the save route refuses foreign pages, bad bodies and unknown prompts", asy
       (await post(host, "/prompt-reader/recordings?promptId=..%2Fescape", { body: takeBytes(320) })).status,
       404,
     );
+    // A 20 ms take: the pre roll must be whole milliseconds within it.
+    for (const preRollMs of ["", "-1", "1.5", "x", "21"]) {
+      const refused = await post(host, `${path}&preRollMs=${preRollMs}`, { body: takeBytes(320) });
+      assert.equal(refused.status, 400, `preRollMs=${preRollMs}`);
+    }
     await assert.rejects(readdir(outputDir), { code: "ENOENT" }, "nothing was written");
   });
 });

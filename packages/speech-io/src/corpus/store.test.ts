@@ -44,6 +44,7 @@ test("schema 2 pairs carry the prompt id and stratum through a round trip", asyn
     assert.equal(written.promptId, "p042");
     assert.equal(written.stratum, "medium");
     assert.equal(written.flushToFinalMs, null);
+    assert.equal("preRollMs" in written, false, "an unset optional field is not written");
 
     const [entry] = await readCorpusEntries(dir);
     assert.equal(entry?.sidecar.promptId, "p042");

@@ -36,14 +36,22 @@ function pageHarness({
   const fetched: string[] = [];
   const posted: unknown[] = [];
   const elements = new Map<string, Record<string, unknown>>();
+  const listeners = new Map<string, () => void>();
+  const listen = (target: string) => (type: string, listener: () => void) => listeners.set(`${target}:${type}`, listener);
   const document = {
     body: { dataset: {} },
+    hidden: false,
     getElementById(id: string) {
-      if (!elements.has(id)) elements.set(id, { replaceChildren(...nodes: unknown[]) { this.children = nodes; } });
+      if (!elements.has(id)) {
+        elements.set(id, { replaceChildren(...nodes: unknown[]) { this.children = nodes; }, addEventListener() {} });
+      }
       return elements.get(id);
     },
     createElement: () => ({ textContent: "", className: "" }),
+    addEventListener: listen("document"),
   };
+  /** Fire a page lifecycle event the reader listens for, such as `document:visibilitychange`. */
+  const dispatch = (key: string) => listeners.get(key)!();
   class AudioContext {
     destination = {};
     audioWorklet = { async addModule() {} };
@@ -90,13 +98,14 @@ function pageHarness({
       constraints.push(options);
       return new Promise((resolve, reject) => { pending.push(resolve); denied.push(reject); });
     } } },
-    window: { setTimeout, clearTimeout },
+    window: { setTimeout, clearTimeout, addEventListener: listen("window") },
   });
   vm.runInContext(readFileSync(new URL("../public/capture-constraints.js", import.meta.url), "utf8").replace("export ", ""), context);
   vm.runInContext(source, context);
   const reader = new context.Reader();
+  reader.bind();
   reader.prompts = [{ id: "p001", stratum: "short", text: "read this" }];
-  return { reader, pending, denied, connected, constraints, played, fetched, posted, expectedConstraints: vm.runInContext("CAPTURE_AUDIO_CONSTRAINTS", context) };
+  return { reader, document, dispatch, pending, denied, connected, constraints, played, fetched, posted, expectedConstraints: vm.runInContext("CAPTURE_AUDIO_CONSTRAINTS", context) };
 }
 
 function mic() {
@@ -161,8 +170,8 @@ test("each take drains its worklet tail, so the next take holds none of it", asy
   let block = 0;
   for (const value of [1, 0]) {
     const opening = reader.press();
-    await waitForRequests(pending, takes.length + 1);
-    pending[takes.length]!(mic());
+    await waitForRequests(pending, 1);
+    if (!takes.length) pending[0]!(mic());
     await opening;
     page = reader.capture.port;
     feed(context, processor, block, (block += 55), value);
@@ -248,9 +257,12 @@ test("play is disabled on a prompt with no take", () => {
 /** Record one ready take of 0.4 s through the page's capture path. */
 async function readyTake(harness: ReturnType<typeof pageHarness>) {
   const { reader, pending } = harness;
+  const cold = !reader.stream;
   const opening = reader.press();
-  await waitForRequests(pending, pending.length + 1);
-  pending[pending.length - 1]!(mic());
+  if (cold) {
+    await waitForRequests(pending, pending.length + 1);
+    pending[pending.length - 1]!(mic());
+  }
   await opening;
   reader.onFrame({ kind: "frame", samples: new Float32Array(6_400).fill(0.3), level: 0.2 });
   reader.gate.cancel();
@@ -296,7 +308,7 @@ test("save works while the transcript is pending and never carries it", async ()
   assert.equal(reader.elements.heardNote.textContent, "Transcribing");
   await reader.save();
   assert.equal(saves.length, 1);
-  assert.match(saves[0]!.url, /^\/prompt-reader\/recordings\?promptId=p001&device=test\+mic$/);
+  assert.match(saves[0]!.url, /^\/prompt-reader\/recordings\?promptId=p001&device=test\+mic&preRollMs=0$/);
   assert.equal(saves[0]!.init!.body, take.samples.buffer);
   assert.equal(reader.take, null);
   assert.equal(reader.index, 1);
@@ -336,4 +348,79 @@ test("a late transcript never lands on a newer take", async () => {
   assert.equal(first.transcript.state, "done");
   assert.equal(second.transcript.state, "pending");
   assert.equal(harness.reader.elements.heardNote.textContent, "Transcribing");
+});
+
+const idleFrames = (count: number, value: number) => Array.from({ length: count }, () => new Float32Array(320).fill(value));
+
+test("a take starts with the 300 ms before its press", async () => {
+  const saves: string[] = [];
+  const harness = pageHarness({
+    respond: async (url) => {
+      if (url.startsWith("/prompt-reader/recordings")) saves.push(url);
+      return okReply({ audio: "utt-a.wav" });
+    },
+  });
+  const { reader, pending } = harness;
+  reader.prompts = [
+    { id: "p001", stratum: "short", text: "read this", recorded: false, takes: [] },
+    { id: "p002", stratum: "short", text: "read that", recorded: false, takes: [] },
+  ];
+  const opening = reader.press();
+  await waitForRequests(pending, 1);
+  const device = mic();
+  pending[0]!(device);
+  await opening;
+  reader.onFrame({ kind: "frame", samples: new Float32Array(6_400).fill(1), level: 0.2 });
+  reader.gate.cancel();
+  reader.finishTake();
+  assert.equal(device.track.stopped, false, "the mic stays open after commit");
+  assert.equal(reader.take.preRollMs, 0, "the page's first take opens a cold mic");
+  await reader.save();
+  // Idle frames older than 300 ms fall out of the ring; the idle level stays hidden.
+  for (const samples of [...idleFrames(10, 9), ...idleFrames(15, 2)]) reader.onFrame({ kind: "frame", samples, level: 0.4 });
+  assert.equal(reader.elements.level.value, 0);
+  const second = reader.press();
+  await second;
+  reader.onFrame({ kind: "frame", samples: new Float32Array(6_400).fill(3), level: 0.2 });
+  reader.gate.cancel();
+  reader.finishTake();
+  assert.equal(pending.length, 1, "one getUserMedia across both takes");
+  const { samples } = reader.take;
+  assert.equal(samples.length, 4_800 + 6_400);
+  assert.ok(samples.subarray(0, 4_800).every((sample: number) => sample === 2), "pre roll is the idle ring");
+  assert.ok(samples.subarray(4_800).every((sample: number) => sample === 3));
+  assert.equal(reader.take.preRollMs, 300);
+  await reader.save();
+  assert.deepEqual(saves.map((url) => new URLSearchParams(url.split("?")[1]).get("preRollMs")), ["0", "300"]);
+});
+
+for (const [event, hide] of [["document:visibilitychange", true], ["window:pagehide", false]] as const) {
+  test(`${event.split(":")[1]} stops the warm mic and the next press reopens it cold`, async () => {
+    const harness = pageHarness();
+    const { reader, pending, document, dispatch } = harness;
+    await readyTake(harness);
+    const device = reader.stream.getAudioTracks()[0];
+    for (const samples of idleFrames(15, 2)) reader.onFrame({ kind: "frame", samples, level: 0.4 });
+    document.hidden = hide;
+    dispatch(event);
+    assert.equal(device.stopped, true);
+    document.hidden = false;
+    const take = await readyTake(harness);
+    assert.equal(pending.length, 2, "the next press opens the mic again");
+    assert.equal(take.preRollMs, 0);
+    assert.equal(take.samples.length, 6_400, "no idle frame from before the stop leads the take");
+  });
+}
+
+test("a tap on a warm mic stays too short despite its pre roll", async () => {
+  const harness = pageHarness();
+  const { reader } = harness;
+  await readyTake(harness);
+  for (const samples of idleFrames(15, 2)) reader.onFrame({ kind: "frame", samples, level: 0.4 });
+  await reader.press();
+  reader.onFrame({ kind: "frame", samples: new Float32Array(3_200).fill(3), level: 0.2 });
+  reader.gate.cancel();
+  reader.finishTake();
+  assert.equal(reader.take, null);
+  assert.match(reader.elements.status.textContent, /too short/);
 });
