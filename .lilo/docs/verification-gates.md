@@ -20,6 +20,7 @@ Run every gate from the repo root after `pnpm install`. Node must satisfy the `e
 
 - Scoped takes a workspace package name: `@speakeasy/speech-io`, `@speakeasy/llm`, `@speakeasy/convo-engine` or `@speakeasy/browser-voice`.
 - Live provider smoke tests run only with an opt in flag and a key, so the suite never spends quota by accident: `SPEAKEASY_LIVE_CEREBRAS=1` with `CEREBRAS_API_KEY` (`code:packages/llm/src/cerebras.test.ts`), `SPEAKEASY_LIVE_MERCURY=1` with `INCEPTIONLABS_API_KEY` (`code:packages/llm/src/mercury.test.ts`), `SPEAKEASY_LIVE_CARTESIA=1` with `CARTESIA_API_KEY` (`code:packages/speech-io/src/tts/cartesia.test.ts`).
+- Live onnxruntime model tests run only with `SPEAKEASY_LIVE_ORT=1` (macOS, downloads into `models/`), no key: `code:packages/speech-io/src/engines/silence-gate-live.test.ts` and the `ort-*-live.test.ts` files.
 - Benchmarks and demos (`pnpm bench`, `pnpm tts`, `pnpm cascade-sweep`) need downloaded models under `models/` or provider keys and are no gate.
 
 ## Hooks

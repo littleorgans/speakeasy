@@ -13,6 +13,9 @@ importers:
       '@speakeasy/convo-engine':
         specifier: workspace:*
         version: link:../convo-engine
+      '@speakeasy/speech-io':
+        specifier: workspace:*
+        version: link:../speech-io
       ws:
         specifier: ^8.21.1
         version: 8.21.1

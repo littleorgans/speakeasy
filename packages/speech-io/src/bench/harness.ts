@@ -1,11 +1,14 @@
 import { performance } from "node:perf_hooks";
 import type { STTSession, VoiceToText } from "../contract.ts";
 import { MoonshineEngine } from "../engines/moonshine.ts";
+import { createLocalOrtEngine } from "../engines/ort-local.ts";
+import { isOrtModelId } from "../engines/ort-models.ts";
+import type { SilenceGateMode } from "../engines/offline-session.ts";
 import { createLocalSherpaEngine } from "../engines/sherpa-binding.ts";
-import type { SherpaModelId } from "../engines/sherpa-models.ts";
 import { StubEngine } from "../engines/stub.ts";
 import { nextCommit } from "./commit.ts";
 import { FLUSH_FINAL_TIMEOUT_MS, SESSION_TIMEOUT_MS } from "./config.ts";
+import type { BenchModelId } from "./models.ts";
 import { isWordTolerantTranscript, wordErrorCount } from "./transcript.ts";
 import type {
   BenchEngine,
@@ -27,9 +30,15 @@ export type SessionObservers = {
   throwIfError: () => void;
 };
 
+/**
+ * Build the bench engine: stub or moonshine by name, else the registry model
+ * `model` names (sherpa-onnx or onnxruntime), defaulting to sherpa's default.
+ * `gate` overrides an offline model's silence gate.
+ */
 export async function createEngine(
   name: EngineName,
-  model?: SherpaModelId,
+  model?: BenchModelId,
+  gate: SilenceGateMode = "model",
 ): Promise<BenchEngine> {
   if (model && name !== "sherpa") {
     throw new Error(`--model only applies to --engine sherpa, not ${name}`);
@@ -41,7 +50,9 @@ export async function createEngine(
     return new MoonshineEngine();
   }
   if (name === "sherpa") {
-    return createLocalSherpaEngine(model);
+    return model && isOrtModelId(model)
+      ? createLocalOrtEngine(model, gate)
+      : createLocalSherpaEngine(model, gate);
   }
   throw new Error(`Unsupported engine ${name}`);
 }

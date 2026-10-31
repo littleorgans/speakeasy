@@ -22,3 +22,20 @@ test("server options keep the model and use the cascade TTS voice", () => {
     },
   );
 });
+
+test("prompt reader flags come as a pair", () => {
+  assert.deepEqual(
+    readBrowserVoiceOptions(["--prompts", "set-a.json", "--out", "/tmp/takes"], {})
+      .promptReader,
+    { promptsPath: "set-a.json", outputDir: "/tmp/takes" },
+  );
+  assert.equal(readBrowserVoiceOptions([], {}).promptReader, undefined);
+  assert.throws(
+    () => readBrowserVoiceOptions(["--prompts", "set-a.json"], {}),
+    /go together/,
+  );
+  assert.throws(
+    () => readBrowserVoiceOptions(["--out", "--prompts", "x"], {}),
+    /--out needs a value/,
+  );
+});

@@ -3,6 +3,7 @@ import { once } from "node:events";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { EmptyEvent, FinalEvent } from "../contract.ts";
+import type { SilenceGate } from "./offline-session.ts";
 import { SherpaOfflineEngine } from "./sherpa-offline.ts";
 import type {
   OfflineRecognizer,
@@ -22,6 +23,7 @@ type FakeOffline = {
 async function openSession(
   model: SherpaModelId,
   results: (RecognizerResult | Error)[] = [],
+  silenceGate?: SilenceGate,
 ) {
   const fake: FakeOffline = { configs: [], decoded: [], results };
   class Recognizer implements OfflineRecognizer {
@@ -48,6 +50,7 @@ async function openSession(
     model,
     modelRoot: await seededModelRoot(model),
     binding: bindingWith({ OfflineRecognizer: Recognizer }),
+    silenceGate,
   });
   const session = await engine.open({ endpoint: { mode: "manual" } });
   return { fake, session };
@@ -62,6 +65,14 @@ test("a silent hold decodes to empty", async () => {
   const [empty] = (await once(session, "empty")) as [EmptyEvent];
   assert.equal(empty.audioMs, 200);
   assert.deepEqual(fake.decoded, [3_200]);
+});
+
+test("a hold the silence gate finds silent never reaches the decoder", { timeout: 5_000 }, async () => {
+  const { fake, session } = await openSession("en-parakeet-tdt-0.6b-v2-int8", [], { hasSpeech: () => false, logProbFloor: null });
+  session.pushAudio(new Float32Array(3_200));
+  session.flush();
+  await once(session, "empty");
+  assert.deepEqual(fake.decoded, []);
 });
 
 test("a hold with no audio is empty without touching the decoder", async () => {

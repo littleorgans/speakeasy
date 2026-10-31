@@ -11,6 +11,7 @@ import type {
   VoiceToText,
 } from "../contract.ts";
 import { ensureAsset, type AssetSpec, type FileSetSpec } from "./assets.ts";
+import type { SilenceGate } from "./offline-session.ts";
 import { resultDetail, resultText } from "./result.ts";
 import type {
   Hotwords,
@@ -38,6 +39,8 @@ import {
 
 export const SHERPA_SAMPLE_RATE = 16_000;
 export const SHERPA_FEATURE_DIM = 80;
+/** CPU threads per sherpa recognizer; onnxruntime engines match it. */
+export const SHERPA_NUM_THREADS = 2;
 /**
  * Silence pushed instantly at flush() so the encoder's pending chunk and
  * right context fill without waiting for real trailing audio. Sized for the
@@ -64,6 +67,8 @@ export type SherpaEngineOptions = {
    * modified_beam_search. Absent means greedy search.
    */
   hotwords?: Hotwords;
+  /** Offline models only: the silence gate every session runs before decode. */
+  silenceGate?: SilenceGate;
 };
 
 /** Shared by the streaming and offline engines. */
@@ -126,6 +131,10 @@ export class SherpaEngine implements VoiceToText {
 
   get model(): StreamingSherpaModel {
     return this.#asset.model;
+  }
+
+  get threads(): number {
+    return SHERPA_NUM_THREADS;
   }
 
   async prepare(): Promise<void> {
@@ -288,7 +297,7 @@ function createRecognizerConfig(
         joiner: asset.file(model.joiner),
       },
       tokens: asset.file(model.tokens),
-      numThreads: 2,
+      numThreads: SHERPA_NUM_THREADS,
       provider: "cpu",
       debug: 0,
       // bpe modelingUnit only when the model ships a bpe.model; several

@@ -7,6 +7,9 @@ const options = readBrowserVoiceOptions(process.argv.slice(2), process.env);
 const host = await startBrowserVoiceServer(options);
 console.log(`speak-easy browser voice: ${host.url}`);
 console.log("Open the URL, allow microphone access, then start a room.");
+if (options.promptReader) {
+  console.log(`prompt reader: ${host.url}/prompt-reader (takes saved to ${options.promptReader.outputDir})`);
+}
 
 /** Load the gitignored local environment without printing or serializing it. */
 function loadLocalEnv(): void {
