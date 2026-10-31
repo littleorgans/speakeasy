@@ -70,6 +70,13 @@ export type AssetSpec = {
   /** Top directory inside the archive; defaults to the basename of `dir`. */
   archiveRoot?: string;
   /**
+   * Paths under the archive root to extract, `/` separated; omit to extract
+   * everything. A listed path missing from the archive fails the install.
+   */
+  members?: readonly string[];
+  /** With `members`: paths also extracted when the archive has them, skipped when not. */
+  optionalMembers?: readonly string[];
+  /**
    * Unpinned assets only: a file whose presence marks an extraction made
    * before completion markers existed.
    */
@@ -186,18 +193,28 @@ async function installArchive(spec: AssetSpec): Promise<void> {
   await mkdir(parent, { recursive: true });
   const temp = await mkdtemp(join(parent, `.${basename(spec.dir)}.extract-`));
   try {
-    await extractArchive(spec.archive, temp);
-    const extracted = join(temp, spec.archiveRoot ?? basename(spec.dir));
+    const root = spec.archiveRoot ?? basename(spec.dir);
+    await extractArchive(spec.archive, temp, await archiveMembers(spec, root));
+    const extracted = join(temp, root);
     if (!(await stat(extracted).catch(() => undefined))?.isDirectory()) {
-      throw new Error(
-        `Archive ${spec.archive} has no ${spec.archiveRoot ?? basename(spec.dir)} directory`,
-      );
+      throw new Error(`Archive ${spec.archive} has no ${root} directory`);
     }
     await writeFile(join(extracted, COMPLETE_MARKER), completeMarkerValue(spec), "utf8");
     await publishDir(extracted, spec, join(temp, "stale"));
   } finally {
     await rm(temp, { recursive: true, force: true });
   }
+}
+
+/** Archive paths to extract: none for the whole archive, else members plus optional ones present. */
+async function archiveMembers(spec: AssetSpec, root: string): Promise<string[]> {
+  if (spec.members === undefined) return [];
+  const optional = spec.optionalMembers?.map((member) => `${root}/${member}`) ?? [];
+  const present = optional.length > 0 ? new Set(await listArchive(spec.archive)) : undefined;
+  return [
+    ...spec.members.map((member) => `${root}/${member}`),
+    ...optional.filter((member) => present?.has(member)),
+  ];
 }
 
 /**
@@ -267,26 +284,43 @@ export async function sha256File(path: string): Promise<string> {
   return hash.digest("hex");
 }
 
-/** Extract a .tar.bz2 or .tgz archive; tar output is captured, not inherited. */
+/**
+ * Extract a .tar.bz2 or .tgz archive, or only `members` of it when given;
+ * tar output is captured, not inherited.
+ */
 export async function extractArchive(
   archivePath: string,
   destinationDir: string,
+  members: readonly string[] = [],
 ): Promise<void> {
   await mkdir(destinationDir, { recursive: true });
-  const flags = tarFlags(archivePath);
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn("tar", [flags, archivePath, "-C", destinationDir], {
+  await runTar([tarFlags("x", archivePath), archivePath, "-C", destinationDir, ...members]);
+}
+
+/** Paths of every entry in a .tar.bz2 or .tgz archive. */
+async function listArchive(archivePath: string): Promise<string[]> {
+  const stdout = await runTar([tarFlags("t", archivePath), archivePath]);
+  return stdout.split("\n").filter((line) => line.length > 0);
+}
+
+/** Run tar, resolving with its stdout; stderr is kept for the failure message. */
+function runTar(args: readonly string[]): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const child = spawn("tar", args, {
       stdio: ["ignore", "pipe", "pipe"],
     });
+    let stdout = "";
     let stderr = "";
-    child.stdout.resume();
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString("utf8");
+    });
     child.stderr.on("data", (chunk: Buffer) => {
       stderr = (stderr + chunk.toString("utf8")).slice(-STDERR_LIMIT);
     });
     child.on("error", reject);
     child.on("close", (code) => {
       if (code === 0) {
-        resolve();
+        resolve(stdout);
       } else {
         reject(
           new Error(`tar exited with code ${code ?? "unknown"}: ${stderr.trim()}`),
@@ -296,12 +330,12 @@ export async function extractArchive(
   });
 }
 
-function tarFlags(archivePath: string): string {
+function tarFlags(mode: "x" | "t", archivePath: string): string {
   if (archivePath.endsWith(".tar.bz2")) {
-    return "-xjf";
+    return `-${mode}jf`;
   }
   if (archivePath.endsWith(".tgz") || archivePath.endsWith(".tar.gz")) {
-    return "-xzf";
+    return `-${mode}zf`;
   }
   throw new Error(`Unsupported archive type: ${archivePath}`);
 }

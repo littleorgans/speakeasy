@@ -1,8 +1,13 @@
 /**
- * The slice of sherpa-onnx-node 1.13.3 the STT engines call, declared here so
- * the engines take the native binding by injection and never import the
- * package. Callers load it with `sherpa-binding.ts::loadSherpaBinding` or, in
- * hosts that ship the native separately, their own `createRequire`.
+ * The slice of sherpa-onnx-node the STT engines call, declared here so the
+ * engines take the native binding by injection and never import the package.
+ * Callers load it with `sherpa-binding.ts::loadSherpaBinding` or, in hosts
+ * that ship the native separately, their own `createRequire`.
+ *
+ * Compatible with 1.13.3 and 2.0.1: same calls and result fields. 2.x strips
+ * leading spaces from result text, and online one leading punctuation mark;
+ * `result.ts::resultText` trims, and every registry model gave identical
+ * final text on both versions (2026-11-01 probe).
  */
 
 export type Waveform = {

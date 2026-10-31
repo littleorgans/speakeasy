@@ -24,6 +24,6 @@
   "dependencies": {
     "llama-tokenizer-js": "1.2.2",
     "onnxruntime-node": "1.27.0",
-    "sherpa-onnx-node": "1.13.3"
+    "sherpa-onnx-node": "2.0.1"
   }
 }

@@ -1,7 +1,8 @@
 /**
  * Ambient types for the TTS paths that require sherpa-onnx-node directly. The
  * STT engines take the binding by injection; their types live in
- * engines/sherpa-api.ts.
+ * engines/sherpa-api.ts. Checked against 2.0.1, which ignores the old
+ * `dataDir` (espeak-ng data) field, so it is not declared.
  */
 declare module "sherpa-onnx-node" {
   export type Waveform = {
@@ -13,7 +14,6 @@ declare module "sherpa-onnx-node" {
     model?: string;
     lexicon?: string;
     tokens?: string;
-    dataDir?: string;
     noiseScale?: number;
     noiseScaleW?: number;
     lengthScale?: number;
@@ -23,7 +23,6 @@ declare module "sherpa-onnx-node" {
     model?: string;
     voices?: string;
     tokens?: string;
-    dataDir?: string;
     lengthScale?: number;
     lexicon?: string;
     lang?: string;
@@ -48,11 +47,22 @@ declare module "sherpa-onnx-node" {
     sampleRate: number;
   };
 
+  /** Per call settings; when present they replace the request's sid and speed. */
+  export type GenerationConfig = {
+    sid?: number;
+    speed?: number;
+    silenceScale?: number;
+    /** Caller phonemized input: one non-empty codepoint array per sentence. */
+    phonemeCodepoints?: number[][];
+  };
+
   export type TtsRequest = {
+    /** Empty when `generationConfig.phonemeCodepoints` carries the input. */
     text: string;
     sid: number;
     speed: number;
     enableExternalBuffer?: boolean;
+    generationConfig?: GenerationConfig;
   };
 
   export type TtsProgress = {
@@ -65,6 +75,8 @@ declare module "sherpa-onnx-node" {
     static createAsync(config: OfflineTtsConfig): Promise<OfflineTts>;
     numSpeakers: number;
     sampleRate: number;
+    /** The espeak voice the model metadata names, e.g. "en-us". */
+    lang: string;
     generate(request: TtsRequest): GeneratedAudio;
     generateAsync(
       request: TtsRequest & {

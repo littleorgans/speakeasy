@@ -231,6 +231,47 @@ test("a failed extract leaves no directory, marker or temp folder", async () => 
   assert.deepEqual(await readdir(join(spec.dir, "..")), ["model-x.tar.bz2"]);
 });
 
+test("archive members limit extraction; without them the whole root installs", async () => {
+  const source = await mkdtemp(join(work, "members-source-"));
+  await mkdir(join(source, "model-x", "espeak-ng-data"), { recursive: true });
+  await writeFile(join(source, "model-x", "model.onnx"), "weights");
+  await writeFile(join(source, "model-x", "tokens.txt"), "a 0\n");
+  await writeFile(join(source, "model-x", "espeak-ng-data", "en_dict"), "dict");
+  const bytes = execFileSync("tar", ["-cjf", "-", "-C", source, "model-x"]);
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  const whole = await freshSpec({ sha256 });
+  await ensureAsset(whole, serving(() => bytes).fetch);
+  assert.deepEqual(
+    (await readdir(whole.dir)).sort(),
+    [COMPLETE_MARKER, "espeak-ng-data", "model.onnx", "tokens.txt"],
+  );
+  const filtered = await freshSpec({ sha256, members: ["model.onnx", "tokens.txt"] });
+  await ensureAsset(filtered, serving(() => bytes).fetch);
+  assert.deepEqual((await readdir(filtered.dir)).sort(), [COMPLETE_MARKER, "model.onnx", "tokens.txt"]);
+  assert.equal(await readFile(join(filtered.dir, COMPLETE_MARKER), "utf8"), sha256);
+});
+
+test("optional members extract when present; absent ones are skipped", async () => {
+  const source = await mkdtemp(join(work, "optional-source-"));
+  await mkdir(join(source, "model-x", "espeak-ng-data"), { recursive: true });
+  await writeFile(join(source, "model-x", "tokens.txt"), "a 0\n");
+  await writeFile(join(source, "model-x", "LICENSE"), "licence");
+  await writeFile(join(source, "model-x", "espeak-ng-data", "LICENSE"), "gpl");
+  const bytes = execFileSync("tar", ["-cjf", "-", "-C", source, "model-x"]);
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  const spec = await freshSpec({ sha256, members: ["tokens.txt"], optionalMembers: ["LICENSE", "MODEL_CARD"] });
+  await ensureAsset(spec, serving(() => bytes).fetch);
+  assert.deepEqual((await readdir(spec.dir)).sort(), [COMPLETE_MARKER, "LICENSE", "tokens.txt"]);
+  assert.equal(await readFile(join(spec.dir, "LICENSE"), "utf8"), "licence");
+});
+
+test("a member missing from the archive fails the install", async () => {
+  const spec = await freshSpec({ members: ["tokens.txt", "voices.bin"] });
+  await assert.rejects(ensureAsset(spec, serving(() => archiveBytes).fetch), /tar exited/);
+  assert.ok(!existsSync(spec.dir));
+  assert.deepEqual(await readdir(dirname(spec.dir)), ["model-x.tar.bz2"]);
+});
+
 test("an unpinned asset counts an existing sentinel as installed", async () => {
   const spec = await freshSpec({ sha256: null });
   await mkdir(spec.dir, { recursive: true });
