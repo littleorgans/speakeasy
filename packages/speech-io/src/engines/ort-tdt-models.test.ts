@@ -17,11 +17,11 @@ function graphFiles(model: OrtTdtModel): string[] {
 
 for (const [id, model] of Object.entries(ORT_TDT_MODELS) as [string, OrtTdtModel][]) {
   test(`${id}: every file is pinned and every role names a listed file`, () => {
-    const paths = model.files.map((file) => file.path);
+    const paths = model.files.map((file) => file.name);
     assert.equal(new Set(paths).size, paths.length);
     for (const file of model.files) {
       assert.match(file.url, REVISION_URL);
-      assert.ok(file.url.endsWith(`/${file.path}`));
+      assert.ok(file.url.endsWith(`/${file.name}`));
       assert.match(file.sha256, /^[0-9a-f]{64}$/);
       assert.ok(file.bytes > 0);
     }

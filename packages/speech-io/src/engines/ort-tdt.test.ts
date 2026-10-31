@@ -5,8 +5,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { after, test } from "node:test";
 import type { EmptyEvent, FinalEvent } from "../contract.ts";
-import { COMPLETE_MARKER } from "./assets.ts";
-import { fileAssetMarker } from "./file-assets.ts";
+import { COMPLETE_MARKER, completeMarkerValue } from "./assets.ts";
 import type { OrtBinding, OrtGraph, OrtTensor } from "./ort-tdt-graphs.ts";
 import { OrtTdtEngine } from "./ort-tdt.ts";
 import {
@@ -142,7 +141,7 @@ async function seededRoot(id: OrtTdtModelId): Promise<string> {
   const model = ORT_TDT_MODELS[id];
   const paths = resolveOrtTdtPaths(model, root);
   await mkdir(paths.dir, { recursive: true });
-  await writeFile(join(paths.dir, COMPLETE_MARKER), fileAssetMarker(paths));
+  await writeFile(join(paths.dir, COMPLETE_MARKER), completeMarkerValue(paths));
   const entries = Object.entries(PIECES);
   if (model.layout === "fused") {
     const lines = entries.map(([id, piece]) => `${piece} ${id}`);

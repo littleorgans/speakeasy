@@ -1,6 +1,6 @@
 import { join } from "node:path";
-import type { FileAssetSpec, PinnedFile } from "./file-assets.ts";
-import type { ModelLicence } from "./sherpa-models.ts";
+import type { FileSetSpec } from "./assets.ts";
+import type { ModelFile, ModelLicence } from "./sherpa-models.ts";
 
 /**
  * Registry of Whistle encoder decoder models for OrtWhistleEngine, run on
@@ -16,8 +16,8 @@ import type { ModelLicence } from "./sherpa-models.ts";
 const WHISTLE_ONNX_BASE =
   "https://huggingface.co/mrfakename/whistle-ONNX/resolve/14fc92cb09ad5c271fe9a4ec4be70274790050d2";
 
-function pinned(path: string, bytes: number, sha256: string): PinnedFile {
-  return { path, url: `${WHISTLE_ONNX_BASE}/${path}`, sha256, bytes };
+function pinned(name: string, bytes: number, sha256: string): ModelFile {
+  return { name, url: `${WHISTLE_ONNX_BASE}/${name}`, sha256, bytes };
 }
 
 export type WhistleModel = {
@@ -26,7 +26,7 @@ export type WhistleModel = {
   /** Directory name under the model root. */
   name: string;
   note: string;
-  files: readonly PinnedFile[];
+  files: readonly ModelFile[];
   licence: ModelLicence;
   /** Language codes the decoder accepts as a hint; see `vendor/whistle/whistle.js::LANGS`. */
   languages: readonly string[];
@@ -80,6 +80,6 @@ export function resolveWhistleModel(id: string): WhistleModel {
   );
 }
 
-export function resolveWhistleFiles(model: WhistleModel, root: string): FileAssetSpec {
+export function resolveWhistleFiles(model: WhistleModel, root: string): FileSetSpec {
   return { dir: join(root, model.name), files: model.files };
 }

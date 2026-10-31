@@ -5,8 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import type { EmptyEvent, FinalEvent, STTErrorEvent } from "../contract.ts";
-import { COMPLETE_MARKER } from "./assets.ts";
-import { fileAssetMarker } from "./file-assets.ts";
+import { COMPLETE_MARKER, completeMarkerValue } from "./assets.ts";
 import {
   OrtWhistleEngine,
   whistleDetail,
@@ -69,7 +68,7 @@ async function seededRoot(): Promise<string> {
   after(() => rm(root, { recursive: true, force: true }));
   const spec = resolveWhistleFiles(ORT_WHISTLE_MODELS[MODEL], root);
   await mkdir(spec.dir, { recursive: true });
-  await writeFile(join(spec.dir, COMPLETE_MARKER), fileAssetMarker(spec));
+  await writeFile(join(spec.dir, COMPLETE_MARKER), completeMarkerValue(spec));
   return root;
 }
 
@@ -231,7 +230,7 @@ test("words without timestamps give text and no tokens", () => {
 test("descriptors pin every file, name files in the list, and match the decoder's languages", () => {
   for (const model of Object.values(ORT_WHISTLE_MODELS)) {
     assert.equal(model.kind, "offline");
-    const paths = model.files.map((file) => file.path);
+    const paths = model.files.map((file) => file.name);
     for (const name of [model.encoder, model.decoder, model.pack]) {
       assert.ok(paths.includes(name), name);
     }
@@ -241,7 +240,7 @@ test("descriptors pin every file, name files in the list, and match the decoder'
     for (const file of model.files) {
       assert.match(file.sha256, /^[0-9a-f]{64}$/);
       assert.ok(file.bytes > 0);
-      assert.ok(file.url.endsWith(`/${file.path}`));
+      assert.ok(file.url.endsWith(`/${file.name}`));
     }
     assert.deepEqual(model.languages, LANGS);
     assert.equal(model.licence.id, "Apache-2.0");

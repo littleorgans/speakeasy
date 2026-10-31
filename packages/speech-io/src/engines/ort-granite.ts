@@ -1,9 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { STTConfig, STTSession, VoiceToText } from "../contract.ts";
-import type { FetchArchive } from "./assets.ts";
+import { ensureAsset, type FetchArchive, type FileSetSpec } from "./assets.ts";
 import { ByteLevelVocab, greedyCtc } from "./ctc-decode.ts";
-import { ensureFileAsset, type FileAssetSpec } from "./file-assets.ts";
 import {
   GRANITE_FEATURE_DIM,
   GRANITE_FEATURE_FRAME_MS,
@@ -51,7 +50,7 @@ type LoadedModel = { graph: CtcGraph; vocab: ByteLevelVocab };
 
 export class OrtGraniteEngine implements VoiceToText {
   readonly model: GraniteCtcModel;
-  readonly #files: FileAssetSpec;
+  readonly #files: FileSetSpec;
   readonly #runtime: CtcRuntime;
   readonly #fetchFile: FetchArchive | undefined;
   #loaded: Promise<LoadedModel> | undefined;
@@ -88,12 +87,12 @@ export class OrtGraniteEngine implements VoiceToText {
   }
 
   async #loadOnce(): Promise<LoadedModel> {
-    await ensureFileAsset(this.#files, this.#fetchFile);
+    await ensureAsset(this.#files, this.#fetchFile);
     const vocab = ByteLevelVocab.fromTokenizerJson(
-      await readFile(join(this.#files.dir, this.model.tokenizer.path), "utf8"),
+      await readFile(join(this.#files.dir, this.model.tokenizer.name), "utf8"),
       this.model.blankToken,
     );
-    const graph = await this.#runtime.loadGraph(join(this.#files.dir, this.model.graph.path));
+    const graph = await this.#runtime.loadGraph(join(this.#files.dir, this.model.graph.name));
     return { graph, vocab };
   }
 }

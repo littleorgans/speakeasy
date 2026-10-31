@@ -17,7 +17,7 @@ test("every file is pinned to a commit with digest and size", () => {
       assert.match(file.sha256, /^[0-9a-f]{64}$/, id);
       assert.ok(file.bytes > 0, id);
       assert.ok(file.url.startsWith(PINNED_EXPORT), id);
-      assert.ok(file.url.endsWith(`/${file.path}`), id);
+      assert.ok(file.url.endsWith(`/${file.name}`), id);
     }
     assert.equal(model.kind, "offline", id);
     assert.ok(model.maxAudioMs > 0, id);

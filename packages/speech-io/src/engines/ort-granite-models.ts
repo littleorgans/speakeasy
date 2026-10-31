@@ -1,6 +1,6 @@
 import { join } from "node:path";
-import type { FileAssetSpec, PinnedFile } from "./file-assets.ts";
-import type { ModelLicence } from "./sherpa-models.ts";
+import type { FileSetSpec } from "./assets.ts";
+import type { ModelFile, ModelLicence } from "./sherpa-models.ts";
 
 /**
  * Registry of Granite Speech CTC models for `OrtGraniteEngine`, published as
@@ -23,8 +23,8 @@ export type GraniteCtcModel = {
   /** Directory name under the model root. */
   name: string;
   note: string;
-  graph: PinnedFile;
-  tokenizer: PinnedFile;
+  graph: ModelFile;
+  tokenizer: ModelFile;
   /** The CTC blank, which is the tokenizer's pad token. */
   blankToken: string;
   licence: ModelLicence;
@@ -39,13 +39,13 @@ export const GRANITE_MODELS = {
     name: "granite-speech-5.0-470m-turboctc-onnx-int8",
     note: "IBM Granite Speech 5.0 470M TurboCTC, English, qwertz92 dynamic int8 ONNX export, lowercase without punctuation",
     graph: {
-      path: "model_int8.onnx",
+      name: "model_int8.onnx",
       url: `${GRANITE_EXPORT}/onnx/model_int8.onnx`,
       sha256: "8173a50ea67f864801971a40622a2e5c7d62fd230912bde94b745f92c74d60e9", // LFS digest
       bytes: 551_294_349,
     },
     tokenizer: {
-      path: "tokenizer.json",
+      name: "tokenizer.json",
       url: `${GRANITE_EXPORT}/tokenizer.json`,
       sha256: "3ee80b02f0119a040a70eb909c20fac8271c173d7e71d195a3b35f77780061e6", // computed
       bytes: 1_137_492,
@@ -82,7 +82,7 @@ export function resolveGraniteModel(id: string): GraniteCtcModel {
 }
 
 /** The pinned file set under `root`; file names join onto the returned `dir`. */
-export function resolveGraniteFiles(model: GraniteCtcModel, root: string): FileAssetSpec {
+export function resolveGraniteFiles(model: GraniteCtcModel, root: string): FileSetSpec {
   return { dir: join(root, model.name), files: [model.graph, model.tokenizer] };
 }
 

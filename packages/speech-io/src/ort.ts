@@ -23,9 +23,3 @@ export {
   loadWhistleRuntime,
   ORT_ROOT,
 } from "./engines/ort-whistle-runtime.ts";
-export {
-  ensureFileAsset,
-  isFileAssetComplete,
-  type FileAssetSpec,
-  type PinnedFile,
-} from "./engines/file-assets.ts";

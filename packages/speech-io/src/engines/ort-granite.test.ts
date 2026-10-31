@@ -5,9 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import type { EmptyEvent, FinalEvent } from "../contract.ts";
-import { COMPLETE_MARKER } from "./assets.ts";
+import { COMPLETE_MARKER, completeMarkerValue } from "./assets.ts";
 import { logitsFor, TINY_TOKENIZER } from "./ctc-test-support.ts";
-import { fileAssetMarker } from "./file-assets.ts";
 import type { CtcRuntime } from "./ort-ctc-runtime.ts";
 import { OrtGraniteEngine } from "./ort-granite.ts";
 import {
@@ -61,8 +60,8 @@ async function seededRoot(): Promise<string> {
   after(() => rm(root, { recursive: true, force: true }));
   const spec = resolveGraniteFiles(GRANITE_MODELS[MODEL], root);
   await mkdir(spec.dir, { recursive: true });
-  await writeFile(join(spec.dir, GRANITE_MODELS[MODEL].tokenizer.path), TINY_TOKENIZER);
-  await writeFile(join(spec.dir, COMPLETE_MARKER), fileAssetMarker(spec));
+  await writeFile(join(spec.dir, GRANITE_MODELS[MODEL].tokenizer.name), TINY_TOKENIZER);
+  await writeFile(join(spec.dir, COMPLETE_MARKER), completeMarkerValue(spec));
   return root;
 }
 

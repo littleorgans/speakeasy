@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { Readable } from "node:stream";
 import { after, before, test } from "node:test";
 import {
@@ -134,8 +134,9 @@ test("an unpinned asset counts an existing sentinel as installed", async () => {
   assert.ok(!existsSync(join(spec.dir, COMPLETE_MARKER)));
 });
 
-const FILE_BYTES = { "encoder.onnx": Buffer.from("weights"), "tokens.txt": Buffer.from("a 0\n") };
+const FILE_BYTES = { "onnx/encoder.onnx": Buffer.from("weights"), "tokens.txt": Buffer.from("a 0\n") };
 type FileName = keyof typeof FILE_BYTES;
+const FILE_BASE = "https://example.invalid/model-y/";
 
 async function fileSetSpec(digests: Partial<Record<FileName, string>> = {}): Promise<FileSetSpec> {
   const root = await mkdtemp(join(work, "files-"));
@@ -143,19 +144,22 @@ async function fileSetSpec(digests: Partial<Record<FileName, string>> = {}): Pro
     dir: join(root, "model-y"),
     files: (Object.keys(FILE_BYTES) as FileName[]).map((name) => ({
       name,
-      url: `https://example.invalid/model-y/${name}`,
+      url: `${FILE_BASE}${name}`,
       sha256: digests[name] ?? createHash("sha256").update(FILE_BYTES[name]).digest("hex"),
+      bytes: FILE_BYTES[name].length,
     })),
   };
 }
 
-function servingFiles(): { fetch: FetchArchive; calls: string[] } {
+function servingFiles(
+  body: (name: FileName) => Buffer = (name) => FILE_BYTES[name],
+): { fetch: FetchArchive; calls: string[] } {
   const calls: string[] = [];
   return {
     calls,
     fetch: async (url) => {
       calls.push(url);
-      return Readable.from([FILE_BYTES[basename(url) as FileName]]);
+      return Readable.from([body(url.slice(FILE_BASE.length) as FileName)]);
     },
   };
 }
@@ -164,7 +168,7 @@ test("a file set downloads each pinned file, then marks every digest", async () 
   const spec = await fileSetSpec();
   const server = servingFiles();
   await ensureAsset(spec, server.fetch);
-  assert.equal(await readFile(join(spec.dir, "encoder.onnx"), "utf8"), "weights");
+  assert.equal(await readFile(join(spec.dir, "onnx/encoder.onnx"), "utf8"), "weights");
   assert.equal(await readFile(join(spec.dir, "tokens.txt"), "utf8"), "a 0\n");
   assert.equal(
     await readFile(join(spec.dir, COMPLETE_MARKER), "utf8"),
@@ -176,19 +180,41 @@ test("a file set downloads each pinned file, then marks every digest", async () 
 
 test("a file set keeps verified files and replaces a stale one", async () => {
   const spec = await fileSetSpec();
-  await mkdir(spec.dir, { recursive: true });
-  await writeFile(join(spec.dir, "encoder.onnx"), "weights");
+  await mkdir(join(spec.dir, "onnx"), { recursive: true });
+  await writeFile(join(spec.dir, "onnx/encoder.onnx"), "weights");
   await writeFile(join(spec.dir, "tokens.txt"), "stale");
   const server = servingFiles();
   await ensureAsset(spec, server.fetch);
-  assert.deepEqual(server.calls, ["https://example.invalid/model-y/tokens.txt"]);
+  assert.deepEqual(server.calls, [`${FILE_BASE}tokens.txt`]);
   assert.equal(await readFile(join(spec.dir, "tokens.txt"), "utf8"), "a 0\n");
+});
+
+test("a file set replaces a corrupt file of the pinned size", async () => {
+  const spec = await fileSetSpec();
+  await mkdir(join(spec.dir, "onnx"), { recursive: true });
+  await writeFile(join(spec.dir, "onnx/encoder.onnx"), "weight!");
+  const server = servingFiles();
+  await ensureAsset(spec, server.fetch);
+  assert.ok(server.calls.includes(`${FILE_BASE}onnx/encoder.onnx`));
+  assert.equal(await readFile(join(spec.dir, "onnx/encoder.onnx"), "utf8"), "weights");
+});
+
+test("a file set repeat after partial failure fetches only what is missing", async () => {
+  const spec = await fileSetSpec();
+  const tampered = servingFiles((name) =>
+    name === "tokens.txt" ? Buffer.from("tampered") : FILE_BYTES[name],
+  );
+  await assert.rejects(ensureAsset(spec, tampered.fetch), /Digest mismatch/);
+  const server = servingFiles();
+  await ensureAsset(spec, server.fetch);
+  assert.deepEqual(server.calls, [`${FILE_BASE}tokens.txt`]);
 });
 
 test("a file set digest mismatch fails closed without a marker", async () => {
   const spec = await fileSetSpec({ "tokens.txt": "0".repeat(64) });
   await assert.rejects(ensureAsset(spec, servingFiles().fetch), /Digest mismatch/);
-  assert.deepEqual((await readdir(spec.dir)).sort(), ["encoder.onnx"]);
+  assert.deepEqual((await readdir(spec.dir)).sort(), ["onnx"]);
+  assert.deepEqual(await readdir(join(spec.dir, "onnx")), ["encoder.onnx"]);
 });
 
 test("a file set drops the marker of another pin before changing files", async () => {

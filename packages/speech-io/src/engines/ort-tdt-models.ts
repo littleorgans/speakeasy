@@ -1,6 +1,6 @@
 import { join } from "node:path";
-import type { FileAssetSpec, PinnedFile } from "./file-assets.ts";
-import type { ModelLicence } from "./sherpa-models.ts";
+import type { FileSetSpec } from "./assets.ts";
+import type { ModelFile, ModelLicence } from "./sherpa-models.ts";
 
 /**
  * Registry of Parakeet TDT exports that run on onnxruntime-node rather than
@@ -47,7 +47,7 @@ type OrtTdtCommon = {
   name: string;
   note: string;
   /** Files at one pinned repository revision, under the model directory. */
-  files: readonly PinnedFile[];
+  files: readonly ModelFile[];
   licence: ModelLicence;
   /** Longest utterance a host should hold open for this model. */
   maxAudioMs: number;
@@ -105,8 +105,8 @@ const PHONON_BASE =
 const REDUX_BASE =
   "https://huggingface.co/eschmidbauer/parakeet-redux-onnx/resolve/1c285ba78d6f1880803f65355133a5ad3559a407";
 
-function pinned(base: string, path: string, bytes: number, sha256: string): PinnedFile {
-  return { path, url: `${base}/${path}`, sha256, bytes };
+function pinned(base: string, name: string, bytes: number, sha256: string): ModelFile {
+  return { name, url: `${base}/${name}`, sha256, bytes };
 }
 
 export const ORT_TDT_MODELS = {
@@ -221,6 +221,6 @@ export function downloadBytes(model: OrtTdtModel): number {
   return model.files.reduce((total, file) => total + file.bytes, 0);
 }
 
-export function resolveOrtTdtPaths(model: OrtTdtModel, root: string): FileAssetSpec {
+export function resolveOrtTdtPaths(model: OrtTdtModel, root: string): FileSetSpec {
   return { dir: join(root, model.name), files: model.files };
 }

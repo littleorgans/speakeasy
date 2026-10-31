@@ -79,8 +79,10 @@ export type AssetSpec = {
 export type AssetFile = {
   url: string;
   sha256: string;
-  /** File name inside `dir`. */
+  /** Path inside `dir`, `/` separated; folders are created as needed. */
   name: string;
+  /** Expected size; a file on disk of another size is refetched unhashed. */
+  bytes?: number;
 };
 
 /** A model published as loose files, each downloaded straight into `dir`. */
@@ -99,7 +101,8 @@ export type FetchArchive = (url: string) => Promise<Readable>;
  * temp folder beside `dir`, rename into place, and write the marker last, so
  * an interrupted run never leaves a directory that looks complete. A file set
  * verifies each file the same way, in place under `dir`, then writes the
- * marker.
+ * marker; verified files already there are kept, so a repeat after partial
+ * failure fetches only what is missing.
  */
 export async function ensureAsset(
   spec: AssetSpec | FileSetSpec,
@@ -139,12 +142,15 @@ async function ensureVerifiedFile(
   sha256: string | null,
   path: string,
   fetchArchive: FetchArchive,
+  bytes?: number,
 ): Promise<void> {
-  if (await hasNonEmptyFile(path)) {
+  const existing = await stat(path).catch(() => undefined);
+  if (existing?.size) {
     if (sha256 === null) {
       return;
     }
-    if ((await sha256File(path)) === sha256) {
+    const sizeMatches = bytes === undefined || existing.size === bytes;
+    if (sizeMatches && (await sha256File(path)) === sha256) {
       return;
     }
     await rm(path, { force: true });
@@ -202,7 +208,13 @@ async function installFileSet(
   // Drop a marker for other pins first: files change in place below.
   await rm(join(spec.dir, COMPLETE_MARKER), { force: true });
   for (const file of spec.files) {
-    await ensureVerifiedFile(file.url, file.sha256, join(spec.dir, file.name), fetchArchive);
+    await ensureVerifiedFile(
+      file.url,
+      file.sha256,
+      join(spec.dir, file.name),
+      fetchArchive,
+      file.bytes,
+    );
   }
   await writeFile(join(spec.dir, COMPLETE_MARKER), completeMarkerValue(spec), "utf8");
 }

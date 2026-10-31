@@ -28,9 +28,3 @@ export {
   loadOrtBinding,
   ORT_TDT_ROOT,
 } from "./engines/ort-tdt-runtime.ts";
-export {
-  ensureFileAsset,
-  isFileAssetComplete,
-  type FileAssetSpec,
-  type PinnedFile,
-} from "./engines/file-assets.ts";

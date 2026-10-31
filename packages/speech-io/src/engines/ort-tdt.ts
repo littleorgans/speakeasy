@@ -1,5 +1,5 @@
 import type { STTConfig, STTSession, VoiceToText } from "../contract.ts";
-import { ensureFileAsset, type FileAssetSpec } from "./file-assets.ts";
+import { ensureAsset, type FileSetSpec } from "./assets.ts";
 import { BufferedOfflineSession } from "./offline-session.ts";
 import { greedyTdt, tdtResult } from "./ort-tdt-decode.ts";
 import { loadTdtGraphs, type OrtBinding, type TdtGraphs } from "./ort-tdt-graphs.ts";
@@ -32,7 +32,7 @@ export type OrtTdtEngineOptions = {
 
 export class OrtTdtEngine implements VoiceToText {
   readonly model: OrtTdtModel;
-  readonly paths: FileAssetSpec;
+  readonly paths: FileSetSpec;
   readonly #binding: OrtBinding;
   #graphs: Promise<TdtGraphs> | undefined;
 
@@ -47,7 +47,7 @@ export class OrtTdtEngine implements VoiceToText {
   }
 
   async prepare(): Promise<void> {
-    await ensureFileAsset(this.paths);
+    await ensureAsset(this.paths);
   }
 
   async open(config?: STTConfig): Promise<STTSession> {

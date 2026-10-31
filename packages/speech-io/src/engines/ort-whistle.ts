@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import type { STTConfig, STTSession, VoiceToText } from "../contract.ts";
-import { ensureFileAsset, type FileAssetSpec } from "./file-assets.ts";
+import { ensureAsset, type FileSetSpec } from "./assets.ts";
 import { BufferedOfflineSession } from "./offline-session.ts";
 import { resultText, type ResultDetail } from "./result.ts";
 import { assertSampleRate, SHERPA_SAMPLE_RATE } from "./sherpa.ts";
@@ -49,7 +49,7 @@ export type OrtWhistleEngineOptions = {
 
 export class OrtWhistleEngine implements VoiceToText {
   readonly model: WhistleModel;
-  readonly paths: FileAssetSpec;
+  readonly paths: FileSetSpec;
   readonly #runtime: WhistleRuntime;
   #recognizer: Promise<WhistleRecognizer> | undefined;
   #decoding: Promise<unknown> = Promise.resolve();
@@ -65,7 +65,7 @@ export class OrtWhistleEngine implements VoiceToText {
   }
 
   async prepare(): Promise<void> {
-    await ensureFileAsset(this.paths);
+    await ensureAsset(this.paths);
   }
 
   async open(config?: STTConfig): Promise<STTSession> {
