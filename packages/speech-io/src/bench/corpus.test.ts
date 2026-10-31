@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -188,4 +189,29 @@ test("--json writes one parseable report; a single model column keys by engine d
   assert.equal(stdout.length, 1);
   assert.deepEqual(JSON.parse(stdout[0]!), report);
   assert.ok(log.some((line) => line.startsWith("model=sherpa stratum=all")));
+});
+
+test("the real --json CLI emits stable scoring data across repeated runs", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "speakeasy-corpus-"));
+  try {
+    await writeCorpus(dir);
+    const run = () => {
+      const result = spawnSync(process.execPath, [
+        "packages/speech-io/src/bench/run.ts", "--corpus", dir, "--engine", "stub", "--json",
+      ], { cwd: new URL("../../../../", import.meta.url), encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stderr, /model=stub stratum=all/);
+      const report = JSON.parse(result.stdout);
+      assert.deepEqual(Object.keys(report), [
+        "corpus", "sidecars", "labeled", "frameMs", "rewrite", "models", "utterances",
+      ]);
+      assert.deepEqual(report.utterances.map((row: { expected: string }) => row.expected), TAKES.map((take) => take.expected));
+      assert.ok(report.models[0].raw.all.caseSensitiveIdentifiers);
+      // Timings are measured anew; every other field and its order is stable.
+      return JSON.stringify(JSON.parse(result.stdout, (key, value) => key === "flushToFinalMs" ? undefined : value));
+    };
+    assert.equal(run(), run());
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
