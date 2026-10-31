@@ -9,7 +9,8 @@
     ".": "./src/index.ts",
     "./stt": "./src/stt.ts",
     "./ort": "./src/ort.ts",
-    "./ort-granite": "./src/ort-granite.ts"
+    "./ort-granite": "./src/ort-granite.ts",
+    "./ort-tdt": "./src/ort-tdt.ts"
   },
   "engines": {
     "node": ">=22.6.0"
