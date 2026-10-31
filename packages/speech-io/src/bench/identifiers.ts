@@ -11,16 +11,15 @@ import { alignWords } from "./transcript.ts";
  * "dev-up/down" and "dev up down" would collide. Raw tokens split on
  * whitespace and shed only sentence punctuation at their edges ("now." ->
  * "now", "gpt-6.1-sol." -> "gpt-6.1-sol"); a leading "." stays (".kilo").
- * Comparison ignores casing by default; caseSensitive retains the exact rate.
- * A reference identifier counts as
- * an error unless the raw word alignment matches it to an identical
- * hypothesis token.
+ * A reference identifier counts as an error unless the raw word alignment
+ * matches it to a hypothesis token equal ignoring casing; `caseSensitive`
+ * requires an identical token and gives the exact rate.
  */
 
 export type IdentifierScore = {
   /** Identifier tokens in the reference; the rate denominator. */
   identifiers: number;
-  /** Reference identifiers the hypothesis did not reproduce exactly. */
+  /** Reference identifiers the hypothesis did not reproduce. */
   errors: number;
   /** The missed reference identifiers, in reference order. */
   missed: string[];
