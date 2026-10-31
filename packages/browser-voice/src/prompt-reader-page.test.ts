@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import vm from "node:vm";
 import { HoldReleaseGate } from "../public/hold-release.js";
+import * as preRoll from "../public/pre-roll.js";
 import { feed, loadCapture } from "./capture-worklet-harness.ts";
 
 type PagePort = { onmessage?: (event: { data: unknown }) => void; postMessage(data: unknown): void };
@@ -88,7 +89,7 @@ function pageHarness({
     .replace(/^import .*;$/gm, "")
     .replace("void new PromptReaderPage().start();", "globalThis.Reader = PromptReaderPage;");
   const context = vm.createContext({
-    document, AudioContext, AudioWorkletNode, HoldReleaseGate,
+    ...preRoll, document, AudioContext, AudioWorkletNode, HoldReleaseGate,
     Float32Array, URLSearchParams,
     fetch: (url: string, init?: FetchInit) => {
       fetched.push(url);

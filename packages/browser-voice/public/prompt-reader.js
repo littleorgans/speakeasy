@@ -1,5 +1,6 @@
 import { CAPTURE_AUDIO_CONSTRAINTS } from "/capture-constraints.js";
 import { HoldReleaseGate } from "/hold-release.js";
+import { concat, PreRollRing } from "/pre-roll.js";
 
 /**
  * Prompt reader: walks a prompt set in id order and records one take per
@@ -19,8 +20,6 @@ import { HoldReleaseGate } from "/hold-release.js";
 
 const SAMPLE_RATE = 16_000;
 const MIN_TAKE_MS = 300;
-const PRE_ROLL_MS = 300;
-const PRE_ROLL_SAMPLES = (SAMPLE_RATE * PRE_ROLL_MS) / 1_000;
 const CLIP_LEVEL = 0.99;
 /** A transcript later than this shows as unavailable. */
 const TRANSCRIBE_TIMEOUT_MS = 15_000;
@@ -59,9 +58,8 @@ class PromptReaderPage {
     this.micGeneration = 0;
     this.source = null;
     this.frames = [];
-    /** Idle frames, the last PRE_ROLL_MS of them, that lead the next take. */
-    this.ring = [];
-    this.ringSamples = 0;
+    /** Idle frames that lead the next take. */
+    this.ring = new PreRollRing();
     this.preRollMs = 0;
     /** Flush requests the worklet has not answered yet. */
     this.flushes = 0;
@@ -210,10 +208,9 @@ class PromptReaderPage {
     const generation = this.micGeneration;
     // The ring holds only frames after the last take's flush reply, so the
     // pre roll is the one part of a take that may predate its press.
-    const preRoll = concat(this.ring).slice(-PRE_ROLL_SAMPLES);
+    const preRoll = this.ring.take();
     this.frames = [preRoll];
     this.preRollMs = Math.round((preRoll.length / SAMPLE_RATE) * 1_000);
-    this.clearRing();
     this.take = null;
     this.setStatus("Recording. Release when you finish the prompt.");
     try {
@@ -270,21 +267,7 @@ class PromptReaderPage {
     this.source = null;
     for (const track of this.stream?.getTracks() ?? []) track.stop();
     this.stream = null;
-    this.clearRing();
-  }
-
-  clearRing() {
-    this.ring = [];
-    this.ringSamples = 0;
-  }
-
-  /** Keeps the last PRE_ROLL_SAMPLES of idle audio, in whole frames. */
-  keepIdle(samples) {
-    this.ring.push(samples);
-    this.ringSamples += samples.length;
-    while (this.ringSamples - this.ring[0].length >= PRE_ROLL_SAMPLES) {
-      this.ringSamples -= this.ring.shift().length;
-    }
+    this.ring.clear();
   }
 
   // Frames before a flush reply belong to the take that ended: the draining
@@ -297,7 +280,7 @@ class PromptReaderPage {
     if (this.flushes === 0) {
       if (!this.stream) return;
       if (this.gate.capturing) this.frames.push(data.samples);
-      else this.keepIdle(data.samples);
+      else this.ring.push(data.samples);
       return;
     }
     if (this.draining && this.flushes === 1) this.frames.push(data.samples);
@@ -539,16 +522,6 @@ function diffWords(expected, heard) {
 
 function isSpace(event) {
   return event.code === "Space" || event.key === " ";
-}
-
-function concat(frames) {
-  const samples = new Float32Array(frames.reduce((sum, frame) => sum + frame.length, 0));
-  let offset = 0;
-  for (const frame of frames) {
-    samples.set(frame, offset);
-    offset += frame.length;
-  }
-  return samples;
 }
 
 function describeMicError(error) {
