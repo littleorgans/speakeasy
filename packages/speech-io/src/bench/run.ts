@@ -15,7 +15,11 @@ import {
   SOFT_THRESHOLD_MS,
 } from "./config.ts";
 import { runCorpusBench } from "./corpus.ts";
-import { parseSherpaModelId, SHERPA_MODELS } from "../engines/sherpa-models.ts";
+import {
+  parseSherpaModelId,
+  SHERPA_MODELS,
+  type SherpaModelId,
+} from "../engines/sherpa-models.ts";
 import {
   formatBoolean,
   formatEndpoint,
@@ -50,9 +54,11 @@ import { pacedFrames, readWavFrames, type WavAudio } from "./wav.ts";
 
 const USAGE = [
   "usage: pnpm bench --wav <path> [--engine stub|moonshine|sherpa] [--model <id>] [--mode sweep|ptt] [--runs <n>] [--frame-ms <n>]",
-  "       pnpm bench --corpus <dir> [--engine stub|moonshine|sherpa] [--model <id>] [--rewrite on|off] [--numbers digits|words|off] [--frame-ms <n>]  (WER scorer)",
+  "       pnpm bench --corpus <dir> [--engine stub|moonshine|sherpa] [--model <id> | --models <id,id,...>] [--rewrite on|off] [--numbers digits|words|off] [--json] [--frame-ms <n>]  (corpus scorer)",
   `       --model ids (sherpa only): ${Object.keys(SHERPA_MODELS).join(", ")}`,
-  "       --rewrite (corpus only): off=raw engine output, on=wrap with the rewrite decorator (domain rules + --numbers)",
+  "       --models (corpus only): one column per id over the same takes; implies --engine sherpa",
+  "       --rewrite (corpus only): off=raw engine output only (default), on=add a rewrite column (domain rules + --numbers)",
+  "       --json (corpus only): print the report as JSON on stdout; progress goes to stderr",
 ].join("\n");
 
 const options = parseArgs(process.argv.slice(2));
@@ -355,16 +361,24 @@ function parseArgs(args: string[]): CliOptions {
     mode: "sweep",
     rewrite: false,
     numbers: "off",
+    json: false,
   };
+  let engineGiven = false;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--engine") {
       options.engine = parseEngine(requireValue(args, index));
+      engineGiven = true;
       index += 1;
     } else if (arg === "--model") {
       options.model = parseSherpaModelId(requireValue(args, index));
       index += 1;
+    } else if (arg === "--models") {
+      options.models = parseModelList(requireValue(args, index));
+      index += 1;
+    } else if (arg === "--json") {
+      options.json = true;
     } else if (arg === "--wav") {
       options.wav = requireValue(args, index);
       index += 1;
@@ -397,6 +411,15 @@ function parseArgs(args: string[]): CliOptions {
   if (options.corpus && options.wav) {
     throw new Error(`Use --wav or --corpus, not both\n${USAGE}`);
   }
+  if (!options.corpus && (options.models || options.json)) {
+    throw new Error(`--models and --json apply to --corpus only\n${USAGE}`);
+  }
+  if (options.models && options.model) {
+    throw new Error(`Use --model or --models, not both\n${USAGE}`);
+  }
+  if (options.models && !engineGiven) {
+    options.engine = "sherpa";
+  }
 
   if (options.runs < DEFAULT_RUNS) {
     throw new Error(`--runs must be at least ${DEFAULT_RUNS}`);
@@ -411,6 +434,14 @@ function requireValue(args: string[], index: number): string {
     throw new Error(`Missing value for ${args[index]}`);
   }
   return value;
+}
+
+function parseModelList(value: string): SherpaModelId[] {
+  const ids = value.split(",").map((id) => parseSherpaModelId(id.trim()));
+  if (new Set(ids).size !== ids.length) {
+    throw new Error(`--models lists a model twice: ${value}`);
+  }
+  return ids;
 }
 
 function parseEngine(value: string): EngineName {

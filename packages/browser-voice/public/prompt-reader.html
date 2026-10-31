@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#11120f" />
+    <title>Speak Easy · Prompt reader</title>
+    <link rel="stylesheet" href="/prompt-reader.css" />
+    <script src="/prompt-reader.js" type="module"></script>
+  </head>
+  <body data-state="loading">
+    <header class="bar">
+      <strong>Prompt reader</strong>
+      <span id="progress" aria-live="polite">Loading prompts</span>
+    </header>
+
+    <main class="reader">
+      <p class="meta" id="prompt-meta"></p>
+      <p class="prompt" id="prompt-text"></p>
+      <meter id="level" min="0" max="0.5" value="0" aria-label="Microphone level"></meter>
+      <p class="status" id="status" aria-live="polite"></p>
+      <div class="controls">
+        <button id="record" type="button">Hold to record <kbd>Space</kbd></button>
+        <button id="save" type="button" disabled>Save and next <kbd>Enter</kbd></button>
+        <button id="previous" type="button">Previous <kbd>←</kbd></button>
+        <button id="next" type="button">Skip <kbd>→</kbd></button>
+      </div>
+    </main>
+
+    <footer class="bar">
+      <span>Takes save to</span>
+      <code id="output"></code>
+    </footer>
+  </body>
+</html>

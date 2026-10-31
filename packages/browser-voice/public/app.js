@@ -1,3 +1,4 @@
+import { CAPTURE_AUDIO_CONSTRAINTS } from "/capture-constraints.js";
 import { HoldReleaseGate } from "/hold-release.js";
 
 const AUDIO_HEADER_BYTES = 9;
@@ -486,10 +487,7 @@ class SpeakEasyRoom {
     this.micStream = await navigator.mediaDevices.getUserMedia({
       audio: {
         ...(device ? { deviceId: { exact: device } } : {}),
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
+        ...CAPTURE_AUDIO_CONSTRAINTS,
       },
     });
     const context = new AudioContext({ latencyHint: "interactive" });

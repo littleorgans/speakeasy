@@ -43,6 +43,8 @@ export type WordAlignment = {
   insertions: string[];
   /** Reference words missing from the hypothesis. */
   deletions: string[];
+  /** Indices of reference words aligned to an identical hypothesis word. */
+  matchedReference: number[];
 };
 
 /**
@@ -63,8 +65,14 @@ export function wordErrorAlignment(
   text: string,
   expected: string,
 ): WordAlignment {
-  const actual = toWords(text);
-  const reference = toWords(expected);
+  return alignWords(toWords(text), toWords(expected));
+}
+
+/**
+ * Levenshtein alignment over caller-tokenized words, for scorers that need
+ * their own tokenization (the identifier rate scores raw tokens).
+ */
+export function alignWords(actual: string[], reference: string[]): WordAlignment {
   const matrix = buildDistanceMatrix(actual, reference);
   return {
     errors: matrix[reference.length]![actual.length]!,
@@ -100,10 +108,11 @@ function backtrackEdits(
   matrix: number[][],
   actual: string[],
   reference: string[],
-): Pick<WordAlignment, "substitutions" | "insertions" | "deletions"> {
+): Omit<WordAlignment, "errors" | "referenceWords"> {
   const substitutions: WordSubstitution[] = [];
   const insertions: string[] = [];
   const deletions: string[] = [];
+  const matchedReference: number[] = [];
   let row = reference.length;
   let col = actual.length;
 
@@ -115,6 +124,7 @@ function backtrackEdits(
       reference[row - 1] === actual[col - 1] &&
       cost === matrix[row - 1]![col - 1]!
     ) {
+      matchedReference.push(row - 1);
       row -= 1;
       col -= 1;
     } else if (row > 0 && col > 0 && cost === matrix[row - 1]![col - 1]! + 1) {
@@ -136,7 +146,8 @@ function backtrackEdits(
   substitutions.reverse();
   insertions.reverse();
   deletions.reverse();
-  return { substitutions, insertions, deletions };
+  matchedReference.reverse();
+  return { substitutions, insertions, deletions, matchedReference };
 }
 
 function toWords(text: string): string[] {

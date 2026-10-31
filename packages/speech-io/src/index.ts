@@ -86,8 +86,10 @@ export { upsertReportSection } from "./bench/report.ts";
 export {
   DEFAULT_CORPUS_DIR,
   readCorpusEntries,
+  saveCorpusPair,
   type CorpusEntry,
   type CorpusSidecar,
+  type CorpusSidecarMeta,
 } from "./corpus/store.ts";
 
 // Bench formatting + stats helpers, reused for latency reporting.
