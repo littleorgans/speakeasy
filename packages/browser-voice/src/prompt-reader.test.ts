@@ -200,12 +200,13 @@ test("malformed prompt sets are refused", async () => {
       [{ prompts: [] }, /items array/],
       [{ items: [{ id: "p001", stratum: "short", text: " " }] }, /non-empty text/],
       [{ items: [PROMPTS.items[0], PROMPTS.items[0]] }, /unique/],
+      [{ items: [{ id: "p.001", stratum: "short", text: "read this" }] }, /items\[0\] id "p\.001" must match/],
     ] as const) {
       await writeFile(promptsPath, JSON.stringify(content));
-      await assert.rejects(
-        startBrowserVoiceServer({ port: 0, promptReader: { promptsPath, outputDir: join(root, "takes") } }),
-        pattern,
-      );
+      // Close even an incorrectly accepted host, so the regression terminates.
+      const starting = startBrowserVoiceServer({ port: 0, promptReader: { promptsPath, outputDir: join(root, "takes") } });
+      await starting.then((host) => host.close(), () => {});
+      await assert.rejects(starting, pattern);
     }
   } finally {
     await rm(root, { recursive: true, force: true });

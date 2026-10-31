@@ -1,7 +1,7 @@
 import { readFile, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readCorpusEntries, saveCorpusPair } from "@speakeasy/speech-io";
+import { PROMPT_ID, readCorpusEntries, saveCorpusPair } from "@speakeasy/speech-io";
 
 /**
  * Prompt reader: the owner reads a prompt set aloud in the browser, one take
@@ -139,6 +139,9 @@ function parsePromptSet(
     const { id, stratum, text } = (item ?? {}) as Record<string, unknown>;
     if (typeof id !== "string" || typeof stratum !== "string" || typeof text !== "string" || !text.trim()) {
       throw new Error(`${path}: items[${index}] needs string id, stratum and non-empty text`);
+    }
+    if (!PROMPT_ID.test(id)) {
+      throw new Error(`${path}: items[${index}] id ${JSON.stringify(id)} must match ${PROMPT_ID} so its take can be saved`);
     }
     return { id, stratum, text };
   });
