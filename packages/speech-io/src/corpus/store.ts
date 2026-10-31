@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { access, link, mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { encodeWavPcm16 } from "../bench/wav.ts";
 
@@ -75,9 +75,16 @@ export async function saveCorpusPair(
   for (let attempt = 1; ; attempt += 1) {
     const stem = attempt === 1 ? base : `${base}-${attempt}`;
     const wavPath = join(dir, `${stem}.wav`);
+    const sidecarPath = join(dir, `${stem}.json`);
+    try {
+      await access(sidecarPath);
+      continue;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
     try {
       // wx claims the stem atomically; a same-millisecond collision retries.
-      await writeFile(wavPath, wavBytes, { flag: "wx" });
+      await writeFile(wavPath, wavBytes, { flag: "wx", flush: true });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "EEXIST") {
         continue;
@@ -98,8 +105,17 @@ export async function saveCorpusPair(
       device: meta.device,
       peakLevel: meta.peakLevel,
     };
-    const sidecarPath = join(dir, `${stem}.json`);
-    await writeFile(sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`);
+    // The final sidecar is the commit marker. A crash leaves an unlisted
+    // wav or .part, preserving earlier pairs and reserving this stem on retry.
+    const pendingPath = `${sidecarPath}.part`;
+    await writeFile(pendingPath, `${JSON.stringify(sidecar, null, 2)}\n`, { flag: "wx", flush: true });
+    try {
+      await link(pendingPath, sidecarPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") continue;
+      throw error;
+    }
+    await unlink(pendingPath);
     return { wavPath, sidecarPath };
   }
 }

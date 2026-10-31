@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -109,5 +110,55 @@ test("prompt ids that are not path safe never reach the filesystem", async () =>
       saveCorpusPair(dir, [new Float32Array(320)], 16_000, { ...META, promptId: "../escape" }),
       /promptId must match/,
     );
+  });
+});
+
+test("concurrent same timestamp retakes keep every pair", async () => {
+  await withCorpus(async (dir) => {
+    const saved = await Promise.all([0.1, 0.2, 0.3].map((value) =>
+      saveCorpusPair(dir, [new Float32Array(320).fill(value)], 16_000, { ...META, promptId: "p042" }),
+    ));
+    assert.equal(new Set(saved.map((pair) => pair.wavPath)).size, 3);
+    assert.equal((await readCorpusEntries(dir)).length, 3);
+  });
+});
+
+test("a crash during sidecar write keeps prior takes readable and retry never overwrites", async () => {
+  await withCorpus(async (dir) => {
+    const first = await saveCorpusPair(dir, [new Float32Array(320).fill(0.1)], 16_000, META);
+    const original = await readFile(first.wavPath);
+    const script = `
+      import fs from "node:fs/promises";
+      import { syncBuiltinESMExports } from "node:module";
+      const write = fs.writeFile;
+      fs.writeFile = async (path, data, options) => {
+        if (/\\.json(?:\\.part)?$/.test(String(path))) {
+          await write(path, String(data).slice(0, 20), options);
+          process.kill(process.pid, "SIGKILL");
+        }
+        return write(path, data, options);
+      };
+      syncBuiltinESMExports();
+      const { saveCorpusPair } = await import(${JSON.stringify(new URL("./store.ts", import.meta.url).href)});
+      await saveCorpusPair(${JSON.stringify(dir)}, [new Float32Array(320).fill(0.2)], 16000, ${JSON.stringify(META)});
+    `;
+    const crash = spawnSync(process.execPath, ["--input-type=module", "-"], { input: script, encoding: "utf8" });
+    assert.equal(crash.signal, "SIGKILL", crash.stderr);
+    assert.equal((await readCorpusEntries(dir)).length, 1);
+    const retry = await saveCorpusPair(dir, [new Float32Array(320).fill(0.3)], 16_000, META);
+    assert.notEqual(retry.wavPath, first.wavPath);
+    assert.deepEqual(await readFile(first.wavPath), original);
+    assert.equal((await readCorpusEntries(dir)).length, 2);
+  });
+});
+
+test("an existing sidecar without its wav is never overwritten by a retake", async () => {
+  await withCorpus(async (dir) => {
+    const first = await saveCorpusPair(dir, [new Float32Array(320)], 16_000, META);
+    const original = await readFile(first.sidecarPath, "utf8");
+    await rm(first.wavPath);
+    const retry = await saveCorpusPair(dir, [new Float32Array(320)], 16_000, { ...META, expected: "new label" });
+    assert.notEqual(retry.sidecarPath, first.sidecarPath);
+    assert.equal(await readFile(first.sidecarPath, "utf8"), original);
   });
 });
