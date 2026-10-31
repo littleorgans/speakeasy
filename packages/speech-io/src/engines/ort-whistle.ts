@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import type { STTConfig, STTSession, VoiceToText } from "../contract.ts";
 import { ensureAsset, type FileSetSpec } from "./assets.ts";
-import { BufferedOfflineSession } from "./offline-session.ts";
+import { BufferedOfflineSession, type SilenceGate } from "./offline-session.ts";
 import { resultText, type ResultDetail } from "./result.ts";
 import { assertSampleRate, SHERPA_SAMPLE_RATE } from "./sherpa.ts";
 import {
@@ -49,12 +49,15 @@ export type OrtWhistleEngineOptions = {
   /** Folder holding downloaded models. */
   modelRoot: string;
   runtime: WhistleRuntime;
+  /** The silence gate every session runs before decode. */
+  silenceGate?: SilenceGate;
 };
 
 export class OrtWhistleEngine implements VoiceToText {
   readonly model: WhistleModel;
   readonly paths: FileSetSpec;
   readonly #runtime: WhistleRuntime;
+  readonly #silenceGate: SilenceGate | undefined;
   #recognizer: Promise<WhistleRecognizer> | undefined;
   #decoding: Promise<unknown> = Promise.resolve();
 
@@ -62,6 +65,7 @@ export class OrtWhistleEngine implements VoiceToText {
     this.model = resolveWhistleModel(options.model);
     this.paths = resolveWhistleFiles(this.model, options.modelRoot);
     this.#runtime = options.runtime;
+    this.#silenceGate = options.silenceGate;
   }
 
   get label(): string {
@@ -81,10 +85,13 @@ export class OrtWhistleEngine implements VoiceToText {
     const recognizer = await this.#load();
     const language = supportedLanguage(this.model, config?.language);
     const maxSamples = (this.model.maxAudioMs * SHERPA_SAMPLE_RATE) / 1_000;
-    return new BufferedOfflineSession(maxSamples, (audio) =>
-      this.#serialized(async () =>
-        whistleDetail(await recognizer.transcribe(audio, language)),
-      ),
+    return new BufferedOfflineSession(
+      maxSamples,
+      (audio) =>
+        this.#serialized(async () =>
+          whistleDetail(await recognizer.transcribe(audio, language)),
+        ),
+      this.#silenceGate,
     );
   }
 

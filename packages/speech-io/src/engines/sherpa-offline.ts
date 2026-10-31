@@ -1,5 +1,5 @@
 import type { STTConfig, STTSession, VoiceToText } from "../contract.ts";
-import { BufferedOfflineSession } from "./offline-session.ts";
+import { BufferedOfflineSession, type SilenceGate } from "./offline-session.ts";
 import { resultDetail } from "./result.ts";
 import {
   assertSampleRate,
@@ -29,6 +29,7 @@ import { resolveSherpaModel, type OfflineSherpaModel } from "./sherpa-models.ts"
 export class SherpaOfflineEngine implements VoiceToText {
   readonly #asset: SherpaModelAsset<OfflineSherpaModel>;
   readonly #binding: SherpaBinding;
+  readonly #silenceGate: SilenceGate | undefined;
   #recognizer: OfflineRecognizer | undefined;
 
   constructor(options: SherpaEngineOptions) {
@@ -40,6 +41,7 @@ export class SherpaOfflineEngine implements VoiceToText {
     }
     this.#asset = new SherpaModelAsset(model, options);
     this.#binding = options.binding;
+    this.#silenceGate = options.silenceGate;
   }
 
   get label(): string {
@@ -67,11 +69,15 @@ export class SherpaOfflineEngine implements VoiceToText {
     );
     const recognizer = this.#recognizer;
     const maxSamples = (this.model.maxAudioMs * SHERPA_SAMPLE_RATE) / 1_000;
-    return new BufferedOfflineSession(maxSamples, async (audio) => {
-      const stream = recognizer.createStream();
-      stream.acceptWaveform({ samples: audio, sampleRate: SHERPA_SAMPLE_RATE });
-      return resultDetail(await recognizer.decodeAsync(stream));
-    });
+    return new BufferedOfflineSession(
+      maxSamples,
+      async (audio) => {
+        const stream = recognizer.createStream();
+        stream.acceptWaveform({ samples: audio, sampleRate: SHERPA_SAMPLE_RATE });
+        return resultDetail(await recognizer.decodeAsync(stream));
+      },
+      this.#silenceGate,
+    );
   }
 }
 

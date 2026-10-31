@@ -10,7 +10,7 @@ import {
   graniteFeatureFrames,
   graniteFeatures,
 } from "./granite-frontend.ts";
-import { BufferedOfflineSession } from "./offline-session.ts";
+import { BufferedOfflineSession, type SilenceGate } from "./offline-session.ts";
 import type { CtcGraph, CtcRuntime } from "./ort-ctc-runtime.ts";
 import {
   resolveGraniteFiles,
@@ -45,6 +45,8 @@ export type OrtGraniteEngineOptions = {
   runtime: CtcRuntime;
   /** Tests inject a fake download. */
   fetchFile?: FetchArchive;
+  /** The silence gate every session runs before decode. */
+  silenceGate?: SilenceGate;
 };
 
 type LoadedModel = { graph: CtcGraph; vocab: ByteLevelVocab };
@@ -54,6 +56,7 @@ export class OrtGraniteEngine implements VoiceToText {
   readonly #files: FileSetSpec;
   readonly #runtime: CtcRuntime;
   readonly #fetchFile: FetchArchive | undefined;
+  readonly #silenceGate: SilenceGate | undefined;
   #loaded: Promise<LoadedModel> | undefined;
 
   constructor(options: OrtGraniteEngineOptions) {
@@ -61,6 +64,7 @@ export class OrtGraniteEngine implements VoiceToText {
     this.#files = resolveGraniteFiles(this.model, options.modelRoot);
     this.#runtime = options.runtime;
     this.#fetchFile = options.fetchFile;
+    this.#silenceGate = options.silenceGate;
   }
 
   get label(): string {
@@ -79,7 +83,11 @@ export class OrtGraniteEngine implements VoiceToText {
     assertSampleRate("OrtGraniteEngine", config);
     const loaded = await this.#load();
     const maxSamples = (this.model.maxAudioMs * SHERPA_SAMPLE_RATE) / 1_000;
-    return new BufferedOfflineSession(maxSamples, (audio) => transcribe(loaded, audio));
+    return new BufferedOfflineSession(
+      maxSamples,
+      (audio) => transcribe(loaded, audio),
+      this.#silenceGate,
+    );
   }
 
   /** One graph serves every session; a failed load is retried on next use. */

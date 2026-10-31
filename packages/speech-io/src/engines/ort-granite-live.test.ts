@@ -42,7 +42,7 @@ for (const id of Object.keys(GRANITE_MODELS) as GraniteModelId[]) {
     { skip: !LIVE || process.platform !== "darwin", timeout: 600_000 },
     async (t) => {
       const clip = await spokenClip();
-      const engine = createLocalOrtEngine(id);
+      const engine = await createLocalOrtEngine(id);
       const session = await engine.open();
       const decodeMs: number[] = [];
       for (let run = 0; run < 3; run += 1) {
@@ -56,7 +56,8 @@ for (const id of Object.keys(GRANITE_MODELS) as GraniteModelId[]) {
         decodeMs.push(Math.round(final.decodeMs ?? NaN));
         if (run === 0) t.diagnostic(`text: ${final.text} (audioMs ${final.audioMs})`);
       }
-      // Recorded, not asserted: the model emits filler words on silence.
+      // Recorded, not asserted: the model emits filler words on silence, and
+      // its silence gate (silence-gate-live.test.ts) answers empty instead.
       session.pushAudio(new Float32Array(32_000));
       session.flush();
       const silence = await Promise.race([

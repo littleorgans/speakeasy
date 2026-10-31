@@ -11,22 +11,55 @@ import { samplesToMs } from "./sherpa.ts";
  * dropped), and decoded once on flush(); decodes run in flush order, and
  * flush() always answers with `final` or `empty`. An empty hold never
  * reaches `decode`, so no native decoder is handed an empty waveform.
+ *
+ * An optional silence gate checks the hold for speech before decode, so a
+ * model that answers silence with words ("Thank you.") emits `empty`
+ * instead; a log probability floor then empties a final the model itself
+ * scores as unlikely. Models opt in on their descriptor (`silenceGate`); the
+ * host supplies the detector, which keeps this module free of native code.
  */
 
 export type DecodeAudio = (audio: Float32Array) => Promise<ResultDetail>;
 
+/** Whether a held utterance contains speech. */
+export type SpeechDetector = (audio: Float32Array) => boolean;
+
+/**
+ * A descriptor's opt in to the silence gate. `logProbFloor`, for models that
+ * score tokens, empties a final whose mean token log probability is below it.
+ */
+export type SilenceGatePolicy = { logProbFloor: number | null };
+
+/** The gate a session runs: the host's detector plus the model's floor. */
+export type SilenceGate = SilenceGatePolicy & { hasSpeech: SpeechDetector };
+
+/** "model" follows the descriptor; "on" and "off" override it, as the bench does. */
+export type SilenceGateMode = "model" | "on" | "off";
+
+/** Whether a model with `policy` gates under `mode`. */
+export function gatesSilence(
+  policy: SilenceGatePolicy | undefined,
+  mode: SilenceGateMode,
+): boolean {
+  return mode === "on" || (mode === "model" && policy !== undefined);
+}
+
+const EMPTY: ResultDetail = { text: "", tokens: [] };
+
 export class BufferedOfflineSession extends EventEmitter implements STTSession {
   readonly #maxSamples: number;
   readonly #decodeAudio: DecodeAudio;
+  readonly #gate: SilenceGate | undefined;
   #frames: Float32Array[] = [];
   #samples = 0;
   #closed = false;
   #decoding: Promise<void> = Promise.resolve();
 
-  constructor(maxSamples: number, decodeAudio: DecodeAudio) {
+  constructor(maxSamples: number, decodeAudio: DecodeAudio, gate?: SilenceGate) {
     super();
     this.#maxSamples = maxSamples;
     this.#decodeAudio = decodeAudio;
+    this.#gate = gate;
   }
 
   pushAudio(frame: Float32Array): void {
@@ -92,8 +125,7 @@ export class BufferedOfflineSession extends EventEmitter implements STTSession {
     explicit: boolean,
   ): Promise<void> {
     try {
-      const detail =
-        audio.length === 0 ? { text: "", tokens: [] } : await this.#decodeAudio(audio);
+      const detail = await this.#gatedDecode(audio);
       const timing = {
         audioMs: samplesToMs(audio.length),
         decodeMs: performance.now() - startedAt,
@@ -107,4 +139,22 @@ export class BufferedOfflineSession extends EventEmitter implements STTSession {
       this.emit("error", { err });
     }
   }
+
+  async #gatedDecode(audio: Float32Array): Promise<ResultDetail> {
+    const gate = this.#gate;
+    if (audio.length === 0 || (gate && !gate.hasSpeech(audio))) {
+      return EMPTY;
+    }
+    const detail = await this.#decodeAudio(audio);
+    if (gate && gate.logProbFloor !== null && belowFloor(detail, gate.logProbFloor)) {
+      return EMPTY;
+    }
+    return detail;
+  }
+}
+
+/** Mean log probability of the scored tokens under `floor`; unscored never is. */
+function belowFloor({ tokens }: ResultDetail, floor: number): boolean {
+  const scored = tokens.flatMap((token) => (token.logProb === null ? [] : [token.logProb]));
+  return scored.length > 0 && scored.reduce((sum, value) => sum + value, 0) / scored.length < floor;
 }

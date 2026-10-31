@@ -5,7 +5,8 @@ import { DEFAULT_RULES } from "../rewrite/rules.ts";
 import { formatMs } from "./format.ts";
 import { createEngine, runPttOnce } from "./harness.ts";
 import { scoreIdentifiers } from "./identifiers.ts";
-import type { BenchModelId } from "./models.ts";
+import type { SilenceGateMode } from "../engines/offline-session.ts";
+import { isOfflineBenchModel, type BenchModelId } from "./models.ts";
 import { median } from "./stats.ts";
 import { wordErrorAlignment, type WordSubstitution } from "./transcript.ts";
 import type { BenchEngine, CliOptions } from "./types.ts";
@@ -24,6 +25,10 @@ import { readWavFrames } from "./wav.ts";
  * through `rewriteText`, the function the production `withRewrite` decorator
  * applies, so raw and rewritten scores never differ by decoder noise.
  *
+ * Offline models score twice, with the silence gate off (column `<id>`) and
+ * on (column `<id>+gate`), whatever their descriptor ships, so the report
+ * shows what the gate costs on speech and saves on silence.
+ *
  * Release point: the last frame of the capture. Demo recordings end at the
  * release keypress by construction, so end-of-file IS the strict release.
  * The bench's RMS speech-end reference is deliberately not used here: its
@@ -39,6 +44,7 @@ export type CorpusBenchDeps = {
   /** Engine for one model column; undefined is the engine's default model. */
   createEngine: (
     model: BenchModelId | undefined,
+    gate: SilenceGateMode,
   ) => BenchEngine | Promise<BenchEngine>;
   /** Human-readable lines; stderr under --json so stdout is only the report. */
   log: (line: string) => void;
@@ -92,8 +98,11 @@ export type ScoreTable = {
 };
 
 export type ModelSummary = {
+  /** Column key: registry id, engine name for its default, `+gate` when gated. */
   model: string;
   engineLabel: string;
+  /** Silence gate of an offline model's column; null for engines without one. */
+  gate: "on" | "off" | null;
   /** The engine's thread setting, null when its runtime picks. */
   threads: number | null;
   raw: ScoreTable;
@@ -125,7 +134,7 @@ export async function runCorpusBench(
   const writeJson =
     deps.writeJson ?? ((json: string) => process.stdout.write(`${json}\n`));
   const openEngine =
-    deps.createEngine ?? ((model) => createEngine(options.engine, model));
+    deps.createEngine ?? ((model, gate) => createEngine(options.engine, model, gate));
   const rewrite: RewriteConfig | null = options.rewrite
     ? { rules: DEFAULT_RULES, numbers: options.numbers }
     : null;
@@ -158,21 +167,25 @@ export async function runCorpusBench(
     );
   }
 
-  for (const model of labeled.length > 0 ? (options.models ?? [options.model]) : []) {
-    const engine = await openEngine(model);
+  const models = labeled.length > 0 ? (options.models ?? [options.model]) : [];
+  const columns = models.flatMap((model) => gateColumns(model, options.engine));
+  for (const { model, gate, column } of columns) {
+    const engine = await openEngine(model, gate);
     await engine.prepare?.();
-    const column = model ?? options.engine;
     const engineLabel = engine.label ?? options.engine;
     const threads = engine.threads ?? null;
+    const gateLabel = gate === "model" ? null : gate;
     log(
-      `model=${column} engine=${engineLabel} threads=${threads ?? "runtime-default"} endpoint=manual cadence=${options.frameMs}ms/frame release=end-of-capture rewrite=${rewrite ? `column(rules=${rewrite.rules.length},numbers=${rewrite.numbers})` : "off"}`,
+      `model=${column} engine=${engineLabel} threads=${threads ?? "runtime-default"} gate=${gateLabel ?? "n/a"} endpoint=manual cadence=${options.frameMs}ms/frame release=end-of-capture rewrite=${rewrite ? `column(rules=${rewrite.rules.length},numbers=${rewrite.numbers})` : "off"}`,
     );
     for (const [index, entry] of labeled.entries()) {
       const row = report.utterances[index]!;
       row.models[column] = await scoreTake(engine, entry, options.frameMs, rewrite);
       log(formatTake(column, row));
     }
-    report.models.push(summarize(column, engineLabel, threads, report.utterances));
+    report.models.push(
+      summarize({ column, engineLabel, gate: gateLabel, threads }, report.utterances),
+    );
   }
 
   for (const summary of report.models) {
@@ -182,6 +195,19 @@ export async function runCorpusBench(
     writeJson(JSON.stringify(report, null, 2));
   }
   return report;
+}
+
+type Column = { model: BenchModelId | undefined; gate: SilenceGateMode; column: string };
+
+/** An offline model's gate off and gate on columns; one column otherwise. */
+function gateColumns(model: BenchModelId | undefined, engine: string): Column[] {
+  if (model && isOfflineBenchModel(model)) {
+    return [
+      { model, gate: "off", column: model },
+      { model, gate: "on", column: `${model}+gate` },
+    ];
+  }
+  return [{ model, gate: "model", column: model ?? engine }];
 }
 
 async function scoreTake(
@@ -227,9 +253,9 @@ function scoreText(hypothesis: string, expected: string): TextScore {
 }
 
 function summarize(
-  column: string,
-  engineLabel: string,
-  threads: number | null,
+  { column, engineLabel, gate, threads }: Pick<ModelSummary, "engineLabel" | "gate" | "threads"> & {
+    column: string;
+  },
   rows: CorpusRow[],
 ): ModelSummary {
   const takes = rows.map((row) => ({ row, take: row.models[column]! }));
@@ -247,6 +273,7 @@ function summarize(
   return {
     model: column,
     engineLabel,
+    gate,
     threads,
     raw: tabulate(takes.map(({ row, take }) => ({ row, score: take.raw }))),
     rewrite: hasRewrite

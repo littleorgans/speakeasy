@@ -9,6 +9,7 @@ import { COMPLETE_MARKER, completeMarkerValue } from "./assets.ts";
 import { logitsFor, TINY_TOKENIZER } from "./ctc-test-support.ts";
 import type { CtcRuntime } from "./ort-ctc-runtime.ts";
 import { OrtGraniteEngine } from "./ort-granite.ts";
+import type { SilenceGate } from "./offline-session.ts";
 import { ORT_THREADS } from "./ort-models.ts";
 import {
   GRANITE_MODELS,
@@ -69,8 +70,8 @@ async function seededRoot(): Promise<string> {
   return root;
 }
 
-async function openSession(runtime = fakeRuntime()) {
-  const engine = new OrtGraniteEngine({ model: MODEL, modelRoot: await seededRoot(), runtime });
+async function openSession(runtime = fakeRuntime(), silenceGate?: SilenceGate) {
+  const engine = new OrtGraniteEngine({ model: MODEL, modelRoot: await seededRoot(), runtime, silenceGate });
   return { engine, runtime, session: await engine.open({ endpoint: { mode: "manual" } }) };
 }
 
@@ -99,6 +100,14 @@ test("an all blank decode is empty", async () => {
   session.flush();
   const [empty] = (await once(session, "empty")) as [EmptyEvent];
   assert.equal(empty.audioMs, 500);
+});
+
+test("a hold the silence gate finds silent never runs the graph", { timeout: 5_000 }, async () => {
+  const { runtime, session } = await openSession(fakeRuntime([[1, 1]]), { hasSpeech: () => false, logProbFloor: null });
+  session.pushAudio(new Float32Array(16_000));
+  session.flush();
+  await once(session, "empty");
+  assert.deepEqual(runtime.runs, []);
 });
 
 test("a hold below the graph minimum is empty without running the graph", async () => {

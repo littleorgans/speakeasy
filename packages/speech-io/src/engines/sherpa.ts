@@ -11,6 +11,7 @@ import type {
   VoiceToText,
 } from "../contract.ts";
 import { ensureAsset, type AssetSpec, type FileSetSpec } from "./assets.ts";
+import type { SilenceGate } from "./offline-session.ts";
 import { resultDetail, resultText } from "./result.ts";
 import type {
   Hotwords,
@@ -66,6 +67,8 @@ export type SherpaEngineOptions = {
    * modified_beam_search. Absent means greedy search.
    */
   hotwords?: Hotwords;
+  /** Offline models only: the silence gate every session runs before decode. */
+  silenceGate?: SilenceGate;
 };
 
 /** Shared by the streaming and offline engines. */

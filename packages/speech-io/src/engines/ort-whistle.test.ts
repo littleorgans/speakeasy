@@ -17,6 +17,7 @@ import {
   resolveWhistleFiles,
   type WhistleModelId,
 } from "./ort-whistle-models.ts";
+import type { SilenceGate } from "./offline-session.ts";
 import { ORT_THREADS } from "./ort-models.ts";
 import { LANGS, type TranscribeResult } from "./vendor/whistle/whistle.js";
 
@@ -76,8 +77,11 @@ async function seededRoot(): Promise<string> {
   return root;
 }
 
-async function engineWith(runtime: WhistleRuntime): Promise<OrtWhistleEngine> {
-  return new OrtWhistleEngine({ model: MODEL, modelRoot: await seededRoot(), runtime });
+async function engineWith(
+  runtime: WhistleRuntime,
+  silenceGate?: SilenceGate,
+): Promise<OrtWhistleEngine> {
+  return new OrtWhistleEngine({ model: MODEL, modelRoot: await seededRoot(), runtime, silenceGate });
 }
 
 test("a hold decodes once on flush to final with word tokens and timing", async () => {
@@ -122,6 +126,15 @@ test("a silent hold decodes to empty", async () => {
   session.flush();
   const [empty] = (await once(session, "empty")) as [EmptyEvent];
   assert.equal(empty.audioMs, 200);
+});
+
+test("a hold the silence gate finds silent never reaches the recognizer", { timeout: 5_000 }, async () => {
+  const runtime = fakeRuntime([said("Thank you.")]);
+  const session = await (await engineWith(runtime, { hasSpeech: () => false, logProbFloor: null })).open();
+  session.pushAudio(new Float32Array(16_000));
+  session.flush();
+  await once(session, "empty");
+  assert.deepEqual(runtime.calls, []);
 });
 
 test("a hold with no audio is empty without touching the recognizer", async () => {

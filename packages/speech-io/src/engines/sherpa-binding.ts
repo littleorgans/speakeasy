@@ -1,9 +1,21 @@
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { loadHotwords } from "./hotwords.ts";
+import {
+  gatesSilence,
+  type SilenceGate,
+  type SilenceGateMode,
+  type SilenceGatePolicy,
+  type SpeechDetector,
+} from "./offline-session.ts";
 import type { SherpaBinding } from "./sherpa-api.ts";
 import { createSherpaEngine, type AnySherpaEngine } from "./sherpa-factory.ts";
-import { DEFAULT_SHERPA_MODEL, type SherpaModelId } from "./sherpa-models.ts";
+import {
+  DEFAULT_SHERPA_MODEL,
+  resolveSherpaModel,
+  type SherpaModelId,
+} from "./sherpa-models.ts";
+import { loadSileroDetector, type VadBinding } from "./silero-vad.ts";
 
 /**
  * speak-easy's own sherpa wiring for the CLI paths (demo, bench, convo
@@ -22,11 +34,40 @@ export function loadSherpaBinding(): SherpaBinding {
 
 export async function createLocalSherpaEngine(
   model: SherpaModelId = DEFAULT_SHERPA_MODEL,
+  gate: SilenceGateMode = "model",
 ): Promise<AnySherpaEngine> {
+  const descriptor = resolveSherpaModel(model);
   return createSherpaEngine({
     model,
     modelRoot: SHERPA_ROOT,
     binding: loadSherpaBinding(),
     hotwords: await loadHotwords(),
+    silenceGate:
+      descriptor.kind === "offline"
+        ? await localSilenceGate(descriptor.silenceGate, gate)
+        : undefined,
   });
+}
+
+let detector: Promise<SpeechDetector> | undefined;
+
+/**
+ * The silence gate a local engine runs under `mode`, or none. Every engine
+ * shares one Silero detector, loaded on first use under SHERPA_ROOT.
+ */
+export async function localSilenceGate(
+  policy: SilenceGatePolicy | undefined,
+  mode: SilenceGateMode,
+): Promise<SilenceGate | undefined> {
+  if (!gatesSilence(policy, mode)) {
+    return undefined;
+  }
+  detector ??= loadSileroDetector(
+    loadSherpaBinding() as SherpaBinding & VadBinding,
+    SHERPA_ROOT,
+  ).catch((err: unknown) => {
+    detector = undefined;
+    throw err;
+  });
+  return { hasSpeech: await detector, logProbFloor: policy?.logProbFloor ?? null };
 }

@@ -1,6 +1,6 @@
 import type { STTConfig, STTSession, VoiceToText } from "../contract.ts";
 import { ensureAsset, type FileSetSpec } from "./assets.ts";
-import { BufferedOfflineSession } from "./offline-session.ts";
+import { BufferedOfflineSession, type SilenceGate } from "./offline-session.ts";
 import { greedyTdt, tdtResult } from "./ort-tdt-decode.ts";
 import { loadTdtGraphs, type OrtBinding, type TdtGraphs } from "./ort-tdt-graphs.ts";
 import {
@@ -29,18 +29,22 @@ export type OrtTdtEngineOptions = {
   /** Folder holding downloaded models, one directory each. */
   modelRoot: string;
   binding: OrtBinding;
+  /** The silence gate every session runs before decode. */
+  silenceGate?: SilenceGate;
 };
 
 export class OrtTdtEngine implements VoiceToText {
   readonly model: OrtTdtModel;
   readonly paths: FileSetSpec;
   readonly #binding: OrtBinding;
+  readonly #silenceGate: SilenceGate | undefined;
   #graphs: Promise<TdtGraphs> | undefined;
 
   constructor(options: OrtTdtEngineOptions) {
     this.model = resolveOrtTdtModel(options.model);
     this.paths = resolveOrtTdtPaths(this.model, options.modelRoot);
     this.#binding = options.binding;
+    this.#silenceGate = options.silenceGate;
   }
 
   get label(): string {
@@ -59,7 +63,11 @@ export class OrtTdtEngine implements VoiceToText {
     assertSampleRate("OrtTdtEngine", config);
     const graphs = await this.#load();
     const maxSamples = (this.model.maxAudioMs * SHERPA_SAMPLE_RATE) / 1_000;
-    return new BufferedOfflineSession(maxSamples, (audio) => this.#decode(graphs, audio));
+    return new BufferedOfflineSession(
+      maxSamples,
+      (audio) => this.#decode(graphs, audio),
+      this.#silenceGate,
+    );
   }
 
   /** Free the native sessions; a later open() loads them again. */

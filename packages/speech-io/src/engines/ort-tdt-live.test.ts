@@ -39,7 +39,7 @@ for (const id of Object.keys(ORT_TDT_MODELS) as OrtTdtModelId[]) {
     { skip: !LIVE || process.platform !== "darwin", timeout: 1_200_000 },
     async (t) => {
       const clip = await spokenClip();
-      const engine = createLocalOrtEngine(id);
+      const engine = await createLocalOrtEngine(id);
       const session = await engine.open();
       const decodeMs: number[] = [];
       for (let run = 0; run < 3; run += 1) {

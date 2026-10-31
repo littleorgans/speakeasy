@@ -41,7 +41,7 @@ for (const id of Object.keys(ORT_WHISTLE_MODELS) as WhistleModelId[]) {
     { skip: !LIVE || process.platform !== "darwin", timeout: 600_000 },
     async (t) => {
       const clip = await spokenClip();
-      const engine = createLocalOrtEngine(id);
+      const engine = await createLocalOrtEngine(id);
       const session = await engine.open({ language: "en" });
       const decodeMs: number[] = [];
       for (let run = 0; run < 3; run += 1) {

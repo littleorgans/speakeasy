@@ -18,6 +18,11 @@ export function isBenchModelId(value: string): value is BenchModelId {
   return isSherpaModelId(value) || isOrtModelId(value);
 }
 
+/** Offline models run in a BufferedOfflineSession, so they can gate silence. */
+export function isOfflineBenchModel(id: BenchModelId): boolean {
+  return isOrtModelId(id) || SHERPA_MODELS[id].kind === "offline";
+}
+
 /** Parse a CLI model id, or throw with the valid set. */
 export function parseBenchModelId(value: string): BenchModelId {
   if (isBenchModelId(value)) {

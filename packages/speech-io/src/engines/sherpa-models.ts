@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import type { AssetFile, AssetSpec, FileSetSpec } from "./assets.ts";
+import type { SilenceGatePolicy } from "./offline-session.ts";
 
 /**
  * Registry of sherpa-onnx STT models: streaming Zipformer transducers for
@@ -54,6 +55,12 @@ type ModelCommon = ModelSource & {
   maxAudioMs: number;
 };
 
+type OfflineCommon = ModelCommon & {
+  kind: "offline";
+  /** Opt in to the silence gate (`offline-session.ts::SilenceGate`). */
+  silenceGate?: SilenceGatePolicy;
+};
+
 type TransducerFiles = {
   encoder: string;
   decoder: string;
@@ -68,14 +75,12 @@ export type StreamingSherpaModel = ModelCommon &
     bpe?: string;
   };
 
-export type NemoTransducerModel = ModelCommon &
+export type NemoTransducerModel = OfflineCommon &
   TransducerFiles & {
-    kind: "offline";
     family: "nemo-transducer";
   };
 
-export type MoonshineModel = ModelCommon & {
-  kind: "offline";
+export type MoonshineModel = OfflineCommon & {
   family: "moonshine";
   preprocessor: string;
   encoder: string;
@@ -85,8 +90,7 @@ export type MoonshineModel = ModelCommon & {
 };
 
 /** NeMo Canary encoder decoder; transcribes `language` with punctuation. */
-export type CanaryModel = ModelCommon & {
-  kind: "offline";
+export type CanaryModel = OfflineCommon & {
   family: "canary";
   encoder: string;
   decoder: string;
@@ -95,8 +99,7 @@ export type CanaryModel = ModelCommon & {
 };
 
 /** Qwen3 ASR: its vocabulary is a tokenizer directory, not a tokens file. */
-export type Qwen3AsrModel = ModelCommon & {
-  kind: "offline";
+export type Qwen3AsrModel = OfflineCommon & {
   family: "qwen3-asr";
   convFrontend: string;
   encoder: string;

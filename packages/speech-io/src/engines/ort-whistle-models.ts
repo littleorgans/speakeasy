@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import type { FileSetSpec } from "./assets.ts";
+import type { SilenceGatePolicy } from "./offline-session.ts";
 import type { ModelFile, ModelLicence } from "./sherpa-models.ts";
 
 /**
@@ -34,6 +35,8 @@ export type WhistleModel = {
   maxAudioMs: number;
   /** onnxruntime intra op threads; omit for `ort-models.ts::ORT_THREADS`. */
   threads?: number;
+  /** Opt in to the silence gate (`offline-session.ts::SilenceGate`). */
+  silenceGate?: SilenceGatePolicy;
   encoder: string;
   decoder: string;
   pack: string;
@@ -65,6 +68,9 @@ export const ORT_WHISTLE_MODELS = {
     languages: ["en", "de", "fr", "es", "it", "nl", "pl"],
     // The original card's single pass window.
     maxAudioMs: 30_000,
+    // Answers silence and noise with "Thank you." as confidently as speech
+    // (mean word log probability -0.01 to -0.08), so no floor separates them.
+    silenceGate: { logProbFloor: null },
     encoder: "onnx/encoder.onnx",
     decoder: "onnx/decoder.onnx",
     pack: "whistle.pack",

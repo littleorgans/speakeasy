@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import type { FileSetSpec } from "./assets.ts";
+import type { SilenceGatePolicy } from "./offline-session.ts";
 import type { ModelFile, ModelLicence } from "./sherpa-models.ts";
 
 /**
@@ -32,6 +33,8 @@ export type GraniteCtcModel = {
   maxAudioMs: number;
   /** onnxruntime intra op threads; omit for `ort-models.ts::ORT_THREADS`. */
   threads?: number;
+  /** Opt in to the silence gate (`offline-session.ts::SilenceGate`). */
+  silenceGate?: SilenceGatePolicy;
 };
 
 export const GRANITE_MODELS = {
@@ -65,6 +68,9 @@ export const GRANITE_MODELS = {
     },
     // The export's validation covers clips up to 29.4 s.
     maxAudioMs: 30_000,
+    // Emits "thank", "yeah" or "okay" on zeros and noise at a mean token log
+    // probability of -0.52 or lower; spoken clips score -0.03 or higher.
+    silenceGate: { logProbFloor: -0.4 },
   },
 } as const satisfies Record<string, GraniteCtcModel>;
 

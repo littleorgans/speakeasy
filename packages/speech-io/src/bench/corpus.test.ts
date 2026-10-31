@@ -8,12 +8,14 @@ import { test } from "node:test";
 import type { STTSession } from "../contract.ts";
 import { saveCorpusPair, type CorpusSidecarMeta } from "../corpus/store.ts";
 import { NO_STRATUM, runCorpusBench, type CorpusBenchDeps } from "./corpus.ts";
+import type { SilenceGateMode } from "../engines/offline-session.ts";
 import type { BenchModelId } from "./models.ts";
 import type { BenchEngine, CliOptions } from "./types.ts";
 
 const FRAME_MS = 20;
 const MODEL_A: BenchModelId = "en-2023-06-21";
 const MODEL_B: BenchModelId = "en-kroko-2025-08-06";
+const OFFLINE: BenchModelId = "whistle-onnx-fp32";
 
 /** Takes in filename order: the schema 1 free take sorts before prompted ones. */
 const TAKES = [
@@ -26,6 +28,7 @@ const TAKES = [
 const HYPOTHESES: Record<string, string[]> = {
   [MODEL_A]: ["and so my fellow americans", "spawn ten agents", "OPEN .LILO/DOCS/INDEX.MD FIRST."],
   [MODEL_B]: ["and saw my fellow americans", "spawn 10 agents", "open lilo docs index md first"],
+  [OFFLINE]: ["and so my fellow americans", "spawn 10 agents", "Open .lilo/docs/index.md first."],
 };
 
 /** Commits the next scripted hypothesis on each flush, as a ptt engine does. */
@@ -105,20 +108,22 @@ function cliOptions(corpus: string, overrides: Partial<CliOptions>): CliOptions 
 async function bench(overrides: Partial<CliOptions>) {
   const dir = await mkdtemp(join(tmpdir(), "speakeasy-corpus-"));
   const created: Array<BenchModelId | undefined> = [];
+  const gates: SilenceGateMode[] = [];
   const stdout: string[] = [];
   const log: string[] = [];
   try {
     await writeCorpus(dir);
     const deps: CorpusBenchDeps = {
-      createEngine: (model) => {
+      createEngine: (model, gate) => {
         created.push(model);
+        gates.push(gate);
         return scriptedEngine(HYPOTHESES[model ?? MODEL_A]!);
       },
       log: (line) => log.push(line),
       writeJson: (json) => stdout.push(json),
     };
     const report = await runCorpusBench(cliOptions(dir, overrides), deps);
-    return { report, created, stdout, log };
+    return { report, created, gates, stdout, log };
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -146,6 +151,17 @@ test("every model decodes the same takes and rows pair up per utterance", async 
     assert.equal(typeof row.models[MODEL_A]?.flushToFinalMs, "number");
   }
   assert.equal(stdout.length, 0, "no JSON without --json");
+});
+
+test("an offline model scores a gate off and a gate on column from separate engines", async () => {
+  const { report, created, gates } = await bench({ models: [MODEL_A, OFFLINE] });
+  assert.deepEqual(created, [MODEL_A, OFFLINE, OFFLINE]);
+  assert.deepEqual(gates, ["model", "off", "on"]);
+  assert.deepEqual(
+    report.models.map((summary) => [summary.model, summary.gate]),
+    [[MODEL_A, null], [OFFLINE, "off"], [`${OFFLINE}+gate`, "on"]],
+  );
+  assert.deepEqual(Object.keys(report.utterances[0]!.models), [MODEL_A, OFFLINE, `${OFFLINE}+gate`]);
 });
 
 test("summaries split WER and the raw identifier rate by stratum", async () => {
@@ -210,6 +226,7 @@ test("the real --json CLI emits stable scoring data across repeated runs", async
       assert.deepEqual(report.utterances.map((row: { expected: string }) => row.expected), TAKES.map((take) => take.expected));
       assert.ok(report.models[0].raw.all.caseSensitiveIdentifiers);
       assert.equal(report.models[0].threads, null, "the stub sets no threads");
+      assert.equal(report.models[0].gate, null, "the stub has no silence gate");
       // Timings are measured anew; every other field and its order is stable.
       return JSON.stringify(JSON.parse(result.stdout, (key, value) => key === "flushToFinalMs" ? undefined : value));
     };

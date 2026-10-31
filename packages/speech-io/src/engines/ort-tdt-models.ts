@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import type { FileSetSpec } from "./assets.ts";
+import type { SilenceGatePolicy } from "./offline-session.ts";
 import type { ModelFile, ModelLicence } from "./sherpa-models.ts";
 
 /**
@@ -57,6 +58,8 @@ type OrtTdtCommon = {
    * `ort-models.ts::ORT_THREADS`. Per step graphs always run on one.
    */
   threads?: number;
+  /** Opt in to the silence gate (`offline-session.ts::SilenceGate`). */
+  silenceGate?: SilenceGatePolicy;
   decoding: TdtDecoding;
   encoder: string;
 };
@@ -175,6 +178,8 @@ export const ORT_TDT_MODELS = {
     },
     // Export card: audio longer than about 35 s should be cut at pauses.
     maxAudioMs: 35_000,
+    // Says "Okay." on low noise (evidence-ort-tdt).
+    silenceGate: { logProbFloor: null },
     decoding: PARAKEET_V3_TDT,
     preprocessor: "preprocessor-model.onnx",
     encoder: "encoder-model.int8.onnx",
@@ -202,6 +207,9 @@ export const ORT_TDT_MODELS = {
     },
     // The reference runner cuts recordings over 30 s at pauses.
     maxAudioMs: 30_000,
+    // Says "Mmm" on 3 s of zeros at a mean token log probability of -0.9;
+    // spoken clips score -0.08 or higher.
+    silenceGate: { logProbFloor: -0.4 },
     decoding: PARAKEET_V3_TDT,
     preprocessor: "preprocessor.onnx",
     encoder: "encoder-model.onnx",

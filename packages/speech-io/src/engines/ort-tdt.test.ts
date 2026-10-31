@@ -7,6 +7,7 @@ import { after, test } from "node:test";
 import type { EmptyEvent, FinalEvent } from "../contract.ts";
 import { COMPLETE_MARKER, completeMarkerValue } from "./assets.ts";
 import type { OrtBinding, OrtGraph, OrtTensor } from "./ort-tdt-graphs.ts";
+import type { SilenceGate } from "./offline-session.ts";
 import { ORT_THREADS } from "./ort-models.ts";
 import { OrtTdtEngine } from "./ort-tdt.ts";
 import {
@@ -158,9 +159,14 @@ async function seededRoot(id: OrtTdtModelId): Promise<string> {
   return root;
 }
 
-async function openSession(id: OrtTdtModelId, steps: Float32Array[] = []) {
+async function openSession(id: OrtTdtModelId, steps: Float32Array[] = [], silenceGate?: SilenceGate) {
   const fake: Fake = { runs: {}, steps, created: [], threads: {} };
-  const engine = new OrtTdtEngine({ model: id, modelRoot: await seededRoot(id), binding: fakeBinding(fake) });
+  const engine = new OrtTdtEngine({
+    model: id,
+    modelRoot: await seededRoot(id),
+    binding: fakeBinding(fake),
+    silenceGate,
+  });
   const session = await engine.open({ endpoint: { mode: "manual" } });
   return { engine, fake, session };
 }
@@ -223,6 +229,14 @@ test("split layout chunks the front end and runs the decoder per emitted token",
   assert.deepEqual([...(encoded!.length!.data as BigInt64Array)], [125n]);
   const tokens = fake.runs.decoder!.map((feeds) => (feeds.token!.data as BigInt64Array)[0]);
   assert.deepEqual(tokens, [BigInt(BLANK), 10n, 11n]);
+});
+
+test("a hold the silence gate finds silent never reaches the graphs", { timeout: 5_000 }, async () => {
+  const { fake, session } = await openSession("en-phonon-2-int8", [...OPEN_THE_FILE], { hasSpeech: () => false, logProbFloor: null });
+  session.pushAudio(new Float32Array(16_000));
+  session.flush();
+  await once(session, "empty");
+  assert.deepEqual(Object.values(fake.runs).flat(), []);
 });
 
 test("a silent hold decodes to empty", async () => {
