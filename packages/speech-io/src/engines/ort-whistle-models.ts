@@ -71,9 +71,13 @@ export const ORT_WHISTLE_MODELS = {
 
 export type WhistleModelId = keyof typeof ORT_WHISTLE_MODELS;
 
+export function isWhistleModelId(value: string): value is WhistleModelId {
+  return Object.hasOwn(ORT_WHISTLE_MODELS, value);
+}
+
 export function resolveWhistleModel(id: string): WhistleModel {
-  if (Object.hasOwn(ORT_WHISTLE_MODELS, id)) {
-    return ORT_WHISTLE_MODELS[id as WhistleModelId];
+  if (isWhistleModelId(id)) {
+    return ORT_WHISTLE_MODELS[id];
   }
   throw new Error(
     `Unknown Whistle model "${id}"; available: ${Object.keys(ORT_WHISTLE_MODELS).join(", ")}`,

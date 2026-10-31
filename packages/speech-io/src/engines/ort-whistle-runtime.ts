@@ -1,26 +1,15 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import * as ort from "onnxruntime-node";
-import {
-  OrtWhistleEngine,
-  type WhistleFiles,
-  type WhistleRecognizer,
-  type WhistleRuntime,
-} from "./ort-whistle.ts";
-import type { WhistleModelId } from "./ort-whistle-models.ts";
+import type { WhistleFiles, WhistleRecognizer, WhistleRuntime } from "./ort-whistle.ts";
 import { OrtBackend } from "./vendor/whistle/backend.js";
 import { parsePack } from "./vendor/whistle/pack.js";
 import { Engram, Tokenizer, transcribe } from "./vendor/whistle/whistle.js";
 
 /**
- * speak-easy's own Whistle wiring for the bench and CLI paths: onnxruntime-node
- * from this package's node_modules on the CPU provider with its default
- * threads, and models under the working directory. Loading follows the
- * reference `js/example.mjs` at the vendored revision.
+ * onnxruntime-node wiring for OrtWhistleEngine: the package from this
+ * package's node_modules on the CPU provider with its default threads.
+ * Loading follows the reference `js/example.mjs` at the vendored revision.
  */
-
-/** On-disk root for downloaded onnxruntime-node models. */
-export const ORT_ROOT = join(process.cwd(), "models", "ort");
 
 /** Mel filterbank shape packed in whistle.pack: 257 FFT bins x 80 mels. */
 const MEL_FILTERBANK_FLOATS = 257 * 80;
@@ -30,14 +19,6 @@ export function loadWhistleRuntime(): WhistleRuntime {
     version: ort.env.versions.node ?? "unknown",
     createRecognizer: createWhistleRecognizer,
   };
-}
-
-export function createLocalWhistleEngine(model: WhistleModelId): OrtWhistleEngine {
-  return new OrtWhistleEngine({
-    model,
-    modelRoot: ORT_ROOT,
-    runtime: loadWhistleRuntime(),
-  });
 }
 
 async function createWhistleRecognizer(files: WhistleFiles): Promise<WhistleRecognizer> {

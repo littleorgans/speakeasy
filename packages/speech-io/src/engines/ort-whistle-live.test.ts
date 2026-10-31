@@ -8,7 +8,7 @@ import { test } from "node:test";
 import type { FinalEvent } from "../contract.ts";
 import { readWavFrames } from "../bench/wav.ts";
 import { ORT_WHISTLE_MODELS, type WhistleModelId } from "./ort-whistle-models.ts";
-import { createLocalWhistleEngine } from "./ort-whistle-runtime.ts";
+import { createLocalOrtEngine } from "./ort-local.ts";
 
 /**
  * Live smoke: downloads each Whistle model into ./models/ort (run from the
@@ -41,7 +41,7 @@ for (const id of Object.keys(ORT_WHISTLE_MODELS) as WhistleModelId[]) {
     { skip: !LIVE || process.platform !== "darwin", timeout: 600_000 },
     async (t) => {
       const clip = await spokenClip();
-      const engine = createLocalWhistleEngine(id);
+      const engine = createLocalOrtEngine(id);
       const session = await engine.open({ language: "en" });
       const decodeMs: number[] = [];
       for (let run = 0; run < 3; run += 1) {

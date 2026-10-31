@@ -7,8 +7,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { FinalEvent } from "../contract.ts";
 import { readWavFrames } from "../bench/wav.ts";
-import { createLocalGraniteEngine } from "../ort-granite.ts";
 import { GRANITE_MODELS, type GraniteModelId } from "./ort-granite-models.ts";
+import { createLocalOrtEngine } from "./ort-local.ts";
 
 /**
  * Live smoke: downloads each Granite model into ./models/ort (run from the
@@ -42,7 +42,7 @@ for (const id of Object.keys(GRANITE_MODELS) as GraniteModelId[]) {
     { skip: !LIVE || process.platform !== "darwin", timeout: 600_000 },
     async (t) => {
       const clip = await spokenClip();
-      const engine = createLocalGraniteEngine(id);
+      const engine = createLocalOrtEngine(id);
       const session = await engine.open();
       const decodeMs: number[] = [];
       for (let run = 0; run < 3; run += 1) {

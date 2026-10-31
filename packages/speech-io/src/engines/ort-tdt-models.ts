@@ -43,6 +43,7 @@ export type MelConfig = {
 
 type OrtTdtCommon = {
   kind: "offline";
+  family: "parakeet-tdt";
   /** Directory name under the model root. */
   name: string;
   note: string;
@@ -112,6 +113,7 @@ function pinned(base: string, name: string, bytes: number, sha256: string): Mode
 export const ORT_TDT_MODELS = {
   "en-fluid-speech-mini": {
     kind: "offline",
+    family: "parakeet-tdt",
     layout: "split",
     name: "fluid-speech-mini-onnx",
     note: "FluidVoice Fluid Speech Mini, Parakeet TDT v3 derivative, 2 and 4 bit MatMulNBits, punctuation and case",
@@ -148,6 +150,7 @@ export const ORT_TDT_MODELS = {
   },
   "en-phonon-2-int8": {
     kind: "offline",
+    family: "parakeet-tdt",
     layout: "fused",
     name: "phonon-2-onnx-int8",
     note: "Fermion Research Phonon-2, Parakeet TDT v3 derivative, int8 encoder, punctuation and case",
@@ -175,6 +178,7 @@ export const ORT_TDT_MODELS = {
   },
   "en-parakeet-redux": {
     kind: "offline",
+    family: "parakeet-tdt",
     layout: "fused",
     name: "parakeet-redux-onnx",
     note: "Moondream Parakeet Redux, ternary Parakeet TDT v3 in 4 bit MatMulNBits, punctuation and case",

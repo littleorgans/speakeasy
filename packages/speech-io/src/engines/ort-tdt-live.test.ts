@@ -9,7 +9,7 @@ import type { FinalEvent } from "../contract.ts";
 import { normalizeTranscript } from "../bench/normalize.ts";
 import { readWavFrames } from "../bench/wav.ts";
 import { ORT_TDT_MODELS, type OrtTdtModelId } from "./ort-tdt-models.ts";
-import { createLocalOrtTdtEngine } from "./ort-tdt-runtime.ts";
+import { createLocalOrtEngine } from "./ort-local.ts";
 
 /**
  * Live smoke: downloads each TDT model into ./models/ort (run from the repo
@@ -39,7 +39,7 @@ for (const id of Object.keys(ORT_TDT_MODELS) as OrtTdtModelId[]) {
     { skip: !LIVE || process.platform !== "darwin", timeout: 1_200_000 },
     async (t) => {
       const clip = await spokenClip();
-      const engine = createLocalOrtTdtEngine(id);
+      const engine = createLocalOrtEngine(id);
       const session = await engine.open();
       const decodeMs: number[] = [];
       for (let run = 0; run < 3; run += 1) {
