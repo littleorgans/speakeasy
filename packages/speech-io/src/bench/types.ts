@@ -24,8 +24,12 @@ export type CliOptions = {
   engine: EngineName;
   /** Sherpa model registry id; ignored by non-sherpa engines. */
   model?: SherpaModelId;
-  /** Wrap the engine with the rewrite decorator (corpus scorer). Default false. */
+  /** Corpus scorer: one column per registry id, scored on the same takes. */
+  models?: SherpaModelId[];
+  /** Corpus scorer: add a rewrite column (domain rules + numbers). Default false. */
   rewrite: boolean;
+  /** Corpus scorer: print the report as JSON on stdout. Default false. */
+  json: boolean;
   /** Number normalization mode for the rewrite pipeline. Default "off". */
   numbers: NumbersMode;
   wav?: string;
