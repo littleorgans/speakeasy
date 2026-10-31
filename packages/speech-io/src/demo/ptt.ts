@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { nextCommit, type CommitObservation } from "../bench/commit.ts";
+import { FLUSH_FINAL_TIMEOUT_MS } from "../bench/config.ts";
 import { formatMs } from "../bench/format.ts";
 import {
   pacedFrames,
@@ -50,7 +51,6 @@ import {
  * directory, --no-save disarms, --save-all skips the prompts.
  */
 
-const FINAL_TIMEOUT_MS = 2_000;
 const LEVEL_WINDOW_FRAMES = 25; // 500ms rolling peak
 const LEVEL_RENDER_INTERVAL_MS = 100;
 const LEVEL_BAR_CELLS = 10;
@@ -299,7 +299,7 @@ class PttDemo {
 
     // Register the commit waiter BEFORE flush(): the contract makes no
     // synchrony guarantee (sherpa emits during flush, others may not).
-    const finalPromise = nextCommit(this.#session, FINAL_TIMEOUT_MS);
+    const finalPromise = nextCommit(this.#session, FLUSH_FINAL_TIMEOUT_MS);
     const releaseAt = performance.now();
     this.#session.flush();
     const final = await finalPromise;
