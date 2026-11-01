@@ -39,3 +39,12 @@ test("prompt reader flags come as a pair", () => {
     /--out needs a value/,
   );
 });
+
+test("hotwords flag selects an external list and requires its path", () => {
+  assert.equal(readBrowserVoiceOptions(["--hotwords", "../speech/words.txt"], {}).hotwordsPath,
+    "../speech/words.txt");
+  assert.equal(readBrowserVoiceOptions([], {}).hotwordsPath, undefined);
+  for (const argv of [["--hotwords"], ["--hotwords", "--port", "0"]]) {
+    assert.throws(() => readBrowserVoiceOptions(argv, {}), /--hotwords needs a value/);
+  }
+});

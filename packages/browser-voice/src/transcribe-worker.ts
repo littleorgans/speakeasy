@@ -1,4 +1,4 @@
-import { createLocalSherpaEngine, loadHotwords, SHERPA_ROOT } from "@speakeasy/speech-io";
+import { createLocalSherpaEngine, SHERPA_ROOT } from "@speakeasy/speech-io";
 import {
   isAssetComplete,
   resolveModelPaths,
@@ -10,12 +10,12 @@ import { TRANSCRIBE_MODEL_ID, TranscriptionError, type TranscribeReply, type Tra
 
 /**
  * Parakeet Ultra without a silence gate, matching TM. Each request snapshots
- * hotwords.txt immediately; unchanged content reuses the warm recognizer.
+ * the selected hotword file immediately; unchanged content reuses the warm recognizer.
  * The model must already sit under models/sherpa; no downloads.
  */
 
 const transcriber = new TakeTranscription({
-  readSnapshot: () => loadHotwords({ snapshot: true }),
+  hotwordsPath: process.argv[2],
   createEngine: loadEngine,
 });
 

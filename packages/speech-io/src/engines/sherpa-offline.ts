@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -121,7 +121,9 @@ export class SherpaOfflineEngine implements VoiceToText {
     if (!this.#hotwords || vocabulary === undefined) {
       return new this.#binding.OfflineRecognizer(config);
     }
-    const dir = mkdtempSync(join(tmpdir(), "speak-easy-offline-hotwords-"));
+    const parent = tmpdir();
+    mkdirSync(parent, { recursive: true });
+    const dir = mkdtempSync(join(parent, "speak-easy-offline-hotwords-"));
     try {
       config.modelConfig.modelingUnit = "bpe";
       config.modelConfig.bpeVocab = join(dir, "bpe.vocab");

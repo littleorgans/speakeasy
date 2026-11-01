@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import { mkdtemp, readdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { readCorpusEntries, readWavFrames } from "@speakeasy/speech-io";
 import { startBrowserVoiceServer, type BrowserVoiceServer } from "./host.ts";
 import { PROMPT_MAX_TAKE_BYTES, type PromptListing } from "./prompt-reader.ts";
 import { ChildTranscriber, TRANSCRIBE_MODEL_ID, type Transcriber } from "./transcriber.ts";
+import { readBrowserVoiceOptions } from "./server-options.ts";
 
 const PROMPTS = {
   set: "T",
@@ -20,14 +21,15 @@ const PROMPTS = {
 
 async function withReader(
   run: (host: BrowserVoiceServer, outputDir: string, root: string) => Promise<void>,
-  options: { transcriber?: (root: string) => Promise<Transcriber> } = {},
+  options: { transcriber?: (root: string) => Promise<Transcriber>; hotwordsPath?: string } = {},
 ): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), "speakeasy-reader-"));
   const promptsPath = join(root, "prompts.json");
   const outputDir = join(root, "takes");
   await writeFile(promptsPath, JSON.stringify(PROMPTS));
   const transcriber = await options.transcriber?.(root);
-  const host = await startBrowserVoiceServer({ port: 0, promptReader: { promptsPath, outputDir }, transcriber });
+  const host = await startBrowserVoiceServer({ port: 0, promptReader: { promptsPath, outputDir },
+    transcriber, hotwordsPath: options.hotwordsPath });
   try {
     await run(host, outputDir, root);
   } finally {
@@ -400,5 +402,25 @@ test("worker list status and validation reasons reach the page API while audio s
       process.on("disconnect", () => process.exit(0));
     `);
     return new ChildTranscriber({ workerPath });
+  } });
+});
+
+test("configured hotword path is absolute in the page API and child configuration", async () => {
+  const { hotwordsPath } = readBrowserVoiceOptions(["--hotwords", "../speech/words.txt"], {});
+  await withReader(async (host) => {
+    const listing = await (await fetch(`${host.url}/prompt-reader/prompts`)).json() as {
+      transcription: { hotwordsPath: string };
+    };
+    assert.equal(listing.transcription.hotwordsPath, resolve("../speech/words.txt"));
+    const answer = await post(host, "/prompt-reader/transcriptions", { body: takeBytes(320) });
+    assert.equal(answer.status, 200);
+    assert.equal(answer.body.text, resolve("../speech/words.txt"));
+  }, { hotwordsPath, transcriber: async (root) => {
+    const workerPath = join(root, "path-worker.mjs");
+    await writeFile(workerPath, `
+      process.on("message", ({ id }) => process.send({ id, text: process.argv[2], decodeMs: 0 }));
+      process.on("disconnect", () => process.exit(0));
+    `);
+    return new ChildTranscriber({ workerPath, hotwordsPath });
   } });
 });

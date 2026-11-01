@@ -4,7 +4,7 @@ import type { PromptReaderConfig } from "./prompt-reader.ts";
 export function readBrowserVoiceOptions(
   argv: string[],
   env: NodeJS.ProcessEnv,
-): { port: number; runtimeConfig: RuntimeConfig; promptReader?: PromptReaderConfig } {
+): { port: number; runtimeConfig: RuntimeConfig; promptReader?: PromptReaderConfig; hotwordsPath?: string } {
   const portFlag = argv.indexOf("--port");
   const port = portFlag === -1 ? 4317 : Number(argv[portFlag + 1]);
   if (!Number.isInteger(port) || port < 0 || port > 65_535) {
@@ -12,11 +12,13 @@ export function readBrowserVoiceOptions(
   }
   const promptsPath = readFlag(argv, "--prompts");
   const outputDir = readFlag(argv, "--out");
+  const hotwordsPath = readFlag(argv, "--hotwords");
   if ((promptsPath === undefined) !== (outputDir === undefined)) {
     throw new Error("--prompts <file> and --out <dir> go together");
   }
   return {
     port,
+    ...(hotwordsPath !== undefined ? { hotwordsPath } : {}),
     ...(promptsPath !== undefined && outputDir !== undefined
       ? { promptReader: { promptsPath, outputDir } }
       : {}),
