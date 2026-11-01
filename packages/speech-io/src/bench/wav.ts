@@ -53,12 +53,28 @@ type FormatChunk = {
   bitsPerSample: number;
 };
 
+type ParsedWav = {
+  view: DataView;
+  format: FormatChunk;
+  dataOffset: number;
+  dataLength: number;
+};
+
 export async function readWavFrames(
   path: string,
   frameMs = DEFAULT_FRAME_MS,
 ): Promise<WavAudio> {
   const bytes = await readFile(path);
   return decodeWavFrames(bytes, frameMs);
+}
+
+/**
+ * Decode finite 16 kHz mono samples without clipping, quantization or padding.
+ * IEEE Float32 WAVs preserve every sample bit, including signed zero.
+ */
+export function decodeWavSamples(bytes: Uint8Array): Float32Array {
+  const { view, format, dataOffset, dataLength } = parseWav(bytes, true);
+  return decodeSamples(view, dataOffset, dataLength, format, true);
 }
 
 export function decodeWavFrames(
@@ -69,31 +85,8 @@ export function decodeWavFrames(
     throw new Error(`frameMs must be positive, received ${frameMs}`);
   }
 
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  assertRiffWave(view);
-
-  let format: FormatChunk | undefined;
-  let dataOffset: number | undefined;
-  let dataLength: number | undefined;
-
-  for (const chunk of iterChunks(view)) {
-    if (chunk.id === FORMAT_CHUNK) {
-      format = readFormatChunk(view, chunk.offset, chunk.size);
-    } else if (chunk.id === DATA_CHUNK) {
-      dataOffset = chunk.offset;
-      dataLength = chunk.size;
-    }
-  }
-
-  if (!format) {
-    throw new Error("WAV is missing a fmt chunk");
-  }
-  if (dataOffset === undefined || dataLength === undefined) {
-    throw new Error("WAV is missing a data chunk");
-  }
-  validateFormat(format);
-
-  const samples = decodeSamples(view, dataOffset, dataLength, format);
+  const { view, format, dataOffset, dataLength } = parseWav(bytes, false);
+  const samples = decodeSamples(view, dataOffset, dataLength, format, false);
   const frameSize = Math.round((format.sampleRate * frameMs) / 1_000);
   const frames = splitFrames(samples, frameSize);
   const durationMs = (samples.length / format.sampleRate) * 1_000;
@@ -106,6 +99,45 @@ export function decodeWavFrames(
     samples,
     frames,
   };
+}
+
+function parseWav(bytes: Uint8Array, strict: boolean): ParsedWav {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  assertRiffWave(view);
+  if (strict && view.getUint32(4, true) + 8 !== view.byteLength) {
+    throw new Error("WAV RIFF length does not match file length");
+  }
+
+  let format: FormatChunk | undefined;
+  let dataOffset: number | undefined;
+  let dataLength: number | undefined;
+
+  for (const chunk of iterChunks(view, strict)) {
+    if (chunk.id === FORMAT_CHUNK) {
+      if (strict && format) {
+        throw new Error("WAV has a duplicate fmt chunk");
+      }
+      format = readFormatChunk(view, chunk.offset, chunk.size);
+    } else if (chunk.id === DATA_CHUNK) {
+      if (strict && dataOffset !== undefined) {
+        throw new Error("WAV has a duplicate data chunk");
+      }
+      dataOffset = chunk.offset;
+      dataLength = chunk.size;
+    }
+  }
+
+  if (!format) {
+    throw new Error("WAV is missing a fmt chunk");
+  }
+  if (dataOffset === undefined || dataLength === undefined) {
+    throw new Error("WAV is missing a data chunk");
+  }
+  validateFormat(format);
+  if (strict && dataLength % format.blockAlign !== 0) {
+    throw new Error("WAV data must contain whole samples");
+  }
+  return { view, format, dataOffset, dataLength };
 }
 
 const WAV_HEADER_BYTES = 44;
@@ -159,15 +191,25 @@ function assertRiffWave(view: DataView): void {
 
 function* iterChunks(
   view: DataView,
+  strict: boolean,
 ): Generator<{ id: string; offset: number; size: number }> {
   let cursor = 12;
-  while (cursor + 8 <= view.byteLength) {
+  while (cursor < view.byteLength) {
+    if (cursor + 8 > view.byteLength) {
+      if (strict) {
+        throw new Error("WAV has a truncated chunk header");
+      }
+      return;
+    }
     const id = readAscii(view, cursor, 4);
     const size = view.getUint32(cursor + 4, true);
     const offset = cursor + 8;
     const next = offset + size + (size % 2);
     if (offset + size > view.byteLength) {
       throw new Error(`WAV chunk ${id} exceeds file length`);
+    }
+    if (strict && next > view.byteLength) {
+      throw new Error(`WAV chunk ${id} is missing padding`);
     }
     yield { id, offset, size };
     cursor = next;
@@ -239,6 +281,7 @@ function decodeSamples(
   dataOffset: number,
   dataLength: number,
   format: FormatChunk,
+  strict: boolean,
 ): Float32Array {
   const bytesPerSample = format.bitsPerSample / 8;
   const sampleCount = Math.floor(dataLength / bytesPerSample);
@@ -246,7 +289,11 @@ function decodeSamples(
 
   for (let index = 0; index < sampleCount; index += 1) {
     const offset = dataOffset + index * bytesPerSample;
-    samples[index] = readSample(view, offset, format);
+    const sample = readSample(view, offset, format);
+    if (strict && !Number.isFinite(sample)) {
+      throw new Error(`WAV contains a nonfinite sample at index ${index}`);
+    }
+    samples[index] = strict ? sample : clampSample(sample);
   }
 
   return samples;
@@ -258,18 +305,18 @@ function readSample(
   format: FormatChunk,
 ): number {
   if (format.audioFormat === FLOAT_FORMAT) {
-    return clampSample(view.getFloat32(offset, true));
+    return view.getFloat32(offset, true);
   }
 
   switch (format.bitsPerSample) {
     case 8:
-      return clampSample((view.getUint8(offset) - 128) / 128);
+      return (view.getUint8(offset) - 128) / 128;
     case 16:
-      return clampSample(view.getInt16(offset, true) / 32_768);
+      return view.getInt16(offset, true) / 32_768;
     case 24:
-      return clampSample(readInt24(view, offset) / 8_388_608);
+      return readInt24(view, offset) / 8_388_608;
     case 32:
-      return clampSample(view.getInt32(offset, true) / 2_147_483_648);
+      return view.getInt32(offset, true) / 2_147_483_648;
     default:
       throw new Error(`Unsupported bit depth ${format.bitsPerSample}`);
   }
