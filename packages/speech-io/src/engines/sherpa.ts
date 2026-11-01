@@ -1,4 +1,6 @@
 import { EventEmitter } from "node:events";
+import { constants } from "node:fs";
+import { access, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import type {
@@ -59,8 +61,6 @@ const DEFAULT_ENDPOINT: Required<EndpointConfig> = {
 
 export type SherpaEngineOptions = {
   model: SherpaModelId;
-  /** Folder holding downloaded archives and extracted models. */
-  modelRoot: string;
   binding: SherpaBinding;
   /**
    * Contextual biasing for streaming models and proven offline tokenizers
@@ -70,17 +70,38 @@ export type SherpaEngineOptions = {
   hotwords?: Hotwords;
   /** Offline models only: the silence gate every session runs before decode. */
   silenceGate?: SilenceGate;
-};
+} & (
+  | {
+      /** Folder holding downloaded archives and extracted models. */
+      modelRoot: string;
+      preparedModelDirectory?: never;
+    }
+  | {
+      /** Exact prepared directory. Only readable runtime inputs are checked; no installation. */
+      preparedModelDirectory: string;
+      modelRoot?: never;
+    }
+);
 
 /** Shared by the streaming and offline engines. */
 export class SherpaModelAsset<M extends SherpaModel> {
   readonly model: M;
-  readonly paths: AssetSpec | FileSetSpec;
+  readonly paths: AssetSpec | FileSetSpec | undefined;
+  readonly #directory: string;
   readonly #binding: SherpaBinding;
 
   constructor(model: M, options: SherpaEngineOptions) {
     this.model = model;
-    this.paths = resolveModelPaths(model, options.modelRoot);
+    const { modelRoot, preparedModelDirectory } = options;
+    if ((modelRoot !== undefined) === (preparedModelDirectory !== undefined)) {
+      throw new Error("Provide exactly one of modelRoot or preparedModelDirectory");
+    }
+    if (preparedModelDirectory !== undefined) {
+      this.#directory = preparedModelDirectory;
+    } else {
+      this.paths = resolveModelPaths(model, modelRoot!);
+      this.#directory = this.paths.dir;
+    }
     this.#binding = options.binding;
   }
 
@@ -89,11 +110,49 @@ export class SherpaModelAsset<M extends SherpaModel> {
   }
 
   file(name: string): string {
-    return join(this.paths.dir, name);
+    return join(this.#directory, name);
   }
 
   async ensure(): Promise<void> {
-    await ensureAsset(this.paths);
+    if (this.paths) {
+      await ensureAsset(this.paths);
+      return;
+    }
+    const { files, directories } = requiredModelInputs(this.model);
+    for (const [names, directory] of [[files, false], [directories, true]] as const) {
+      for (const name of names) {
+        const path = this.file(name);
+        try {
+          const info = await stat(path);
+          if (directory ? !info.isDirectory() : !info.isFile() || info.size === 0) {
+            throw new Error("Wrong type or empty file");
+          }
+          await access(path, constants.R_OK | (directory ? constants.X_OK : 0));
+        } catch (cause) {
+          throw new Error(`Prepared model requires readable ${directory ? "directory" : "nonempty file"}: ${path}`, { cause });
+        }
+      }
+    }
+  }
+}
+
+/** Runtime paths from the registry, independent of archive and marker metadata. */
+function requiredModelInputs(model: SherpaModel): { files: string[]; directories: string[] } {
+  if (model.kind === "streaming") {
+    return {
+      files: [model.encoder, model.decoder, model.joiner, model.tokens, ...(model.bpe ? [model.bpe] : [])],
+      directories: [],
+    };
+  }
+  switch (model.family) {
+    case "nemo-transducer":
+      return { files: [model.encoder, model.decoder, model.joiner, model.tokens], directories: [] };
+    case "moonshine":
+      return { files: [model.preprocessor, model.encoder, model.uncachedDecoder, model.cachedDecoder, model.tokens], directories: [] };
+    case "canary":
+      return { files: [model.encoder, model.decoder, model.tokens], directories: [] };
+    case "qwen3-asr":
+      return { files: [model.convFrontend, model.encoder, model.decoder], directories: [model.tokenizer] };
   }
 }
 
