@@ -1,13 +1,18 @@
 import { Buffer } from "node:buffer";
+import { randomUUID } from "node:crypto";
 import {
   ConversationLoop,
   type ConversationRuntime,
   type RuntimeConfig,
+  type RuntimeOptions,
 } from "@speakeasy/convo-engine";
 import { WebSocket, type RawData } from "ws";
 import { BrowserAudioSink, BrowserAudioSource } from "./browser-audio.ts";
-import type { SpeechOutputRegistry } from "@speakeasy/speech-io/providers";
+import { ProviderError, sameSpeechOutputConfig, type SpeechOutputRegistry } from "@speakeasy/speech-io/providers";
 import type { ReleaseAudioWork } from "./audio-lease.ts";
+import type { ProviderDispatchContext, ProviderPolicy } from "./provider-policy.ts";
+import type { SpeechOutputCatalogue } from "./speech-output-catalog.ts";
+import { safeSpeechOutputError, SpeechOutputError, type SpeechOutputEvent } from "./speech-output-protocol.ts";
 import {
   decodeMicFrame,
   parseClientCommand,
@@ -17,17 +22,25 @@ import {
 
 export type BrowserRuntimeConfig = RuntimeConfig;
 export type BrowserConversationRuntime = ConversationRuntime;
+export type BrowserRuntimeContext = Pick<RuntimeOptions, "speechOutputContext">;
 export type RuntimeFactory = (
   config: BrowserRuntimeConfig,
+  context?: BrowserRuntimeContext,
 ) => Promise<BrowserConversationRuntime>;
+
+type RoomOperation = { id: string; controller: AbortController };
+type RoomSelection = Extract<SpeechOutputEvent, { type: "output-selected" }>;
 
 /** One browser socket owns one conversation loop and its audio adapters. */
 export class BrowserConversationSession {
   readonly #socket: WebSocket;
+  readonly #sessionId: string;
   readonly #runtimeConfig: BrowserRuntimeConfig;
   readonly #createRuntime: RuntimeFactory;
   readonly #acquire: (() => ReleaseAudioWork | undefined) | undefined;
   readonly #outputRegistry: () => SpeechOutputRegistry;
+  readonly #policy: ProviderPolicy | undefined;
+  readonly #outputCatalogue: (() => SpeechOutputCatalogue) | undefined;
   readonly #mic = new BrowserAudioSource();
   #loop: ConversationLoop | undefined;
   #runtime: BrowserConversationRuntime | undefined;
@@ -39,23 +52,32 @@ export class BrowserConversationSession {
   #stopTask: Promise<void> | undefined;
   #release: ReleaseAudioWork | undefined;
   #retirementFailed = false;
+  #selection: RoomSelection | undefined;
+  #operation: RoomOperation | undefined;
 
   constructor(options: {
     socket: WebSocket;
+    sessionId: string;
     runtimeConfig: BrowserRuntimeConfig;
     createRuntime: RuntimeFactory;
     acquire?: () => ReleaseAudioWork | undefined;
     outputRegistry?: () => SpeechOutputRegistry;
+    policy?: ProviderPolicy;
+    outputCatalogue?: () => SpeechOutputCatalogue;
   }) {
     this.#socket = options.socket;
+    this.#sessionId = options.sessionId;
     this.#runtimeConfig = options.runtimeConfig;
     this.#createRuntime = options.createRuntime;
     this.#acquire = options.acquire;
     this.#outputRegistry = options.outputRegistry ?? (() => []);
+    this.#policy = options.policy;
+    this.#outputCatalogue = options.outputCatalogue;
     this.#wireSocket();
   }
 
   stop(): Promise<void> {
+    this.#invalidate();
     if (this.#stopTask) return this.#stopTask;
     const task = this.#stop();
     this.#stopTask = task;
@@ -69,9 +91,7 @@ export class BrowserConversationSession {
   }
 
   async #stop(): Promise<void> {
-    this.#starting = false;
-    void this.#activeSink?.interrupt();
-    this.#activeSink?.close();
+    if (this.#retirementFailed) throw new ProviderError("PROVIDER_FAILED");
     await this.#startTask;
     await this.#loop?.stop();
     await this.#quiesce();
@@ -91,12 +111,7 @@ export class BrowserConversationSession {
         this.#acceptAudio(data);
         return;
       }
-      try {
-        const command = parseClientCommand(rawText(data), this.#outputRegistry());
-        void this.#handle(command).catch((error) => this.#sendNotice("error", safeMessage(error)));
-      } catch (error) {
-        this.#sendNotice("error", safeMessage(error));
-      }
+      this.#receive(rawText(data));
     });
     this.#socket.once("close", () => {
       void this.close().catch(() => {});
@@ -106,7 +121,66 @@ export class BrowserConversationSession {
     });
   }
 
-  async #handle(command: ClientCommand): Promise<void> {
+  #receive(raw: string): void {
+    let type: unknown;
+    let requestId: string | null = null;
+    try {
+      type = JSON.parse(raw)?.type;
+      if (type === "select-output" && this.#stopped()) this.#invalidate();
+      const command = parseClientCommand(raw, this.#outputRegistry());
+      if (command.type === "select-output") {
+        requestId = command.requestId;
+        this.#select(command);
+      } else {
+        void this.#handle(command).catch((error) => this.#sendNotice("error", safeMessage(error)));
+      }
+    } catch (error) {
+      if (type === "select-output") {
+        this.#send({ type: "output-selection-error", requestId, ...safeSpeechOutputError(error) });
+      } else {
+        if (this.#stopped()) {
+          this.#invalidate();
+          this.#send({ type: "session", phase: "stopped" });
+        }
+        this.#sendNotice("error", error instanceof ProviderError ? error.message : safeMessage(error));
+      }
+    }
+  }
+
+  #stopped(): boolean {
+    return !this.#closed && !this.#startTask && !this.#loop && !this.#stopTask && !this.#retirementFailed;
+  }
+
+  #select(command: Extract<ClientCommand, { type: "select-output" }>): void {
+    if (!this.#stopped()) throw new SpeechOutputError("BUSY");
+    if (!this.#policy || !this.#outputCatalogue) throw new ProviderError("PROVIDER_UNAVAILABLE");
+    if (command.catalogueRevision !== this.#outputCatalogue().revision) throw new ProviderError("SELECTION_STALE");
+    const selected = this.#policy.select({ sessionId: this.#sessionId, direction: "output",
+      catalogueRevision: command.catalogueRevision, config: command.selection });
+    this.#selection = { type: "output-selected", requestId: command.requestId,
+      catalogueRevision: selected.catalogueRevision, selectionRevision: selected.selectionRevision,
+      selection: structuredClone(command.selection) };
+    this.#send(this.#selection);
+  }
+
+  #invalidate(): void {
+    this.#starting = false;
+    const operation = this.#operation;
+    this.#operation = undefined;
+    this.#selection = undefined;
+    operation?.controller.abort();
+    this.#policy?.revoke(this.#sessionId, "output");
+    void this.#activeSink?.interrupt();
+    this.#activeSink?.close();
+  }
+
+  #assertCurrent(operation: RoomOperation): void {
+    if (this.#operation !== operation || this.#closed || operation.controller.signal.aborted) {
+      throw new ProviderError("SELECTION_STALE");
+    }
+  }
+
+  async #handle(command: Exclude<ClientCommand, { type: "select-output" }>): Promise<void> {
     switch (command.type) {
       case "start":
         await this.#start(command);
@@ -129,17 +203,26 @@ export class BrowserConversationSession {
   }
 
   async #start(command: Extract<ClientCommand, { type: "start" }>): Promise<void> {
-    if (this.#closed || this.#startTask || this.#loop || this.#stopTask || this.#retirementFailed) return;
+    if (this.#closed || this.#startTask || this.#loop) return;
+    if (this.#stopTask || this.#retirementFailed) {
+      this.#invalidate();
+      this.#sendNotice("error", "Previous speech work has not retired.");
+      this.#send({ type: "session", phase: "stopped" });
+      return;
+    }
     const release = this.#acquire?.();
     if (this.#acquire && !release) {
+      this.#invalidate();
       this.#sendNotice("error", "Other speech work is in progress. Try again after it finishes.");
       this.#send({ type: "session", phase: "stopped" });
       return;
     }
     this.#release = release;
+    const operation: RoomOperation = { id: randomUUID(), controller: new AbortController() };
+    this.#operation = operation;
     this.#starting = true;
     this.#send({ type: "session", phase: "loading" });
-    this.#startTask = this.#open(command).finally(() => {
+    this.#startTask = this.#open(command, operation).finally(() => {
       this.#starting = false;
       this.#startTask = undefined;
       if (!this.#loop && !this.#retirementFailed) {
@@ -150,11 +233,11 @@ export class BrowserConversationSession {
     await this.#startTask;
   }
 
-  async #open(command: Extract<ClientCommand, { type: "start" }>): Promise<void> {
+  async #open(command: Extract<ClientCommand, { type: "start" }>, operation: RoomOperation): Promise<void> {
     try {
       const runtimeConfig =
         runtimeConfigFor(command, this.#runtimeConfig);
-      const runtime = await this.#createRuntime(runtimeConfig);
+      const runtime = await this.#createSelectedRuntime(command, runtimeConfig, operation);
       this.#runtime = runtime;
       if (!this.#starting || this.#closed) {
         await this.#quiesce();
@@ -166,7 +249,7 @@ export class BrowserConversationSession {
           stt: runtime.stt,
           responder: runtime.responder,
           mic: this.#mic,
-          createSink: (sampleRate) => this.#createSink(sampleRate),
+          createSink: (sampleRate) => this.#createSink(sampleRate, operation),
         },
         {
           systemPrompt: command.systemPrompt,
@@ -179,7 +262,7 @@ export class BrowserConversationSession {
                 : { mode: "eager", minTrailingSilenceMs: command.pauseMs },
           },
           onEvent: (event) => {
-            if (this.#loop === loop && !this.#stopTask && !this.#closed) this.#send(event);
+            if (this.#loop === loop && this.#operation === operation && !this.#stopTask && !this.#closed) this.#send(event);
           },
         },
       );
@@ -194,33 +277,84 @@ export class BrowserConversationSession {
       }
       this.#send({ type: "session", phase: "ready", label: runtime.label });
     } catch (error) {
+      const current = this.#operation === operation;
+      if (current) this.#invalidate();
       await this.#loop?.stop();
       await this.#quiesce();
       this.#loop = undefined;
       this.#runtime = undefined;
-      this.#sendNotice("error", safeMessage(error));
-      this.#send({ type: "session", phase: "stopped" });
+      if (current && !this.#closed) {
+        this.#sendNotice("error", safeSpeechOutputError(error).message);
+        this.#send({ type: "session", phase: "stopped" });
+      }
     }
   }
 
+  #createSelectedRuntime(
+    command: Extract<ClientCommand, { type: "start" }>,
+    config: BrowserRuntimeConfig,
+    operation: RoomOperation,
+  ): Promise<BrowserConversationRuntime> {
+    const create = (dispatch?: ProviderDispatchContext) => {
+      const guarded = <T>(read: () => T): T => {
+        this.#assertCurrent(operation);
+        try { return read(); }
+        catch (error) {
+          this.#invalidate();
+          this.#sendNotice("error", safeSpeechOutputError(error).message);
+          throw error;
+        }
+      };
+      const beforeRequest = () => { guarded(() => dispatch?.recheck()); };
+      beforeRequest();
+      return this.#createRuntime(config, { speechOutputContext: {
+        signal: operation.controller.signal,
+        beforeRequest,
+        getKey: dispatch?.apiKey ? () => guarded(() => dispatch.apiKey!()) : undefined,
+      } });
+    };
+    const hosted = config.speechOutput ? config.speechOutput.provider.kind !== "local" : config.ttsEngine === "cartesia";
+    if (command.engine === "realtime" ||
+        (!hosted && command.catalogueRevision === undefined && command.selectionRevision === undefined)) {
+      this.#selection = undefined;
+      this.#policy?.revoke(this.#sessionId, "output");
+      return create();
+    }
+    const selected = this.#selection;
+    if (!command.speechOutput || !command.catalogueRevision || !command.selectionRevision ||
+        !selected || !this.#policy || !this.#outputCatalogue) throw new ProviderError("SELECTION_REQUIRED");
+    if (command.catalogueRevision !== selected.catalogueRevision ||
+        command.selectionRevision !== selected.selectionRevision ||
+        this.#outputCatalogue().revision !== selected.catalogueRevision ||
+        !sameSpeechOutputConfig(command.speechOutput, selected.selection)) throw new ProviderError("SELECTION_STALE");
+    return this.#policy.dispatch({ sessionId: this.#sessionId, direction: "output",
+      config: structuredClone(command.speechOutput), catalogueRevision: command.catalogueRevision,
+      selectionRevision: command.selectionRevision,
+      source: { kind: "live-response-text", sessionId: this.#sessionId, operationId: operation.id } }, create);
+  }
+
   async #quiesce(): Promise<void> {
+    if (this.#retirementFailed) throw new ProviderError("PROVIDER_FAILED");
     try { await this.#runtime?.quiesce?.(); }
     catch (error) { this.#retirementFailed = true; throw error; }
   }
 
-  #createSink(sampleRate: number): BrowserAudioSink {
+  #createSink(sampleRate: number, operation: RoomOperation): BrowserAudioSink {
     const sink = new BrowserAudioSink({
       playbackId: this.#nextPlaybackId++,
       sampleRate,
-      sendEvent: (event) => this.#send(event),
+      sendEvent: (event) => {
+        if (this.#activeSink === sink && (this.#operation === operation ||
+            (event.type === "playback" && event.action === "clear"))) this.#send(event);
+      },
       sendAudio: (packet) => {
-        if (this.#socket.readyState === WebSocket.OPEN) {
+        if (this.#operation === operation && this.#socket.readyState === WebSocket.OPEN) {
           this.#socket.send(packet);
         }
       },
     });
     this.#activeSink = sink;
-    if (this.#closed || this.#stopTask) sink.close();
+    if (this.#operation !== operation || this.#closed || this.#stopTask) sink.close();
     return sink;
   }
 

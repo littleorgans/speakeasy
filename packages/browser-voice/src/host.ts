@@ -45,6 +45,7 @@ const STATIC_FILES = new Map([
   ["/prompt-reader.js", "prompt-reader.js"],
   ["/setup-results.js", "setup-results.js"],
   ["/speech-output-controls.js", "speech-output-controls.js"],
+  ["/speech-observations.js", "speech-observations.js"],
 ]);
 const PROMPT_READER_API = "/prompt-reader/";
 const PROMPT_READER_TAKES = "/prompt-reader/takes/";
@@ -119,7 +120,8 @@ export async function startBrowserVoiceServer(options: BrowserVoiceServerOptions
   const outputSessions = new Set<SpeechOutputSession>();
   let activeSocket: WebSocket | undefined;
   const runtimeConfig = options.runtimeConfig ?? {};
-  const createRuntime = options.createRuntime ?? createConversationRuntime;
+  const createRuntime: RuntimeFactory = options.createRuntime ?? ((config, context) =>
+    createConversationRuntime(config, undefined, undefined, context));
 
   server.on("upgrade", (request, socket, head) => {
     const output = request.url === "/speech-output" && !!options.speechOutput && !!options.providers;
@@ -151,8 +153,11 @@ export async function startBrowserVoiceServer(options: BrowserVoiceServerOptions
       return;
     }
     activeSocket = socket;
-    const session = new BrowserConversationSession({ socket, runtimeConfig, createRuntime,
-      acquire: () => lease.tryAcquire("room"), outputRegistry: () => options.providers?.registries().output ?? [] });
+    const session = new BrowserConversationSession({ socket, sessionId: randomUUID(), runtimeConfig, createRuntime,
+      acquire: () => lease.tryAcquire("room"), policy: options.providers?.policy,
+      outputCatalogue: options.speechOutput
+        ? () => currentOutputCatalogue(options.speechOutput!, options.providers) : undefined,
+      outputRegistry: () => options.providers?.registries().output ?? [] });
     sessions.add(session);
     socket.once("close", () => {
       if (activeSocket === socket) activeSocket = undefined;
