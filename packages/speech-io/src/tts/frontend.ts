@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { TtsRequest } from "sherpa-onnx-node";
 import { ensureAsset, type FileSetSpec } from "../engines/assets.ts";
 import type { ModelLicence } from "../engines/sherpa-models.ts";
-import { TTS_ROOT } from "./models.ts";
+import { TTS_ROOT, verifyTtsFiles, type TtsModelFamily } from "./models.ts";
 import { EnglishG2P, normalizeNumbers } from "./vendor/piper-plus-g2p/en/index.js";
 
 /**
@@ -14,7 +14,7 @@ import { EnglishG2P, normalizeNumbers } from "./vendor/piper-plus-g2p/en/index.j
  *
  * Piper Plus's English G2P (CMU dictionary, vendored at commit 4fd95c24)
  * turns text into IPA, adapted to the espeak voice the model was trained
- * with, and sherpa receives it as phoneme codepoints. Picked by the Space
+ * with, or to Kokoro Misaki symbols. sherpa receives phoneme codepoints. Picked by the Space
  * lead from voice-out research (2026-11-01). Against espeak-ng: Kristin MOS
  * 4.253 to 4.194, WER 14.0% to 13.2%; Kokoro v1.0 af_heart MOS 4.161 to
  * 4.294, WER 7.9% to 7.0%. The text rules and the British mapping port that
@@ -121,11 +121,24 @@ export function adaptIpa(ipa: string, british: boolean): string {
   return rp.replace(/æ/g, "a");
 }
 
-/** One codepoint array per sentence, keeping only symbols the voice knows. */
+/** Research g2k-adapter.cjs::toMisaki, applied to raw Piper Plus IPA. */
+export function toMisaki(ipa: string): string {
+  return ipa.replace(/ɹ̩/g, "əɹ").replace(/ɚ/g, "əɹ").replace(/ɝ/g, "ɜɹ")
+    .replace(/ɜːɹ/g, "ɜɹ").replace(/ɜː/g, "ɜɹ")
+    .replace(/oʊ/g, "O").replace(/əʊ/g, "Q").replace(/eɪ/g, "A")
+    .replace(/aɪ/g, "I").replace(/aʊ/g, "W").replace(/ɔɪ/g, "Y")
+    .replace(/t[͡^]?ʃ/g, "ʧ").replace(/d[͡^]?ʒ/g, "ʤ")
+    .replace(/ɫ/g, "l").replace(/g/g, "ɡ").replace(/r/g, "ɹ")
+    .replace(/ɐ/g, "ə").replace(/([^\s])̩/g, "ᵊ$1").replace(/[ː͡^̃]/g, "");
+}
+
+/** Reject missing speech symbols. Absent whitespace and sentence punctuation are separators. */
 export function toPhonemeCodepoints(ipa: string, symbols: ReadonlySet<string>): number[][] {
+  const unknown = [...new Set([...ipa].filter((c) => !symbols.has(c) && !/\s|[.,;:!?]/u.test(c)))];
+  if (unknown.length) throw new Error(`Unknown TTS phonemes: ${JSON.stringify(unknown)}`);
   return (ipa.match(/[^.!?]+[.!?]?/g) ?? [])
     .map((sentence) => [...sentence.trim()].filter((c) => symbols.has(c)))
-    .filter((sentence) => sentence.length > 0)
+    .filter((sentence) => sentence.some((c) => !/\s|[.,;:!?]/u.test(c)))
     .map((sentence) => sentence.map((c) => c.codePointAt(0)!));
 }
 
@@ -139,23 +152,34 @@ export function parseTokenSymbols(tokens: string): Set<string> {
   return symbols;
 }
 
-let english: Promise<EnglishG2P> | undefined;
+const english = new Map<string, Promise<EnglishG2P>>();
 
-/** The G2P over the pinned CMU dictionary, installed and parsed once per process. */
-function loadEnglishG2P(root: string): Promise<EnglishG2P> {
-  english ??= (async () => {
-    const dict: FileSetSpec = {
-      dir: join(root, `piper-plus-g2p-${PIPER_PLUS_COMMIT.slice(0, 8)}`),
-      files: [{ url: CMU_DICT.url, sha256: CMU_DICT.sha256, name: "cmudict_data.json", bytes: CMU_DICT.bytes }],
-    };
-    await ensureAsset(dict);
-    const cmuDict = JSON.parse(await readFile(join(dict.dir, "cmudict_data.json"), "utf8")) as Record<string, string>;
-    return new EnglishG2P({ cmuDict });
-  })().catch((err: unknown) => {
-    english = undefined;
-    throw err;
-  });
-  return english;
+export function resolveTtsFrontendAssets(root: string = TTS_ROOT): FileSetSpec {
+  return {
+    dir: join(root, `piper-plus-g2p-${PIPER_PLUS_COMMIT.slice(0, 8)}`),
+    files: [{ url: CMU_DICT.url, sha256: CMU_DICT.sha256, name: "cmudict_data.json", bytes: CMU_DICT.bytes }],
+  };
+}
+
+/** One parsed dictionary per root. Browser loading requires already provisioned bytes. */
+async function loadEnglishG2P(root: string, allowDownload: boolean): Promise<EnglishG2P> {
+  const dict = resolveTtsFrontendAssets(root);
+  if (!allowDownload) {
+    await verifyTtsFiles(dict.dir, [{ name: "cmudict_data.json", sha256: CMU_DICT.sha256, bytes: CMU_DICT.bytes }]);
+  }
+  let loaded = english.get(dict.dir);
+  if (!loaded) {
+    loaded = (async () => {
+      if (allowDownload) await ensureAsset(dict);
+      const cmuDict = JSON.parse(await readFile(join(dict.dir, "cmudict_data.json"), "utf8")) as Record<string, string>;
+      return new EnglishG2P({ cmuDict });
+    })().catch((err: unknown) => {
+      english.delete(dict.dir);
+      throw err;
+    });
+    english.set(dict.dir, loaded);
+  }
+  return loaded;
 }
 
 /**
@@ -164,15 +188,17 @@ function loadEnglishG2P(root: string): Promise<EnglishG2P> {
  * registry voices).
  */
 export async function createTtsFrontend(
-  voice: { tokens: string; lang: string },
+  voice: { tokens: string; lang: string; family?: TtsModelFamily },
   root: string = TTS_ROOT,
+  allowDownload = true,
 ): Promise<TtsFrontend> {
-  const [g2p, tokens] = await Promise.all([loadEnglishG2P(root), readFile(voice.tokens, "utf8")]);
+  const [g2p, tokens] = await Promise.all([loadEnglishG2P(root, allowDownload), readFile(voice.tokens, "utf8")]);
   const symbols = parseTokenSymbols(tokens);
   const british = BRITISH_VOICES.has(voice.lang);
   return {
     request: (text, sid, speed) => {
-      const ipa = adaptIpa(g2p.phonemize(normalizeText(text, british)).tokens.join(""), british);
+      const raw = g2p.phonemize(normalizeText(text, british)).tokens.join("");
+      const ipa = voice.family === "kokoro" ? toMisaki(raw) : adaptIpa(raw, british);
       const phonemeCodepoints = toPhonemeCodepoints(ipa, symbols);
       return phonemeCodepoints.length > 0
         ? { text: "", sid, speed, generationConfig: { phonemeCodepoints, sid, speed } }

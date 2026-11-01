@@ -11,6 +11,7 @@ import {
   normalizeText,
   parseTokenSymbols,
   toPhonemeCodepoints,
+  toMisaki,
 } from "./frontend.ts";
 import { EnglishG2P } from "./vendor/piper-plus-g2p/en/index.js";
 
@@ -63,23 +64,38 @@ test("adaptIpa applies the RP rules for British voices", () => {
   assert.equal(adaptIpa(ipa, true), "mˈɑːtʃ kˈɑː stˈuːət");
 });
 
-test("toPhonemeCodepoints splits sentences and drops unknown symbols", () => {
+test("toPhonemeCodepoints rejects meaningful missing phonemes and permits absent separators", () => {
   const symbols = new Set(["a", "b", " ", "."]);
-  assert.deepEqual(toPhonemeCodepoints("ab x. a?", symbols), [[97, 98, 32, 46], [97]]);
+  assert.throws(() => toPhonemeCodepoints("ab x. a?", symbols), /Unknown TTS phonemes.*x/);
+  assert.deepEqual(toPhonemeCodepoints("ab. a?", symbols), [[97, 98, 46], [97]]);
+  assert.deepEqual(toPhonemeCodepoints("... ?", symbols), []);
+  assert.throws(() => toPhonemeCodepoints("aˈ", symbols), /ˈ/);
+});
+
+test("Kokoro mapping matches research diphthongs, rhotics, affricates and syllabic consonants", () => {
+  assert.equal(toMisaki("ɹ̩ ɚ ɝ ɜːɹ ɜː oʊ əʊ eɪ aɪ aʊ ɔɪ t͡ʃ d^ʒ ɫ g r ɐ n̩ ɑː"),
+    "əɹ əɹ ɜɹ ɜɹ ɜɹ O Q A I W Y ʧ ʤ l ɡ ɹ ə ᵊn ɑ");
+  const raw = g2p.phonemize("march car stuart").tokens.join("");
+  assert.equal(toMisaki(raw), "mˈɑɹʧ kˈɑɹ stˈuəɹt");
 });
 
 test("createTtsFrontend asks for no synthesis when nothing is speakable", async () => {
   const dir = await mkdtemp(join(tmpdir(), "speak-easy-frontend-"));
   try {
     const tokens = join(dir, "tokens.txt");
-    await writeFile(tokens, "_ 0\n^ 1\n$ 2\n  3\n. 4\n");
+    await writeFile(tokens, "_ 0\n^ 1\n$ 2\n  3\n. 4\nm 5\nˈ 6\nɑ 7\nɹ 8\nʧ 9\nt 10\nʃ 11\nː 12\n");
     const g2pDir = join(dir, "piper-plus-g2p-4fd95c24");
     await mkdir(g2pDir);
-    await writeFile(join(g2pDir, "cmudict_data.json"), "{}");
+    await writeFile(join(g2pDir, "cmudict_data.json"), JSON.stringify({ march: "M AA1 R CH" }));
     await writeFile(join(g2pDir, COMPLETE_MARKER), `${CMU_DICT.sha256}  cmudict_data.json\n`);
     const frontend = await createTtsFrontend({ tokens, lang: "en-us" }, dir);
     assert.equal(frontend.request("...", 0, 1), undefined);
     assert.equal(frontend.request("   ", 0, 1), undefined);
+    const kokoro = await createTtsFrontend({ tokens, lang: "en-us", family: "kokoro" }, dir);
+    const kristin = await createTtsFrontend({ tokens, lang: "en", family: "vits" }, dir);
+    const ipa = (f: typeof frontend) => f.request("march", 0, 1)!.generationConfig!.phonemeCodepoints!.map((s) => String.fromCodePoint(...s)).join("");
+    assert.equal(ipa(kokoro), "mˈɑɹʧ");
+    assert.equal(ipa(kristin), "mˈɑːtʃ");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

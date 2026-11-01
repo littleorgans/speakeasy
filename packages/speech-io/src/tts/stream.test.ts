@@ -106,3 +106,46 @@ test("planSegments leaves a short first sentence whole", () => {
   ]);
   assert.deepEqual(planSegments("Hello there."), ["Hello there."]);
 });
+
+test("pipeline readiness includes the wait for initial text on its own clock", async () => {
+  const { synthPipeline } = await import("./stream.ts");
+  let clock = 10;
+  async function* text() { clock += 90; yield "Hello."; }
+  const audio = synthPipeline(text(), {
+    async synth() {
+      clock += 5;
+      return { samples: Float32Array.of(0.5), sampleRate: 1000, firstAudioMs: undefined, totalSynthMs: 5, audioDurationMs: 1, rtf: 5 };
+    },
+  }, 1, () => clock);
+  assert.equal((await audio.next()).value?.readyAtMs, 95);
+  await audio.return();
+});
+
+test("cancelling a pending text pull suppresses later synthesis and requests producer return", async () => {
+  const { synthPipeline } = await import("./stream.ts");
+  let release!: (value: IteratorResult<string>) => void;
+  const late = new Promise<IteratorResult<string>>((resolve) => { release = resolve; });
+  let pulls = 0;
+  let closed = 0;
+  let synths = 0;
+  const text: AsyncIterable<string> = {
+    [Symbol.asyncIterator]() {
+      return {
+        next: async () => ++pulls === 1 ? { done: false, value: "First." } : late,
+        return: async () => { closed += 1; return { done: true, value: undefined }; },
+      };
+    },
+  };
+  const audio = synthPipeline(text, {
+    async synth() {
+      synths += 1;
+      return { samples: Float32Array.of(0.5), sampleRate: 1000, firstAudioMs: undefined, totalSynthMs: 1, audioDurationMs: 1, rtf: 1 };
+    },
+  });
+  await audio.next();
+  await audio.return();
+  release({ done: false, value: "Late." });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(synths, 1);
+  assert.equal(closed, 1);
+});
