@@ -14,6 +14,8 @@ import {
   sameSpeechOutputConfig,
 } from "@speakeasy/speech-io/providers";
 import type {
+  LocalInputModelRegistration,
+  LocalOutputModelRegistration,
   SpeechConfigRegistries,
   SpeechInputConfig,
   SpeechOutputConfig,
@@ -34,6 +36,20 @@ const localOutput: SpeechOutputConfig = {
 };
 const apiOutput: SpeechOutputConfig = {
   schema: 1, provider: { kind: "openai" }, model: "researched-output", voice: "api-voice", speed: 1,
+};
+const localModels: LocalInputModelRegistration[] = [
+  { runtimeKind: "mlx-parakeet", model: "registered-parakeet" },
+  { runtimeKind: "speechcpp-qwen3-asr", model: "registered-qwen" },
+  { runtimeKind: "sherpa-nemo-transducer", model: "registered-transducer" },
+  { runtimeKind: "mlx-lm-cleanup", model: "registered-cleanup" },
+];
+const outputModels: LocalOutputModelRegistration[] = [
+  { kind: "local", runtimeKind: "sherpa-vits", model: "registered-vits", voices: [0, "speaker"], speed: { min: 0.5, max: 2 } },
+  { kind: "local", runtimeKind: "sherpa-kokoro", model: "registered-kokoro", voices: [3, "heart"], speed: { min: 0.75, max: 1.5 } },
+];
+const registered: SpeechConfigRegistries = {
+  input: { ...registries.input, localModels },
+  output: [...registries.output, ...outputModels],
 };
 
 function rejectsConfig(run: () => unknown): void {
@@ -104,6 +120,112 @@ test("config identity compares fields rather than object order, preserving voice
   assert.equal(sameSpeechInputConfig(apiInput, localInput), false);
   assert.equal(sameSpeechOutputConfig(localOutput, { ...localOutput, voice: "0" }), false);
   assert.equal(sameSpeechOutputConfig(localOutput, { ...localOutput, speed: 1.1 }), false);
+});
+
+test("registered local input models round trip with an alternate symbolic model per runtime", () => {
+  for (const entry of localModels) {
+    const alternate = { ...entry, model: `${entry.model}-alternate` };
+    const inputRegistry = { ...registered.input, localModels: [...localModels, alternate] };
+    for (const model of [entry, alternate]) {
+      const input: SpeechInputConfig = { schema: 1, provider: { kind: "local", ...model } };
+      const preference = { schema: 1, input, output: localOutput };
+      rejectsConfig(() => parseSpeechInputConfig(input, registries.input));
+      const parsed = parseSpeechPreferences(JSON.parse(JSON.stringify(preference)), { ...registered, input: inputRegistry });
+      assert.deepEqual(parsed, preference);
+      assert.notEqual(parsed.input.provider, input.provider);
+    }
+  }
+});
+
+test("registered local input requires exact runtime and model with no preset or execution fields", () => {
+  const provider = { kind: "local", ...localModels[0]! };
+  assert.deepEqual(parseSpeechInputConfig({ schema: 1, provider }, registered.input).provider, provider);
+  for (const invalid of [
+    { ...provider, model: localModels[1]!.model },
+    { ...provider, runtimeKind: localModels[1]!.runtimeKind },
+    { ...provider, runtimeKind: "sherpa-vits" },
+    { ...provider, runtimeKind: "unknown-runtime" },
+    { ...provider, model: "not-registered" },
+    { ...provider, model: "/tmp/custom-model.onnx" },
+    { ...provider, model: "python run-model.py" },
+    { ...provider, presetId: "manifest-owned-preset" },
+    { kind: "local", runtimeKind: provider.runtimeKind },
+    { kind: "local", model: provider.model },
+    { ...apiInput.provider, runtimeKind: provider.runtimeKind },
+    ...["path", "modelPath", "command", "apiKey"].map((field) => ({ ...provider, [field]: "forbidden" })),
+  ]) rejectsConfig(() => parseSpeechInputConfig({ schema: 1, provider: invalid }, registered.input));
+  rejectsConfig(() => parseSpeechInputConfig({ schema: 1, provider: { ...provider, runtimeKind: "unknown-runtime" } }, {
+    ...registered.input, localModels: [{ runtimeKind: "unknown-runtime", model: provider.model }] as unknown as LocalInputModelRegistration[],
+  }));
+});
+
+test("registered local output models round trip with independent voice and speed controls", () => {
+  for (const entry of outputModels) {
+    const alternate = { ...entry, model: `${entry.model}-alternate` };
+    for (const model of [entry, alternate]) {
+      for (const voice of model.voices) {
+        for (const speed of [model.speed.min, model.speed.max]) {
+          const output: SpeechOutputConfig = { schema: 1,
+            provider: { kind: "local", runtimeKind: model.runtimeKind }, model: model.model, voice, speed };
+          const preference = { schema: 1, input: apiInput, output };
+          rejectsConfig(() => parseSpeechOutputConfig(output, registries.output));
+          const parsed = parseSpeechPreferences(JSON.parse(JSON.stringify(preference)), {
+            ...registered, output: [...registered.output, alternate],
+          });
+          assert.deepEqual(parsed, preference);
+          assert.notEqual(parsed.output.provider, output.provider);
+        }
+      }
+    }
+  }
+});
+
+test("registered local output binds runtime, model, typed voice and speed without changing legacy forms", () => {
+  const output: SpeechOutputConfig = { schema: 1, provider: { kind: "local", runtimeKind: "sherpa-vits" },
+    model: "registered-vits", voice: 0, speed: 1 };
+  assert.deepEqual(parseSpeechOutputConfig(output, registered.output), output);
+  for (const invalid of [
+    { ...output, provider: { kind: "local" } },
+    { ...output, provider: { kind: "local", runtimeKind: "sherpa-kokoro" } },
+    { ...output, provider: { kind: "local", runtimeKind: "mlx-parakeet" } },
+    { ...output, provider: { kind: "local", runtimeKind: "unknown-runtime" } },
+    { ...output, model: "registered-kokoro" },
+    { ...output, model: "/tmp/custom-model.onnx" },
+    { ...output, voice: "0" }, { ...output, voice: 3 }, { ...output, speed: 2.01 },
+    { ...localOutput, provider: output.provider },
+    { ...apiOutput, provider: { ...apiOutput.provider, runtimeKind: "sherpa-vits" } },
+    ...["path", "command", "apiKey"].map((field) => ({ ...output, provider: { ...output.provider, [field]: "forbidden" } })),
+  ]) rejectsConfig(() => parseSpeechOutputConfig(invalid, registered.output));
+  const invalidKind = { kind: "local", runtimeKind: "unknown-runtime" };
+  rejectsConfig(() => parseSpeechOutputConfig({ ...output, provider: invalidKind }, [
+    { ...outputModels[0]!, ...invalidKind } as unknown as LocalOutputModelRegistration,
+  ]));
+  for (const config of [localOutput, apiOutput]) {
+    assert.deepEqual(parseSpeechOutputConfig(config, registered.output), config);
+  }
+});
+
+test("registered local identity distinguishes variants, runtime kinds and symbolic models", () => {
+  const input: SpeechInputConfig = { schema: 1, provider: { kind: "local", ...localModels[0]! } };
+  const sameInput: SpeechInputConfig = { provider: { model: localModels[0]!.model, runtimeKind: "mlx-parakeet", kind: "local" }, schema: 1 };
+  assert.equal(sameSpeechInputConfig(input, sameInput), true);
+  for (const provider of [
+    { kind: "local", ...localModels[1]!, model: localModels[0]!.model },
+    { kind: "local", ...localModels[0]!, model: "alternate-model" },
+    { kind: "local", presetId: localModels[0]!.model },
+  ] satisfies SpeechInputConfig["provider"][]) {
+    const other: SpeechInputConfig = { schema: 1, provider };
+    assert.equal(sameSpeechInputConfig(input, other), false);
+    assert.equal(sameSpeechInputConfig(other, input), false);
+  }
+  const output: SpeechOutputConfig = { ...localOutput, provider: { kind: "local", runtimeKind: "sherpa-vits" } };
+  assert.equal(sameSpeechOutputConfig(output, structuredClone(output)), true);
+  for (const other of [localOutput, { ...output, provider: { kind: "local", runtimeKind: "sherpa-kokoro" } },
+    { ...output, model: "alternate-model" }, { ...output, voice: "0" }, { ...output, speed: 1.5 },
+  ] satisfies SpeechOutputConfig[]) {
+    assert.equal(sameSpeechOutputConfig(output, other), false);
+    assert.equal(sameSpeechOutputConfig(other, output), false);
+  }
 });
 
 test("timing preserves measured zero, reported evidence and explicit unavailability", () => {

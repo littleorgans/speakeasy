@@ -32,6 +32,18 @@ const apiOutput: SpeechOutputConfig = {
 const siblingOutput: SpeechOutputConfig = {
   schema: 1, provider: { kind: "openai" }, model: "test-output", voice: "voice-one", speed: 1,
 };
+const registeredInput: SpeechInputConfig = {
+  schema: 1, provider: { kind: "local", runtimeKind: "mlx-parakeet", model: "registered-input" },
+};
+const siblingRegisteredInput: SpeechInputConfig = {
+  schema: 1, provider: { kind: "local", runtimeKind: "speechcpp-qwen3-asr", model: "registered-input" },
+};
+const registeredOutput: SpeechOutputConfig = {
+  ...localOutput, provider: { kind: "local", runtimeKind: "sherpa-vits" },
+};
+const siblingRegisteredOutput: SpeechOutputConfig = {
+  ...localOutput, provider: { kind: "local", runtimeKind: "sherpa-kokoro" },
+};
 const live: ProviderSource = { kind: "live-capture", sessionId: "session-one", operationId: "capture-one" };
 const typed: ProviderSource = { kind: "typed-text", sessionId: "session-one" };
 const saved: ProviderSource = { kind: "saved-take", corpusId: "test-corpus", takeId: "take-one" };
@@ -40,8 +52,8 @@ function fixture(grants: VerifiedOwnerReplayGrant[] = []) {
   const environment: Record<string, string | undefined> = {
     CARTESIA_API_KEY: "fixture-cartesia", OPENAI_API_KEY: "fixture-openai",
   };
-  const inputConfigs = [localInput, apiInput, siblingInput, secondModel];
-  const outputConfigs = [localOutput, apiOutput, siblingOutput];
+  const inputConfigs = [localInput, apiInput, siblingInput, secondModel, registeredInput, siblingRegisteredInput];
+  const outputConfigs = [localOutput, apiOutput, siblingOutput, registeredOutput, siblingRegisteredOutput];
   function entry<C extends SpeechInputConfig | SpeechOutputConfig>(
     config: C, index: number, direction: SpeechDirection,
   ): CatalogueEntry<C> {
@@ -57,10 +69,12 @@ function fixture(grants: VerifiedOwnerReplayGrant[] = []) {
   const registries: SpeechConfigRegistries = {
     input: {
       localPresets: [{ id: "test-preset" }],
+      localModels: inputConfigs.flatMap(({ provider }) =>
+        provider.kind === "local" && provider.runtimeKind !== undefined ? [provider] : []),
       apiModels: inputConfigs.flatMap((config) => config.provider.kind === "local" ? [] : [config.provider]),
     },
     output: outputConfigs.map((config) => ({
-      kind: config.provider.kind, model: config.model,
+      ...config.provider, model: config.model,
       voices: [config.voice, "voice-two", 0, "0"], speed: { min: 0.5, max: 2 },
     })),
   };
@@ -124,6 +138,62 @@ test("local live input and saved replay remain available without API keys or sel
     f.calls++;
   });
   assert.equal(f.calls, 4);
+});
+
+test("registered local input binds catalogue availability to its exact runtime and revision", async () => {
+  const f = fixture();
+  const selection = f.select("input", registeredInput);
+  const request = f.request(selection, saved);
+  await f.policy.dispatch(request, ({ authorization, apiKey }) => {
+    assert.deepEqual(authorization.config, registeredInput);
+    assert.equal(authorization.grantId, null);
+    assert.equal(apiKey, undefined);
+    f.calls++;
+  });
+  const entry = f.catalogue.input.find((item) => item.config.provider.kind === "local" &&
+    "runtimeKind" in item.config.provider && item.config.provider.runtimeKind === "mlx-parakeet");
+  assert.ok(entry);
+  entry.selectable = false;
+  await denied(f, request, "PROVIDER_UNAVAILABLE");
+  entry.selectable = true;
+  f.catalogue.input = f.catalogue.input.filter((item) => item !== entry);
+  await denied(f, request, "PROVIDER_UNAVAILABLE");
+  f.catalogue.input.push(entry);
+  f.catalogue.revision = "registration-revised";
+  await denied(f, request, "SELECTION_STALE");
+  f.catalogue.revision = selection.catalogueRevision;
+  f.registries.input.localModels = [];
+  await denied(f, request, "CONFIG_UNSUPPORTED");
+  await denied(f, f.request(f.select("input", apiInput), saved), "SAVED_REPLAY_NOT_AUTHORIZED");
+});
+
+test("registered local output availability cannot borrow a legacy or sibling runtime entry", async () => {
+  const f = fixture();
+  const config = { ...registeredOutput, voice: "voice-two", speed: 0.75 };
+  const selection = f.select("output", config);
+  const request = f.request(selection, typed);
+  let recheck: (() => unknown) | undefined;
+  await f.policy.dispatch(request, (context) => {
+    assert.deepEqual(context.authorization.config, config);
+    assert.equal(context.apiKey, undefined);
+    recheck = context.recheck;
+    f.calls++;
+  });
+  const entry = f.catalogue.output.find((item) => item.config.provider.kind === "local" &&
+    "runtimeKind" in item.config.provider && item.config.provider.runtimeKind === "sherpa-vits");
+  assert.ok(entry);
+  entry.selectable = false;
+  await denied(f, request, "PROVIDER_UNAVAILABLE");
+  assert.ok(recheck);
+  assert.throws(recheck, (error: unknown) => error instanceof ProviderError && error.code === "PROVIDER_UNAVAILABLE");
+  entry.selectable = true;
+  f.catalogue.output = f.catalogue.output.filter((item) => item !== entry);
+  await denied(f, request, "PROVIDER_UNAVAILABLE");
+  f.catalogue.output.push(entry);
+  f.catalogue.revision = "registration-revised";
+  await denied(f, request, "SELECTION_STALE");
+  f.catalogue.revision = selection.catalogueRevision;
+  await denied(f, f.request(f.select("output", apiOutput), saved), "SAVED_REPLAY_NOT_AUTHORIZED");
 });
 
 test("restored preference and client selected flags grant no API permission", async () => {

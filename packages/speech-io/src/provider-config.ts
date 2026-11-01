@@ -5,16 +5,32 @@ export type OutputApiKind = "cartesia" | "openai" | "elevenlabs";
 export type ApiProviderKind = InputApiKind | OutputApiKind;
 export type SpeechDirection = "input" | "output";
 
+export type LocalInputRuntimeKind =
+  | "mlx-parakeet"
+  | "speechcpp-qwen3-asr"
+  | "sherpa-nemo-transducer"
+  | "mlx-lm-cleanup";
+export type LocalOutputRuntimeKind = "sherpa-vits" | "sherpa-kokoro";
+
+/** Portable projection of a trusted host registration, without artifact locations. */
+export type LocalInputModelRegistration = {
+  runtimeKind: LocalInputRuntimeKind;
+  model: string;
+};
+
 export type SpeechInputConfig = {
   schema: 1;
   provider:
-    | { kind: "local"; presetId: string }
+    | { kind: "local"; presetId: string; runtimeKind?: never; model?: never }
+    | ({ kind: "local"; presetId?: never } & LocalInputModelRegistration)
     | { kind: InputApiKind; model: string };
 };
 
 export type SpeechOutputConfig = {
   schema: 1;
-  provider: { kind: "local" | OutputApiKind };
+  provider:
+    | { kind: "local"; runtimeKind?: LocalOutputRuntimeKind }
+    | { kind: OutputApiKind; runtimeKind?: never };
 } & Required<Pick<TTSConfig, "model" | "voice" | "speed">>;
 
 export type SpeechPreferences = {
@@ -26,16 +42,24 @@ export type SpeechPreferences = {
 /** Supply the actual preset manifest and adapter models, without loading them. */
 export type SpeechInputRegistry = {
   localPresets: readonly { id: string }[];
+  localModels?: readonly LocalInputModelRegistration[];
   apiModels: readonly { kind: InputApiKind; model: string }[];
 };
 
 /** Project the existing output registry; numeric and named voices stay distinct. */
-export type SpeechOutputRegistry = readonly {
-  kind: SpeechOutputConfig["provider"]["kind"];
+export type SpeechOutputRegistration = SpeechOutputConfig["provider"] & {
   model: string;
   voices: readonly SpeechOutputConfig["voice"][];
   speed: { min: number; max: number };
-}[];
+};
+
+/** Explicit local registrations require runtime identity; legacy entries omit it. */
+export type LocalOutputModelRegistration = SpeechOutputRegistration & {
+  kind: "local";
+  runtimeKind: LocalOutputRuntimeKind;
+};
+
+export type SpeechOutputRegistry = readonly SpeechOutputRegistration[];
 
 export type SpeechConfigRegistries = {
   input: SpeechInputRegistry;
@@ -148,11 +172,16 @@ export function parseSpeechInputConfig(
       !record(value.provider)) return invalidConfig();
   const provider = value.provider;
   if (provider.kind === "local") {
-    if (!keys(provider, ["kind", "presetId"]) || !text(provider.presetId) ||
-        !registry.localPresets.some((preset) => preset.id === provider.presetId)) {
+    if (keys(provider, ["kind", "presetId"]) && text(provider.presetId) &&
+        registry.localPresets.some((preset) => preset.id === provider.presetId)) {
+      return { schema: 1, provider: { kind: "local", presetId: provider.presetId } };
+    }
+    if (!keys(provider, ["kind", "runtimeKind", "model"]) ||
+        !isLocalInputRuntimeKind(provider.runtimeKind) || !text(provider.model) ||
+        !registry.localModels?.some((entry) => entry.runtimeKind === provider.runtimeKind && entry.model === provider.model)) {
       return invalidConfig();
     }
-    return { schema: 1, provider: { kind: "local", presetId: provider.presetId } };
+    return { schema: 1, provider: { kind: "local", runtimeKind: provider.runtimeKind, model: provider.model } };
   }
   if (!keys(provider, ["kind", "model"]) || !text(provider.model) ||
       !isInputApiKind(provider.kind) ||
@@ -167,19 +196,26 @@ export function parseSpeechOutputConfig(
   registry: SpeechOutputRegistry,
 ): SpeechOutputConfig {
   if (!record(value) || !keys(value, ["schema", "provider", "model", "voice", "speed"]) ||
-      value.schema !== 1 || !record(value.provider) || !keys(value.provider, ["kind"]) ||
+      value.schema !== 1 || !record(value.provider) ||
       !isOutputKind(value.provider.kind) || !text(value.model) ||
       !(text(value.voice) || (typeof value.voice === "number" && Number.isInteger(value.voice) && value.voice >= 0)) ||
       typeof value.speed !== "number" || !Number.isFinite(value.speed) || value.speed <= 0) {
     return invalidConfig();
   }
   const { kind } = value.provider;
+  let provider: SpeechOutputConfig["provider"];
+  if (keys(value.provider, ["kind"])) provider = { kind };
+  else if (kind === "local" && keys(value.provider, ["kind", "runtimeKind"]) &&
+      isLocalOutputRuntimeKind(value.provider.runtimeKind)) {
+    provider = { kind, runtimeKind: value.provider.runtimeKind };
+  } else return invalidConfig();
   const { model, voice, speed } = value;
   if (!registry.some((entry) => entry.kind === kind && entry.model === model &&
+      entry.runtimeKind === provider.runtimeKind &&
       entry.voices.includes(voice) && speed >= entry.speed.min && speed <= entry.speed.max)) {
     return invalidConfig();
   }
-  return { schema: 1, provider: { kind }, model, voice, speed };
+  return { schema: 1, provider, model, voice, speed };
 }
 
 export function parseSpeechPreferences(
@@ -202,16 +238,31 @@ function isOutputKind(value: unknown): value is SpeechOutputConfig["provider"]["
   return value === "local" || value === "cartesia" || value === "openai" || value === "elevenlabs";
 }
 
+function isLocalInputRuntimeKind(value: unknown): value is LocalInputRuntimeKind {
+  return value === "mlx-parakeet" || value === "speechcpp-qwen3-asr" ||
+    value === "sherpa-nemo-transducer" || value === "mlx-lm-cleanup";
+}
+
+function isLocalOutputRuntimeKind(value: unknown): value is LocalOutputRuntimeKind {
+  return value === "sherpa-vits" || value === "sherpa-kokoro";
+}
+
 export function sameSpeechInputConfig(a: SpeechInputConfig, b: SpeechInputConfig): boolean {
-  return a.provider.kind === "local" && b.provider.kind === "local"
-    ? a.provider.presetId === b.provider.presetId
-    : a.provider.kind !== "local" && b.provider.kind !== "local" &&
-      a.provider.kind === b.provider.kind && a.provider.model === b.provider.model;
+  if (a.provider.kind === "local" && b.provider.kind === "local") {
+    return a.provider.presetId === b.provider.presetId &&
+      a.provider.runtimeKind === b.provider.runtimeKind && a.provider.model === b.provider.model;
+  }
+  return a.provider.kind !== "local" && b.provider.kind !== "local" &&
+    a.provider.kind === b.provider.kind && a.provider.model === b.provider.model;
+}
+
+/** Catalogue availability is per exact model identity; controls are registry validated. */
+export function sameSpeechOutputModel(a: SpeechOutputConfig, b: SpeechOutputConfig): boolean {
+  return a.provider.kind === b.provider.kind && a.provider.runtimeKind === b.provider.runtimeKind && a.model === b.model;
 }
 
 export function sameSpeechOutputConfig(a: SpeechOutputConfig, b: SpeechOutputConfig): boolean {
-  return a.provider.kind === b.provider.kind && a.model === b.model &&
-    a.voice === b.voice && a.speed === b.speed;
+  return sameSpeechOutputModel(a, b) && a.voice === b.voice && a.speed === b.speed;
 }
 
 export function parseTimingObservation(value: unknown): TimingObservation {

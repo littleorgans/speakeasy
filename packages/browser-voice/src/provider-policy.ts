@@ -5,6 +5,7 @@ import {
   safeProviderError,
   sameSpeechInputConfig,
   sameSpeechOutputConfig,
+  sameSpeechOutputModel,
 } from "@speakeasy/speech-io/providers";
 import type {
   SpeechCatalogue,
@@ -188,8 +189,7 @@ export class ProviderPolicy {
         const config = parseSpeechOutputConfig(request.config, registries.output);
         resolved = { direction: "output", config, catalogueRevision: catalogue.revision };
         // Output entries describe a model. Its registry validates voices and speed.
-        selectable = catalogue.output.find((entry) => entry.config.provider.kind === config.provider.kind &&
-          entry.config.model === config.model)?.selectable;
+        selectable = catalogue.output.find((entry) => sameSpeechOutputModel(entry.config, config))?.selectable;
       } else {
         throw new ProviderError("CONFIG_UNSUPPORTED");
       }
