@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 
-export const SETUP_IDS = [
+export const SETUP_IDS = Object.freeze([
   "mlx-parakeet/v3-greedy", "mlx-parakeet/ultra-greedy", "qwen/context",
   "sweep/score-2", "mlx-cleanup/qwen-targeted",
-] as const;
+] as const);
 export type SetupId = typeof SETUP_IDS[number];
 export const DEFAULT_SETUP_ID: SetupId = SETUP_IDS[0];
 export const ULTRA_SETUP_ID: SetupId = "mlx-parakeet/ultra-greedy";

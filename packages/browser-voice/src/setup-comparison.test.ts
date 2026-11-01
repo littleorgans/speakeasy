@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { setTimeout as delay } from "node:timers/promises";
+import { setImmediate as settle, setTimeout as delay } from "node:timers/promises";
 import { test } from "node:test";
 import { SetupComparison, ComparisonBusyError } from "./setup-comparison.ts";
 import {
@@ -88,6 +88,17 @@ test("registry pins five exact immutable identities and rejects arbitrary ids or
   assert.deepEqual(parseSetupSelection(), [V3]);
   for (const bad of [[], [V3, V3], ["missing"], [{ id: V3, seed: 4 }], "all"]) {
     assert.throws(() => parseSetupSelection(bad), /unique local/);
+  }
+});
+
+test("the shared setup id order is immutable at runtime", () => {
+  const original = [...SETUP_IDS];
+  try {
+    assert.throws(() => { (SETUP_IDS as unknown as string[])[0] = "custom/model"; }, TypeError);
+    assert.deepEqual(parseSetupSelection(), [V3]);
+    assert.deepEqual(SETUP_IDS, original);
+  } finally {
+    if (!Object.isFrozen(SETUP_IDS)) Object.assign(SETUP_IDS, original);
   }
 });
 
@@ -407,6 +418,37 @@ test("idle release waits for comparison work and its exit before a newly admitte
   assert.ok(!h.executor.calls.includes(`load:${QWEN}`));
   released.resolve();
   assert.equal((await queued.done).status, "complete");
+  assert.equal((await h.take([V3]).done).rows[0].timings.firstUse, true);
+  assert.equal(h.executor.maxActive, 1);
+});
+
+test("queued comparisons release expired unused models between jobs and wait for exit", async (t) => {
+  let now = 0;
+  const h = harness({ now: () => now });
+  const entered = barrier();
+  const finished = barrier();
+  const released = barrier();
+  t.after(async () => { finished.resolve(); released.resolve(); await h.service.close(); });
+  await h.take([V3]).done;
+  h.executor.onExecute = async (request) => {
+    if (request.setupId === QWEN) { entered.resolve(); await finished.promise; }
+    return output();
+  };
+  h.executor.onRelease = async (id) => { if (id === V3) await released.promise; };
+  const active = h.take([QWEN]);
+  await entered.promise;
+  const queued = h.take([CPU]);
+  now = SETUP_MANIFEST.idleReleaseMs + 1;
+  assert.ok(!h.executor.calls.includes(`release:${V3}`), "release waits for the active operation");
+  finished.resolve();
+  await active.done;
+  await settle();
+  assert.ok(h.executor.calls.includes(`release:${V3}`), "expiration is checked before queued work");
+  assert.ok(!h.executor.calls.includes(`load:${CPU}`), "queued load waits for release exit");
+  released.resolve();
+  assert.equal((await queued.done).status, "complete");
+  assert.ok(h.executor.calls.indexOf(`release:${V3}`) < h.executor.calls.indexOf(`load:${CPU}`));
+  assert.ok(!h.executor.calls.includes(`release:${QWEN}`), "recently used models remain resident");
   assert.equal((await h.take([V3]).done).rows[0].timings.firstUse, true);
   assert.equal(h.executor.maxActive, 1);
 });

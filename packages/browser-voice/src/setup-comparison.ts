@@ -138,9 +138,11 @@ export class SetupComparison {
     if (this.#pump) return;
     // Admission is synchronous; all executor calls start on this one pump.
     this.#pump = Promise.resolve().then(async () => {
-      await this.#releaseExpired();
-      while (this.#active) {
+      for (;;) {
+        // A queued comparison may follow minutes of work on other models.
+        await this.#releaseExpired();
         const job = this.#active;
+        if (!job) break;
         try { await this.#run(job); }
         finally { this.#finish(job); }
         this.#active = this.#queued;
