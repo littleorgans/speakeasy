@@ -118,7 +118,7 @@ test("pipeline readiness includes the wait for initial text on its own clock", a
     },
   }, 1, () => clock);
   assert.equal((await audio.next()).value?.readyAtMs, 95);
-  await audio.return();
+  await audio.return(undefined);
 });
 
 test("cancelling a pending text pull suppresses later synthesis and requests producer return", async () => {
@@ -143,7 +143,7 @@ test("cancelling a pending text pull suppresses later synthesis and requests pro
     },
   });
   await audio.next();
-  await audio.return();
+  await audio.return(undefined);
   release({ done: false, value: "Late." });
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(synths, 1);

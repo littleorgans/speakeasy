@@ -20,6 +20,12 @@ async function collect(stream: AsyncIterable<AudioSegment>): Promise<AudioSegmen
   return out;
 }
 
+function responseWithArrayBuffer(arrayBuffer: Response["arrayBuffer"]): Response {
+  const response = new Response();
+  Object.defineProperty(response, "arrayBuffer", { value: arrayBuffer });
+  return response;
+}
+
 /** A fetch stub returning raw f32le PCM, capturing the request it saw. */
 function stubFetch(
   samples: Float32Array,
@@ -257,12 +263,10 @@ test("request wall includes complete body receipt and excludes policy and callba
     now: () => clock,
     fetch: async () => {
       clock += 25;
-      const response = new Response();
-      response.arrayBuffer = async () => {
+      return responseWithArrayBuffer(async () => {
         clock += 50;
         return new Float32Array([0.2]).buffer;
-      };
-      return response;
+      });
     },
     onRequestComplete: (result) => { completed.push(result); clock += 200; },
   }).open({ model: "sonic-3.6-2026-08-27", voice: "DANIEL" });
@@ -317,12 +321,10 @@ test("external abort cancels body buffering promptly and suppresses late callbac
     fetch: async (_url, init) => {
       calls += 1;
       signal = init.signal;
-      const response = new Response();
-      response.arrayBuffer = () => {
+      return responseWithArrayBuffer(() => {
         started();
         return new Promise<ArrayBuffer>((resolve) => { finish = resolve; });
-      };
-      return response;
+      });
     },
   }).open();
   const pending = collect(session.speak("First sentence. Second sentence."));
