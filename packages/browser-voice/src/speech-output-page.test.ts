@@ -224,17 +224,37 @@ for (const { name, outputTimestamp, expected } of [
   }
 });
 
-test("missing output timestamp support keeps the first render unavailable without replacing it", async () => {
+for (const { name, getOutputTimestamp } of [
+  { name: "missing output timestamp support", getOutputTimestamp: undefined },
+  { name: "missing output timestamp result", getOutputTimestamp: () => undefined },
+  { name: "zero output timestamp performance position", getOutputTimestamp: () => ({ contextTime: 4, performanceTime: 0 }) },
+  { name: "nonfinite output timestamp position", getOutputTimestamp: () => ({ contextTime: NaN, performanceTime: 1000 }) },
+  { name: "throwing output timestamp query", getOutputTimestamp: () => { throw new Error("Output timestamp unavailable."); } },
+]) test(`${name} keeps the first render unavailable without replacing it`, async () => {
   const h = await outputHarness();
   const { socket, requestId, port } = await h.start();
   h.accepted(socket, requestId);
-  h.contexts[0].getOutputTimestamp = undefined;
-  port.onmessage?.({ data: { kind: "first-render", playbackId: 7, audioTime: 4.125 } });
+  h.contexts[0].getOutputTimestamp = getOutputTimestamp;
+  assert.doesNotThrow(() => port.onmessage?.({ data: { kind: "first-render", playbackId: 7, audioTime: 4.125 } }));
+  assert.equal(h.controls.job.rendered, true, "nonzero render is observed even without timing");
   assert.equal(h.controls.browserMs, null);
   h.contexts[0].getOutputTimestamp = () => ({ contextTime: 4.5, performanceTime: 1500 });
   port.onmessage?.({ data: { kind: "first-render", playbackId: 7, audioTime: 4.5 } });
   assert.equal(h.controls.browserMs, null, "a later notification cannot replace the first render");
-  h.controls.stop();
+  const timing = { serverFirstAudioReadyMs: { status: "measured", ms: 42 } };
+  socket.event({ type: "sample-complete", requestId, playbackId: 7, outcome: "produced", timing, segments: [{}] });
+  socket.event({ type: "playback", requestId, action: "end", playbackId: 7 });
+  assert.notEqual(h.controls.job, null, "production alone cannot finish playback");
+  port.onmessage?.({ data: { kind: "drained", playbackId: 7, audioEndMs: 40 } });
+  assert.equal(socket.sent.at(-1).type, "playback-drained");
+  assert.notEqual(h.controls.job, null, "browser drain still waits for service completion");
+  socket.event({ type: "sample-complete", requestId, playbackId: 7, outcome: "drained", timing, segments: [{}] });
+  assert.equal(h.controls.job, null);
+  assert.equal(h.controls.browserMs, null);
+  assert.equal(h.controls.hostMs, 42);
+  assert.match(h.controls.status, /Finished.*clock.*unavailable/i);
+  assert.doesNotMatch(h.controls.status, /No nonzero audio/);
+  assert.match(h.elements.get("output-timing").textContent, /Browser TTFA: Unavailable/);
 });
 
 test("editing sample text or model stops a preview and never saves or restarts it", async () => {
@@ -304,13 +324,13 @@ test("only configured API models are offered; stale speed is not restored as sup
   assert.equal(stale.controls.selection(), null);
 });
 
-test("suspension breaks the audio clock correlation instead of inventing a TTFA", async () => {
+for (const resumed of [false, true]) test(`suspension ${resumed ? "followed by resume" : "still active"} leaves browser TTFA unavailable`, async () => {
   const h = await outputHarness();
   const { socket, requestId, port } = await h.start();
   h.accepted(socket, requestId);
   h.contexts[0].state = "suspended";
   h.contexts[0].listeners.get("statechange")();
-  h.contexts[0].state = "running";
+  if (resumed) h.contexts[0].state = "running";
   port.onmessage?.({ data: { kind: "first-render", playbackId: 7, audioTime: 4.25 } });
   assert.equal(h.controls.browserMs, null);
   h.controls.stop();

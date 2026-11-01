@@ -259,7 +259,9 @@ export class SpeechOutputControls {
     if (message.kind === "first-render" && !job.rendered && Number.isFinite(message.audioTime)) {
       // currentTime need not advance with performance.now(), especially at startup.
       // Use the browser's related output stream positions, never message receipt time.
-      const timestamp = job.context.getOutputTimestamp?.();
+      let timestamp;
+      try { timestamp = job.context.getOutputTimestamp?.(); }
+      catch { /* A nonzero render remains observed when output timing is unavailable. */ }
       if (job.context.state === "running" && !job.clockBlocked &&
           Number.isFinite(timestamp?.contextTime) && timestamp.contextTime > 0 &&
           Number.isFinite(timestamp?.performanceTime) && timestamp.performanceTime > 0) {
