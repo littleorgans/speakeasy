@@ -125,7 +125,7 @@ export class SpeechOutputControls {
     this.elements["output-error"].textContent = this.error || (unavailable ? this.model().readiness.reason : this.catalog ? this.textError() : "") || "";
     this.elements["output-try"].disabled = Boolean(this.job) || busy || !this.available() || Boolean(this.textError());
     this.elements["output-stop"].hidden = !this.job;
-    this.elements["output-timing"].textContent = `Browser TTFA: ${this.browserMs == null ? "Unavailable" : `${Math.round(this.browserMs)} ms`} · Host first audio: ${this.hostMs == null ? "Unavailable" : `${Math.round(this.hostMs)} ms`}. Browser rendering only; speaker latency is unmeasured.${this.applied ? ` ${this.applied.model} · ${this.applied.voice}` : ""}`;
+    this.elements["output-timing"].textContent = `Browser TTFA: ${this.browserMs == null ? "Unavailable" : `${Math.round(this.browserMs)} ms`} · Host first audio: ${this.hostMs == null ? "Unavailable" : `${Math.round(this.hostMs)} ms`}. Browser rendering estimate; speaker latency is unmeasured.${this.applied ? ` ${this.applied.model} · ${this.applied.voice}` : ""}`;
   }
 
   renderModelSummary() {
@@ -171,8 +171,6 @@ export class SpeechOutputControls {
       if (this.job !== job) return;
       job.node = new AudioWorkletNode(context, "speak-easy-playback", { outputChannelCount: [2] });
       job.node.connect(context.destination);
-      // Both anchors are local. No server clock is subtracted from this clock.
-      job.anchor = { audio: context.currentTime, monotonic: performance.now() };
       job.node.port.onmessage = (event) => this.rendered(job, event.data);
       this.openSocket(job);
     } catch (error) { this.fail(job, error.message); }
@@ -258,10 +256,17 @@ export class SpeechOutputControls {
 
   rendered(job, message) {
     if (this.job !== job || job.cleared || message.playbackId !== job.playbackId) return;
-    if (message.kind === "first-render" && this.browserMs == null && Number.isFinite(message.audioTime)) {
-      const renderedAt = job.anchor.monotonic + (message.audioTime - job.anchor.audio) * 1_000;
-      const elapsed = renderedAt - job.submittedAt;
-      if (elapsed >= 0 && job.context.state === "running" && !job.clockBlocked) this.browserMs = elapsed;
+    if (message.kind === "first-render" && !job.rendered && Number.isFinite(message.audioTime)) {
+      // currentTime need not advance with performance.now(), especially at startup.
+      // Use the browser's related output stream positions, never message receipt time.
+      const timestamp = job.context.getOutputTimestamp?.();
+      if (job.context.state === "running" && !job.clockBlocked &&
+          Number.isFinite(timestamp?.contextTime) && timestamp.contextTime > 0 &&
+          Number.isFinite(timestamp?.performanceTime) && timestamp.performanceTime > 0) {
+        const renderedAt = timestamp.performanceTime + (message.audioTime - timestamp.contextTime) * 1_000;
+        const elapsed = renderedAt - job.submittedAt;
+        if (Number.isFinite(elapsed) && elapsed >= 0) this.browserMs = elapsed;
+      }
       job.rendered = true;
       this.status = "Playing";
     } else if (message.kind === "drained") {
@@ -283,7 +288,9 @@ export class SpeechOutputControls {
     if (this.job !== job || !job.complete || !job.drained) return;
     this.job = null;
     this.dispose(job);
-    this.status = this.browserMs == null ? "Finished. No nonzero audio rendered; browser TTFA unavailable." : "Finished";
+    this.status = this.browserMs != null ? "Finished" : job.rendered
+      ? "Finished. Browser audio clock mapping unavailable; browser TTFA unavailable."
+      : "Finished. No nonzero audio rendered; browser TTFA unavailable.";
   }
 
   fail(job, message) {

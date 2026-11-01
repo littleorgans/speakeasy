@@ -17,7 +17,7 @@ const catalogue = {
 
 type Port = { messages: any[]; onmessage?: (event: { data: any }) => void; postMessage(data: any): void };
 
-async function outputHarness({ stored, active = false, catalog = catalogue }: { stored?: unknown; active?: boolean; catalog?: any } = {}) {
+async function outputHarness({ stored, active = false, catalog = catalogue, audioTime = 4, setupMs = 0 }: { stored?: unknown; active?: boolean; catalog?: any; audioTime?: number; setupMs?: number } = {}) {
   const elements = new Map<string, any>();
   const element = () => ({ value: "", disabled: false, hidden: false, textContent: "", children: [] as any[], listeners: new Map<string, (event?: any) => void>(), addEventListener(type: string, callback: (event?: any) => void) { this.listeners.set(type, callback); }, replaceChildren(...nodes: any[]) { this.children = nodes; } });
   const document = { createElement: element, getElementById(id: string) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); } };
@@ -28,12 +28,14 @@ async function outputHarness({ stored, active = false, catalog = catalogue }: { 
   const fetches: string[] = [];
   class AudioContext {
     state = "running";
-    currentTime = 4;
+    currentTime = audioTime;
+    outputTimestamp = { contextTime: audioTime, performanceTime: now };
     destination = {};
-    audioWorklet = { async addModule() {} };
+    audioWorklet = { async addModule() { now += setupMs; } };
     listeners = new Map<string, () => void>();
     addEventListener(type: string, callback: () => void) { this.listeners.set(type, callback); }
     constructor() { contexts.push(this); }
+    getOutputTimestamp() { return this.outputTimestamp; }
     async resume() {}
     async close() { this.state = "closed"; }
   }
@@ -166,6 +168,8 @@ test("browser TTFA uses the audio clock and Finished waits for server and browse
   const { socket, requestId, port } = await h.start();
   h.accepted(socket, requestId);
   h.advance(9000); // Delivery time is deliberately much later than rendering.
+  h.contexts[0].currentTime = 12;
+  h.contexts[0].outputTimestamp = { contextTime: 11.9, performanceTime: 8900 };
   port.onmessage?.({ data: { kind: "first-render", playbackId: 7, audioTime: 4.125, sampleOffset: 70 } });
   assert.equal(h.controls.browserMs, 125);
   port.onmessage?.({ data: { kind: "first-render", playbackId: 7, audioTime: 4.5 } });
@@ -181,6 +185,56 @@ test("browser TTFA uses the audio clock and Finished waits for server and browse
   assert.equal(h.controls.status, "Finished");
   assert.equal(h.controls.hostMs, 42);
   assert.equal(h.controls.job, null);
+});
+
+for (const { name, outputTimestamp, expected } of [
+  { name: "native audio clock start delay uses the browser supplied clock origin",
+    outputTimestamp: { contextTime: 0.01, performanceTime: 83789.3 }, expected: 131.632653 },
+  { name: "native startup without an output clock position finishes with TTFA unavailable",
+    outputTimestamp: { contextTime: 0, performanceTime: 83801.80000001192 }, expected: null },
+]) test(name, async () => {
+  // Saved native start delay; only the positive output timestamp pair is synthetic.
+  const h = await outputHarness({ audioTime: 0.005804988662131519, setupMs: 24.1 });
+  h.advance(83659.30000001192);
+  const { socket, requestId, port } = await h.start();
+  h.accepted(socket, requestId);
+  h.contexts[0].currentTime = 0.017414965986394557;
+  h.contexts[0].outputTimestamp = outputTimestamp;
+  h.advance(83802.20000004768);
+  port.onmessage?.({ data: { kind: "first-render", playbackId: 7, audioTime: 0.01163265306122449, sampleOffset: 1 } });
+  if (expected == null) assert.equal(h.controls.browserMs, null, "zero output position cannot establish a clock origin");
+  else assert.ok(Math.abs(h.controls.browserMs - expected) < 0.000001);
+  assert.notEqual(h.controls.browserMs, 83802.20000004768 - 83659.30000001192, "callback delivery is a separate boundary");
+  const timing = { serverFirstAudioReadyMs: { status: "measured", ms: 80.36745899997186 } };
+  socket.event({ type: "sample-complete", requestId, playbackId: 7, outcome: "produced", timing, segments: [{}] });
+  socket.event({ type: "playback", requestId, playbackId: 7, action: "end" });
+  port.onmessage?.({ data: { kind: "drained", playbackId: 7, audioEndMs: 40 } });
+  assert.equal(socket.sent.at(-1).type, "playback-drained");
+  socket.event({ type: "sample-complete", requestId, playbackId: 7, outcome: "drained", timing, segments: [{}] });
+  assert.equal(h.controls.job, null);
+  assert.equal(h.controls.hostMs, timing.serverFirstAudioReadyMs.ms);
+  if (expected == null) {
+    assert.equal(h.controls.browserMs, null);
+    assert.match(h.controls.status, /Finished.*clock.*unavailable/i);
+    assert.doesNotMatch(h.controls.status, /No nonzero audio/);
+    assert.match(h.elements.get("output-timing").textContent, /Browser TTFA: Unavailable/);
+  } else {
+    assert.equal(h.controls.status, "Finished");
+    assert.match(h.elements.get("output-timing").textContent, /Browser TTFA: 132 ms/);
+  }
+});
+
+test("missing output timestamp support keeps the first render unavailable without replacing it", async () => {
+  const h = await outputHarness();
+  const { socket, requestId, port } = await h.start();
+  h.accepted(socket, requestId);
+  h.contexts[0].getOutputTimestamp = undefined;
+  port.onmessage?.({ data: { kind: "first-render", playbackId: 7, audioTime: 4.125 } });
+  assert.equal(h.controls.browserMs, null);
+  h.contexts[0].getOutputTimestamp = () => ({ contextTime: 4.5, performanceTime: 1500 });
+  port.onmessage?.({ data: { kind: "first-render", playbackId: 7, audioTime: 4.5 } });
+  assert.equal(h.controls.browserMs, null, "a later notification cannot replace the first render");
+  h.controls.stop();
 });
 
 test("editing sample text or model stops a preview and never saves or restarts it", async () => {
