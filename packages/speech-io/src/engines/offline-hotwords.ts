@@ -30,26 +30,33 @@ export function prepareOfflineHotwords(
   const vocabulary = [...scores].map(([piece, score], id) =>
     `${piece}\t${id === layout.firstScoredPieceId ? "-0" : score}\n`).join("");
   const maxBytes = Math.max(...pieces.map((piece) => Buffer.byteLength(piece)));
+  const errors: string[] = [];
   const encodings = hotwords.phrases.map((phrase) => {
-    const fail = (reason: string): never => {
-      throw new Error(`${model.name}: hotword ${JSON.stringify(phrase)}: ${reason}`);
-    };
-    if (!phrase.trim() || /[\x00-\x08\x0a-\x1f\x7f]/.test(phrase)) {
-      fail("empty phrase or native line/control syntax");
+    try {
+      const fail = (reason: string): never => {
+        throw new Error(`${model.name}: hotword ${JSON.stringify(phrase)}: ${reason}`);
+      };
+      if (!phrase.trim() || /[\x00-\x08\x0a-\x1f\x7f]/.test(phrase)) {
+        fail("empty phrase or native line/control syntax");
+      }
+      // Native EncodeHotwords reserves a word starting with ':' for a score.
+      const words = phrase.split(/[ \t\r\n\v\f]+/).filter(Boolean);
+      if (words.some((word) => word.startsWith(":"))) fail("reserved native score syntax");
+      if (words.some((word) => /^<[^>]*>$/.test(word))) fail("reserved control or blank token");
+      const normalized = words.map((word) => `▁${word}`).join("");
+      const encoded = encode(normalized, scores, maxBytes, fail);
+      if (!encoded.length || encoded.some((piece) => /^<[^>]*>$/.test(piece))) {
+        fail("reserved unknown, control or blank piece");
+      }
+      const roundtrip = encoded.join("").replaceAll("▁", " ").slice(1);
+      if (roundtrip !== words.join(" ")) fail("incomplete text roundtrip");
+      return encoded;
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+      return [];
     }
-    // Native EncodeHotwords reserves a word starting with ':' for a score.
-    const words = phrase.split(/[ \t\r\n\v\f]+/).filter(Boolean);
-    if (words.some((word) => word.startsWith(":"))) fail("reserved native score syntax");
-    if (words.some((word) => /^<[^>]*>$/.test(word))) fail("reserved control or blank token");
-    const normalized = words.map((word) => `▁${word}`).join("");
-    const encoded = encode(normalized, scores, maxBytes, fail);
-    if (!encoded.length || encoded.some((piece) => /^<[^>]*>$/.test(piece))) {
-      fail("reserved unknown, control or blank piece");
-    }
-    const roundtrip = encoded.join("").replaceAll("▁", " ").slice(1);
-    if (roundtrip !== words.join(" ")) fail("incomplete text roundtrip");
-    return encoded;
   });
+  if (errors.length) throw new Error(errors.join("\n"));
   return { vocabulary, encodings };
 }
 

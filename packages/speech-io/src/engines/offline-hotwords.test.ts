@@ -37,3 +37,12 @@ test("fallback bytes and selected control pieces are rejected even with vocabula
   assert.throws(() => encode(pieces, ["a☃"]), /coverage/);
   assert.throws(() => encode(pieces, ["a<0xE2>"]), /control/);
 });
+
+test("atomic validation reports every invalid phrase with its encoding reason", () => {
+  assert.throws(() => encode(["<unk>", "<s>", "▁", "a"], ["a", "a☃", "a :2", "<blk>"]), (error: Error) => {
+    assert.match(error.message, /a☃.*unencodable UTF8 coverage/);
+    assert.match(error.message, /a :2.*reserved native score syntax/);
+    assert.match(error.message, /<blk>.*reserved control or blank token/);
+    return true;
+  });
+});

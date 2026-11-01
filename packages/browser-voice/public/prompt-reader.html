@@ -20,6 +20,8 @@
       <div class="heard" id="heard" hidden aria-live="polite">
         <p class="heard-text" id="heard-text"></p>
         <p class="heard-note" id="heard-note"></p>
+        <p class="heard-note" id="heard-hotwords"></p>
+        <p class="heard-error" id="heard-error"></p>
       </div>
       <meter id="level" min="0" max="0.5" value="0" aria-label="Microphone level"></meter>
       <p class="status" id="status" aria-live="polite"></p>
@@ -34,6 +36,9 @@
     </main>
 
     <footer class="bar">
+      <span>Edit known words in</span>
+      <code id="hotwords-path"></code>
+      <span>Reloaded for every take. Empty or missing file uses no list.</span>
       <span>Takes save to</span>
       <code id="output"></code>
     </footer>

@@ -1,31 +1,26 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
-import { createLocalSherpaEngine, SHERPA_ROOT } from "@speakeasy/speech-io";
+import { createLocalSherpaEngine, loadHotwords, SHERPA_ROOT } from "@speakeasy/speech-io";
 import {
-  COMPLETE_MARKER,
   isAssetComplete,
   resolveModelPaths,
   resolveSherpaModel,
-  type AnySherpaEngine,
-  type FinalEvent,
+  type Hotwords,
 } from "@speakeasy/speech-io/stt";
-import { PROMPT_SAMPLE_RATE } from "./prompt-reader.ts";
-import type { TranscribeReply, TranscribeRequest } from "./transcriber.ts";
+import { TakeTranscription } from "./take-transcription.ts";
+import { TRANSCRIBE_MODEL_ID, TranscriptionError, type TranscribeReply, type TranscribeRequest } from "./transcriber.ts";
 
 /**
- * Child process behind ChildTranscriber: Canary 180M Flash in English with
- * the registry's silence gate, loaded on the first request and kept warm.
- * Requests decode one at a time. The model and Silero must already sit
- * under models/sherpa; this worker never downloads.
+ * Parakeet Ultra without a silence gate, matching TM. Each request snapshots
+ * hotwords.txt immediately; unchanged content reuses the warm recognizer.
+ * The model must already sit under models/sherpa; no downloads.
  */
 
-const MODEL = "en-canary-180m-flash-int8";
-
-let engine: Promise<AnySherpaEngine> | undefined;
-let queue: Promise<void> = Promise.resolve();
+const transcriber = new TakeTranscription({
+  readSnapshot: () => loadHotwords({ snapshot: true }),
+  createEngine: loadEngine,
+});
 
 process.on("message", (request: TranscribeRequest) => {
-  queue = queue.then(() => answer(request));
+  void answer(request);
 });
 // The parent going away ends the worker too.
 process.on("disconnect", () => process.exit(0));
@@ -33,41 +28,18 @@ process.on("disconnect", () => process.exit(0));
 async function answer({ id, samples }: TranscribeRequest): Promise<void> {
   let reply: TranscribeReply;
   try {
-    reply = { id, ...(await transcribe(samples)) };
+    reply = { id, ...(await transcriber.transcribe(samples)) };
   } catch (error) {
-    reply = { id, error: error instanceof Error ? error.message : String(error) };
+    reply = { id, error: error instanceof Error ? error.message : String(error),
+      ...(error instanceof TranscriptionError && error.hotwords ? { hotwords: error.hotwords } : {}) };
   }
   process.send?.(reply);
 }
 
-async function transcribe(samples: Float32Array): Promise<{ text: string; decodeMs: number }> {
-  engine ??= loadEngine().catch((error: unknown) => {
-    engine = undefined;
-    throw error;
-  });
-  const session = await (await engine).open({ sampleRate: PROMPT_SAMPLE_RATE });
-  try {
-    return await new Promise((resolve, reject) => {
-      session.once("final", ({ text, decodeMs }: FinalEvent) => resolve({ text, decodeMs: decodeMs ?? 0 }));
-      session.once("empty", ({ decodeMs }: { decodeMs?: number }) => resolve({ text: "", decodeMs: decodeMs ?? 0 }));
-      session.once("error", ({ err }: { err: unknown }) => reject(err));
-      session.pushAudio(samples);
-      session.flush();
-    });
-  } finally {
-    await session.end();
-  }
-}
-
-async function loadEngine(): Promise<AnySherpaEngine> {
-  const model = resolveSherpaModel(MODEL);
+async function loadEngine(hotwords: Hotwords | undefined) {
+  const model = resolveSherpaModel(TRANSCRIBE_MODEL_ID);
   if (!(await isAssetComplete(resolveModelPaths(model, SHERPA_ROOT)))) {
     throw new Error(`${model.name} is not installed under ${SHERPA_ROOT}`);
   }
-  if (!existsSync(join(SHERPA_ROOT, "silero-vad", COMPLETE_MARKER))) {
-    throw new Error(`silero-vad is not installed under ${SHERPA_ROOT}`);
-  }
-  const loaded = await createLocalSherpaEngine(MODEL);
-  await loaded.prepare();
-  return loaded;
+  return createLocalSherpaEngine(TRANSCRIBE_MODEL_ID, "off", { hotwords });
 }

@@ -351,6 +351,47 @@ test("a late transcript never lands on a newer take", async () => {
   assert.equal(harness.reader.elements.heardNote.textContent, "Transcribing");
 });
 
+test("each take shows its own applied list count and model after later file changes", async () => {
+  let count = 2;
+  const harness = pageHarness({ respond: async () => okReply({
+    text: "read this", decodeMs: 3, model: "en-parakeet-ultra-int8",
+    hotwords: { path: "/owner/hotwords.txt", count, revision: String(count) },
+  }) });
+  const first = await readyTake(harness);
+  await settle();
+  assert.match(harness.reader.elements.heardHotwords.textContent, /2 entries applied/);
+  assert.match(harness.reader.elements.heardNote.textContent, /en-parakeet-ultra-int8/);
+  count = 0;
+  const second = await readyTake(harness);
+  await settle();
+  assert.match(harness.reader.elements.heardHotwords.textContent, /No list.*greedy/);
+  assert.equal(first.transcript.hotwords.count, 2);
+  assert.equal(second.transcript.hotwords.count, 0);
+});
+
+test("a rejected list displays exact reasons and keeps the original take saveable", async () => {
+  const reason = 'hotword "a☃": unencodable UTF8 coverage at byte 4\nhotword "a :2": reserved native score syntax';
+  let saved: ArrayBuffer | undefined;
+  const harness = pageHarness({ respond: async (url, init) => {
+    if (url === "/prompt-reader/transcriptions") return {
+      ok: false, status: 503, json: async () => ({ error: reason, model: "en-parakeet-ultra-int8",
+        hotwords: { path: "/owner/hotwords.txt", count: 3, revision: "bad" } }),
+    };
+    saved = init?.body;
+    return okReply({ audio: "utt-p001-a.wav" });
+  } });
+  const take = await readyTake(harness);
+  await settle();
+  assert.equal(harness.reader.elements.heardError.textContent, reason);
+  assert.match(harness.reader.elements.heardHotwords.textContent, /3 entries.*failed/);
+  assert.match(harness.reader.elements.heardNote.textContent, /en-parakeet-ultra-int8/);
+  assert.equal(harness.reader.take, take);
+  await harness.reader.play();
+  assert.equal(harness.played[0]?.samples.length, take.samples.length);
+  await harness.reader.save();
+  assert.equal(saved, take.samples.buffer);
+});
+
 const idleFrames = (count: number, value: number) => Array.from({ length: count }, () => new Float32Array(320).fill(value));
 
 test("a take starts with the 300 ms before its press", async () => {

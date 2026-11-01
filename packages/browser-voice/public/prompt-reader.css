@@ -90,6 +90,16 @@ code,
   color: var(--muted);
 }
 
+.heard-error {
+  color: var(--live);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.heard-error:empty {
+  display: none;
+}
+
 meter {
   width: 100%;
   height: 0.6rem;
