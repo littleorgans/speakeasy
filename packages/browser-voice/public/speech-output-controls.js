@@ -1,3 +1,5 @@
+import { formatMs, formatObservation, transcriptStatus } from "/speech-observations.js";
+
 /** A typed text preview has its own socket and playback, without mic or LLM. */
 export class SpeechOutputControls {
   constructor({ activeRoom = () => false } = {}) {
@@ -6,10 +8,13 @@ export class SpeechOutputControls {
     this.draft = null;
     this.serial = 0;
     this.job = null;
+    this.result = null;
+    this.roomSerial = 0;
+    this.roomSelection = null;
     this.status = "Loading voices";
     this.elements = Object.fromEntries([
       "output-provider", "output-model", "output-model-summary", "output-voice", "output-transfer", "output-mode-note",
-      "output-text", "output-try", "output-stop", "output-status", "output-error", "output-timing",
+      "output-text", "output-try", "output-stop", "output-status", "output-error", "output-timing", "output-details", "output-observations",
     ].map((id) => [id, document.getElementById(id)]));
     for (const key of ["output-provider", "output-model", "output-voice"]) {
       this.elements[key].addEventListener("change", () => {
@@ -22,7 +27,8 @@ export class SpeechOutputControls {
     this.elements["output-stop"].addEventListener("click", () => this.stop());
   }
 
-  async load(stored) {
+  async load(stored = this.draft) {
+    this.cancelRoomSelection();
     this.draft = stored ?? null;
     try {
       const response = await fetch("/speech-output/models");
@@ -56,6 +62,7 @@ export class SpeechOutputControls {
   }
 
   choose(changed) {
+    this.cancelRoomSelection();
     const provider = this.elements["output-provider"].value;
     const candidates = this.models.filter((model) => model.provider.kind === provider);
     const model = changed === "output-provider" ? candidates[0] : candidates.find((entry) => entry.id === this.elements["output-model"].value);
@@ -106,6 +113,61 @@ export class SpeechOutputControls {
         : outputKind ? `Reply text is sent to ${outputKind}; generated audio returns.` : "Reply speech uses the host configured output."}`;
   }
 
+  /** Room selection never shares a Try job, serial or selection revision. */
+  roomSnapshot() {
+    if (!this.available() || !this.catalog?.revision) {
+      throw new Error("Speech output is unavailable. Choose a supported model and voice before entering.");
+    }
+    return { speechOutput: this.selection(), catalogueRevision: this.catalog.revision };
+  }
+
+  async selectForRoom(socket, snapshot) {
+    this.cancelRoomSelection();
+    snapshot ??= this.roomSnapshot();
+    if (!this.available() || socket?.readyState !== WebSocket.OPEN || snapshot.catalogueRevision !== this.catalog?.revision ||
+        !this.matchesSelection(snapshot.speechOutput, this.selection())) throw new Error("Room output selection changed. Enter again.");
+    return new Promise((resolve, reject) => {
+      const pending = { socket, resolve, reject, requestId: `room-${Date.now()}-${++this.roomSerial}`,
+        selection: { ...snapshot.speechOutput, provider: { ...snapshot.speechOutput.provider } }, catalogueRevision: snapshot.catalogueRevision };
+      this.roomSelection = pending;
+      try {
+        socket.send(JSON.stringify({ type: "select-output", requestId: pending.requestId,
+          catalogueRevision: pending.catalogueRevision, selection: pending.selection }));
+      } catch (error) { this.cancelRoomSelection(error.message); }
+    });
+  }
+
+  acceptRoom(socket, event) {
+    const pending = this.roomSelection;
+    if (!pending || pending.socket !== socket) return;
+    if ((event.type === "session" && event.phase === "stopped") || (event.type === "notice" && event.level === "error")) {
+      this.cancelRoomSelection("Room selection stopped.");
+    } else if (event.type === "output-selection-error" && (event.requestId === null || event.requestId === pending.requestId)) {
+      this.cancelRoomSelection(event.message);
+    } else if (event.type === "output-selected" && event.requestId === pending.requestId) {
+      if (event.catalogueRevision !== pending.catalogueRevision || this.catalog?.revision !== pending.catalogueRevision ||
+          !this.matchesSelection(event.selection, pending.selection) || !this.matchesSelection(this.selection(), pending.selection) ||
+          !Number.isSafeInteger(event.selectionRevision) || event.selectionRevision <= 0) {
+        this.cancelRoomSelection("Room selection acknowledgement does not match the displayed output.");
+        return;
+      }
+      this.roomSelection = null;
+      pending.resolve({ speechOutput: pending.selection, catalogueRevision: pending.catalogueRevision, selectionRevision: event.selectionRevision });
+    }
+  }
+
+  cancelRoomSelection(message = "Room selection cancelled.") {
+    const pending = this.roomSelection;
+    this.roomSelection = null;
+    pending?.reject(new Error(message));
+  }
+
+  matchesSelection(actual, expected) {
+    return Boolean(actual && expected) && actual.schema === expected.schema && actual.provider?.kind === expected.provider?.kind &&
+      actual?.provider?.runtimeKind === expected?.provider?.runtimeKind && actual?.model === expected?.model &&
+      actual?.voice === expected?.voice && actual?.speed === expected?.speed;
+  }
+
   textError() {
     const text = this.elements["output-text"].value;
     if (!text.trim()) return "Enter text to try.";
@@ -125,7 +187,35 @@ export class SpeechOutputControls {
     this.elements["output-error"].textContent = this.error || (unavailable ? this.model().readiness.reason : this.catalog ? this.textError() : "") || "";
     this.elements["output-try"].disabled = Boolean(this.job) || busy || !this.available() || Boolean(this.textError());
     this.elements["output-stop"].hidden = !this.job;
-    this.elements["output-timing"].textContent = `Browser TTFA: ${this.browserMs == null ? "Unavailable" : `${Math.round(this.browserMs)} ms`} · Host first audio: ${this.hostMs == null ? "Unavailable" : `${Math.round(this.hostMs)} ms`}. Browser rendering estimate; speaker latency is unmeasured.${this.applied ? ` ${this.applied.model} · ${this.applied.voice}` : ""}`;
+    this.elements["output-timing"].textContent = `Browser TTFA: ${formatMs(this.browserMs)} · Host first audio: ${formatMs(this.hostMs)}. Browser rendering estimate; speaker latency is unmeasured.${this.applied ? ` ${this.applied.model} · ${this.applied.voice}` : ""}`;
+    this.renderResult();
+  }
+
+  renderResult() {
+    const result = this.result;
+    this.elements["output-details"].hidden = !result;
+    const lines = [];
+    if (result) {
+      lines.push(`Request: ${result.requestId} · Playback: ${result.playbackId} · Generation: ${result.generation} · Text: ${result.textId} · ${result.outcome}`);
+      lines.push(`Selection: ${JSON.stringify(result.selection)}`, `Requested full text: ${result.text}`);
+      for (const [key, value] of Object.entries(result.timing ?? {})) lines.push(`${key}: ${formatObservation(value)}`);
+      for (const segment of result.segments) {
+        lines.push(`Segment ${segment.index}: ${segment.sentence} · ${segment.sampleRate} Hz · Audio duration: ${formatMs(segment.audioDurationMs)}`);
+        for (const [key, value] of Object.entries(segment.timing ?? {})) lines.push(`${key}: ${formatObservation(value)}`);
+      }
+      for (const request of result.requests) {
+        lines.push(`Applied model: ${request.model} · Voice: ${request.voice} · Requested sentence: ${request.text}`);
+        lines.push(`Returned transcript: ${typeof request.returnedTranscript === "string" ? JSON.stringify(request.returnedTranscript) : "Unavailable"} · Transcript: ${transcriptStatus(request.text, request.returnedTranscript)} (exact text comparison)`);
+        lines.push([["Request wall", "providerRequestWallMs"], ["Provider processing", "providerProcessingMs"], ["Provider network", "providerNetworkMs"]]
+          .map(([label, key]) => `${label}: ${formatObservation(request.timing?.[key])}`).join(" · "));
+        if (request.sessionSetupWallMs || request.providerFirstAudioMs) lines.push(`Setup wall: ${formatObservation(request.sessionSetupWallMs)} · First provider PCM: ${formatObservation(request.providerFirstAudioMs)}`);
+      }
+    }
+    this.elements["output-observations"].replaceChildren(...lines.map((line) => {
+      const paragraph = document.createElement("p");
+      paragraph.textContent = line;
+      return paragraph;
+    }));
   }
 
   renderModelSummary() {
@@ -147,8 +237,9 @@ export class SpeechOutputControls {
   async tryVoice() {
     if (this.activeRoom() || !this.available() || this.textError()) { this.render(); return; }
     this.stop();
-    const job = { requestId: `voice-${Date.now()}-${++this.serial}`, selection: this.selection(), text: this.elements["output-text"].value, submittedAt: performance.now() };
+    const job = { requestId: `voice-${Date.now()}-${++this.serial}`, selection: this.selection(), catalogueRevision: this.catalog.revision, text: this.elements["output-text"].value, submittedAt: performance.now() };
     this.job = job;
+    this.result = null;
     this.error = "";
     this.applied = null;
     this.browserMs = null;
@@ -183,7 +274,7 @@ export class SpeechOutputControls {
     job.socket = socket;
     socket.addEventListener("open", () => {
       if (this.job !== job) { socket.close(); return; }
-      socket.send(JSON.stringify({ type: "select-output", requestId: job.requestId, catalogueRevision: this.catalog.revision, selection: job.selection }));
+      socket.send(JSON.stringify({ type: "select-output", requestId: job.requestId, catalogueRevision: job.catalogueRevision, selection: job.selection }));
     });
     socket.addEventListener("message", (event) => {
       if (this.job !== job) return;
@@ -218,24 +309,37 @@ export class SpeechOutputControls {
     if (event.requestId !== job.requestId && !(event.type === "sample-error" && event.requestId === null)) return;
     if (event.type === "output-selected") {
       if (job.selectionSent) return;
+      if (event.catalogueRevision !== job.catalogueRevision || !this.matchesSelection(event.selection, job.selection) ||
+          !Number.isSafeInteger(event.selectionRevision) || event.selectionRevision <= 0) { this.fail(job, "Voice selection acknowledgement does not match."); return; }
       job.selectionSent = true;
       job.socket.send(JSON.stringify({ type: "speak-sample", requestId: job.requestId, catalogueRevision: event.catalogueRevision, selectionRevision: event.selectionRevision, selection: job.selection, text: job.text }));
     } else if (event.type === "sample-accepted") {
       if (job.playbackId != null) return;
+      if (!job.selectionSent || !this.matchesSelection(event.selection, job.selection) || event.text !== job.text ||
+          typeof event.textId !== "string" || !event.textId.trim() || !Number.isSafeInteger(event.generation) || event.generation <= 0) {
+        this.fail(job, "Voice acceptance does not match this trial."); return;
+      }
       job.playbackId = event.playbackId;
       job.generation = event.generation;
-      this.applied = event.selection;
+      job.textId = event.textId;
+      this.applied = job.selection;
     } else if (event.playbackId != null && event.playbackId !== job.playbackId) return;
     else if (event.type === "sample-phase") this.status = event.phase === "opening" ? "Preparing voice. Waiting for audio." : "Waiting for audio";
     else if (event.type === "sample-error") { this.fail(job, event.message); return; }
     else if (event.type === "sample-complete") {
+      if (job.playbackId == null || event.playbackId !== job.playbackId || event.textId !== job.textId ||
+          !this.matchesSelection(event.selection, job.selection) || !["produced", "drained", "cancelled"].includes(event.outcome)) return;
       if (event.outcome === "cancelled") { this.stop(); return; }
+      if (job.complete || (job.produced && event.outcome === "produced")) return;
+      this.result = JSON.parse(JSON.stringify({ requestId: job.requestId, playbackId: job.playbackId, generation: job.generation,
+        selection: job.selection, textId: job.textId, text: job.text, outcome: event.outcome,
+        timing: event.timing, segments: event.segments ?? [], requests: event.requests ?? [] }));
       job.produced = true;
       job.complete = event.outcome === "drained";
       const observation = event.timing?.serverFirstAudioReadyMs;
       this.hostMs = observation?.status === "measured" ? observation.ms : null;
       this.acknowledgeDrain(job);
-      if (event.outcome === "produced" && !event.segments.length) {
+      if (event.outcome === "produced" && !this.result.segments.length) {
         this.job = null;
         this.dispose(job);
         this.status = "No audio produced. Browser TTFA unavailable.";
