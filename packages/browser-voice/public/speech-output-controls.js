@@ -351,4 +351,3 @@ export function clampPause(value, input) {
   const pause = Number(value);
   return Math.min(max, Math.max(min, Number.isFinite(pause) ? Math.round(pause) : Number(input.value)));
 }
-

@@ -410,4 +410,3 @@ export function diffWords(expected, heard) {
   }
   return words.map((word, index) => ({ word, differs: differs[index] }));
 }
-
