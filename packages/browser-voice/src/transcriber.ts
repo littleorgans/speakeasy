@@ -1,4 +1,5 @@
 import { fork, type ChildProcess } from "node:child_process";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
@@ -52,14 +53,16 @@ export class ChildTranscriber implements Transcriber {
   readonly #workerPath: string;
   readonly #label: string;
   readonly #timeoutMs: number;
+  readonly #hotwordsPath: string | undefined;
   readonly #pending = new Map<number, Pending>();
   #child: ChildProcess | undefined;
   #nextId = 0;
 
-  constructor(options: { workerPath?: string; label?: string; timeoutMs?: number } = {}) {
+  constructor(options: { workerPath?: string; label?: string; timeoutMs?: number; hotwordsPath?: string } = {}) {
     this.#workerPath = options.workerPath ?? WORKER_PATH;
     this.#label = options.label ?? TRANSCRIBE_MODEL_ID;
     this.#timeoutMs = options.timeoutMs ?? TRANSCRIBE_TIMEOUT_MS;
+    this.#hotwordsPath = options.hotwordsPath === undefined ? undefined : resolve(options.hotwordsPath);
   }
 
   transcribe(samples: Float32Array): Promise<Transcript> {
@@ -87,7 +90,7 @@ export class ChildTranscriber implements Transcriber {
   #spawn(): ChildProcess {
     if (this.#child) return this.#child;
     // Advanced serialization carries the Float32Array without a JSON copy.
-    const child = fork(this.#workerPath, [], {
+    const child = fork(this.#workerPath, this.#hotwordsPath === undefined ? [] : [this.#hotwordsPath], {
       serialization: "advanced",
       stdio: ["ignore", "inherit", "inherit", "ipc"],
     });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { createSherpaEngine } from "./sherpa-factory.ts";
@@ -100,6 +100,30 @@ test("offline snapshots phrases and score, and caches successful preparation", a
   await writeFile(tokenFile, "malformed");
   await engine.open();
   assert.equal(files[0]?.words, "a\n");
+});
+
+test("offline snapshots recreate an absent temp parent and retain private cleanup", async (t) => {
+  const root = await mkdtemp("/tmp/speak-easy-missing-temp-");
+  const parent = join(root, "removed", "nested");
+  const first = await setup({ phrases: ["a"] });
+  const second = await setup({ phrases: ["b"], failConstruction: true });
+  const previous = process.env.TMPDIR;
+  t.after(async () => {
+    if (previous === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = previous;
+    await rm(root, { recursive: true, force: true });
+  });
+  process.env.TMPDIR = parent;
+  assert.equal(existsSync(parent), false, "temp parent is absent at recognizer creation");
+  await first.engine.open();
+  await assert.rejects(second.engine.open(), /constructor failed/);
+  await second.engine.open();
+  const files = [...first.files, ...second.files];
+  assert.deepEqual(files.map(({ words }) => words), ["a\n", "b\n", "b\n"]);
+  assert.ok(files.every(({ vocab, dir }) => vocab.includes("en\t-0\n▁\t-1\n") &&
+    dirname(dir) === parent && !existsSync(dir)));
+  assert.equal(new Set(files.map(({ dir }) => dir)).size, 3);
+  assert.deepEqual(await readdir(parent), []);
 });
 
 test("offline validation rejects the entire list before native construction", async () => {

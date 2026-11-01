@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { HotwordFileSnapshot } from "@speakeasy/speech-io";
+import { loadHotwords, type HotwordFileSnapshot } from "@speakeasy/speech-io";
 import type { AnySherpaEngine, FinalEvent, Hotwords } from "@speakeasy/speech-io/stt";
 import { PROMPT_SAMPLE_RATE } from "./prompt-reader.ts";
 import { TRANSCRIBE_MODEL_ID, TranscriptionError, type Transcript } from "./transcriber.ts";
@@ -13,10 +13,11 @@ export class TakeTranscription {
   #queue: Promise<unknown> = Promise.resolve();
 
   constructor(options: {
-    readSnapshot(): Promise<HotwordFileSnapshot>;
+    hotwordsPath?: string;
+    readSnapshot?(): Promise<HotwordFileSnapshot>;
     createEngine(hotwords: Hotwords | undefined): Promise<AnySherpaEngine>;
   }) {
-    this.#read = options.readSnapshot;
+    this.#read = options.readSnapshot ?? (() => loadHotwords({ snapshot: true, source: options.hotwordsPath }));
     this.#createEngine = options.createEngine;
   }
 

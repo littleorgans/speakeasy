@@ -61,14 +61,17 @@ export async function startBrowserVoiceServer(options: {
   createRuntime?: RuntimeFactory;
   /** Serve the prompt reader's API, saving takes to an outside folder. */
   promptReader?: PromptReaderConfig;
+  /** Per take hotword list; defaults to hotwords.txt in the working directory. */
+  hotwordsPath?: string;
   /** Display only take transcription; defaults to the Parakeet Ultra child. */
   transcriber?: Transcriber;
 } = {}): Promise<BrowserVoiceServer> {
   const promptReader = options.promptReader
     ? await PromptReader.load(options.promptReader)
     : undefined;
+  const hotwordsPath = resolve(options.hotwordsPath ?? HOTWORDS_FILENAME);
   const transcriber = promptReader
-    ? (options.transcriber ?? new ChildTranscriber())
+    ? (options.transcriber ?? new ChildTranscriber({ hotwordsPath }))
     : undefined;
   const server = createServer((request, response) => {
     if (request.url === "/health") {
@@ -77,7 +80,7 @@ export async function startBrowserVoiceServer(options: {
       return;
     }
     if (request.url?.startsWith(PROMPT_READER_API)) {
-      void servePromptReader(request, response, promptReader, transcriber);
+      void servePromptReader(request, response, promptReader, transcriber, hotwordsPath);
       return;
     }
     void serveStatic(request.url ?? "/", response);
@@ -146,6 +149,7 @@ async function servePromptReader(
   response: ServerResponse,
   reader: PromptReader | undefined,
   transcriber: Transcriber | undefined,
+  hotwordsPath: string,
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
   try {
@@ -155,7 +159,7 @@ async function servePromptReader(
       });
     } else if (url.pathname === "/prompt-reader/prompts" && request.method === "GET") {
       sendJson(response, 200, { ...(await reader.listing()),
-        transcription: { model: TRANSCRIBE_MODEL_ID, hotwordsPath: resolve(HOTWORDS_FILENAME) } });
+        transcription: { model: TRANSCRIBE_MODEL_ID, hotwordsPath } });
     } else if (url.pathname === "/prompt-reader/recordings" && request.method === "POST") {
       await saveTake(request, response, reader, url.searchParams);
     } else if (url.pathname === "/prompt-reader/transcriptions" && request.method === "POST" && transcriber) {

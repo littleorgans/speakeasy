@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter, once } from "node:events";
 import { readFileSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { loadHotwords } from "@speakeasy/speech-io";
@@ -9,9 +9,10 @@ import { createSherpaEngine, resolveModelPaths, SHERPA_MODELS } from "@speakeasy
 import type { OfflineRecognizerConfig } from "../../speech-io/src/engines/sherpa-api.ts";
 import { bindingWith, seededModelRoot } from "../../speech-io/src/engines/test-support.ts";
 import { TakeTranscription } from "./take-transcription.ts";
+import { readBrowserVoiceOptions } from "./server-options.ts";
 import { TRANSCRIBE_MODEL_ID, TranscriptionError } from "./transcriber.ts";
 
-async function setup(decode?: () => Promise<void>) {
+async function setup(decode?: () => Promise<void>, hotwordsPath?: string) {
   const modelRoot = await seededModelRoot(TRANSCRIBE_MODEL_ID);
   const source = join(modelRoot, "hotwords.txt");
   const pieces = ["<unk>", "<s>", "</s>", ...Array.from({ length: 271 }, (_, i) => `<control${i}>`),
@@ -42,12 +43,12 @@ async function setup(decode?: () => Promise<void>) {
     }
   } });
   const service = new TakeTranscription({
-    async readSnapshot() {
+    ...(hotwordsPath === undefined ? { async readSnapshot() {
       const snapshot = await loadHotwords({ snapshot: true, source });
       reads += 1;
       snapshots.emit("read");
       return snapshot;
-    },
+    } } : { hotwordsPath }),
     async createEngine(hotwords) {
       created += 1;
       return createSherpaEngine({ model: TRANSCRIBE_MODEL_ID, modelRoot, hotwords, binding });
@@ -81,6 +82,45 @@ test("every take reloads the file; unchanged content reuses and changed content 
   assert.ok(h.configs.every((config) => config.modelConfig.numThreads === 2 && config.featConfig.sampleRate === 16_000 &&
     config.featConfig.featureDim === 80 && config.maxActivePaths === 4 && config.hotwordsScore === 2));
   assert.equal(first.text, "a", "old transcript remains associated with its snapshot");
+});
+
+test("configured external list reaches every snapshot, native read and transcript metadata", async (t) => {
+  const root = await mkdtemp("/tmp/speak-easy-external-hotwords-");
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const source = join(root, "owner-words.txt");
+  const { hotwordsPath } = readBrowserVoiceOptions(["--hotwords", source], {});
+  const h = await setup(undefined, hotwordsPath);
+  const missing = await h.take();
+  assert.equal(missing.text, "greedy");
+  assert.equal(missing.hotwords?.path, source);
+  assert.equal(missing.hotwords?.count, 0);
+  await writeFile(source, "a\n");
+  const first = await h.take();
+  const unchanged = await h.take();
+  assert.equal(first.text, "a");
+  assert.equal(first.hotwords?.path, source);
+  assert.equal(first.hotwords?.count, 1);
+  assert.equal(unchanged.hotwords?.revision, first.hotwords?.revision);
+  assert.deepEqual(h.constructedWords, ["greedy", "a\n"]);
+  await writeFile(source, "a☃\n");
+  await assert.rejects(h.take(), (error: unknown) => {
+    assert.ok(error instanceof TranscriptionError);
+    assert.equal(error.hotwords?.path, source);
+    assert.equal(error.hotwords?.count, 1);
+    assert.match(error.message, /unencodable UTF8 coverage/);
+    return true;
+  });
+  assert.equal(h.configs.length, 2, "invalid content never reaches native decode");
+  await writeFile(source, "b\n");
+  const changed = await h.take();
+  assert.equal(changed.text, "b");
+  assert.notEqual(changed.hotwords?.revision, first.hotwords?.revision);
+  await writeFile(source, "");
+  const empty = await h.take();
+  assert.equal(empty.text, "greedy");
+  assert.equal(empty.hotwords?.path, source);
+  assert.equal(empty.hotwords?.count, 0);
+  assert.deepEqual(h.constructedWords, ["greedy", "a\n", "b\n", "greedy"]);
 });
 
 test("the reader sends a variable final audio length without zero padding", async () => {
