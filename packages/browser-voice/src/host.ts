@@ -8,20 +8,24 @@ import {
 } from "node:http";
 import { extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  createConversationRuntime,
-  type RuntimeConfig,
-} from "@speakeasy/convo-engine";
+import { randomUUID } from "node:crypto";
+import { createConversationRuntime } from "@speakeasy/convo-engine";
 import { WebSocket, WebSocketServer } from "ws";
 import { HOTWORDS_FILENAME } from "@speakeasy/speech-io";
 import {
-  PROMPT_MAX_TAKE_BYTES,
   PROMPT_SAMPLE_RATE,
   PromptReader,
   UnknownPromptError,
   type PromptReaderConfig,
 } from "./prompt-reader.ts";
-import { BrowserConversationSession, type RuntimeFactory } from "./session.ts";
+import { BrowserConversationSession, type BrowserRuntimeConfig, type RuntimeFactory } from "./session.ts";
+import { AudioWorkLease } from "./audio-lease.ts";
+import { HttpError, readTakeSamples, requireLoopback, sendHttpError, sendJson } from "./http-guards.ts";
+import { SetupComparison } from "./setup-comparison.ts";
+import { SetupWorkers } from "./setup-workers.ts";
+import type { SetupExecutor } from "./setup-protocol.ts";
+import { SetupRoutes, type ProviderRoutesConfig, type SetupReadiness } from "./setup-routes.ts";
+import { SpeechOutputSession, type SpeechOutputSessionOptions } from "./speech-output-session.ts";
 import { ChildTranscriber, TRANSCRIBE_MODEL_ID, TranscriptionError, type Transcriber } from "./transcriber.ts";
 
 const PUBLIC_ROOT = fileURLToPath(new URL("../public/", import.meta.url));
@@ -39,10 +43,11 @@ const STATIC_FILES = new Map([
   ["/prompt-reader", "prompt-reader.html"],
   ["/prompt-reader.css", "prompt-reader.css"],
   ["/prompt-reader.js", "prompt-reader.js"],
+  ["/setup-results.js", "setup-results.js"],
+  ["/speech-output-controls.js", "speech-output-controls.js"],
 ]);
 const PROMPT_READER_API = "/prompt-reader/";
 const PROMPT_READER_TAKES = "/prompt-reader/takes/";
-const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost"]);
 const CONTENT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -55,9 +60,9 @@ export type BrowserVoiceServer = {
   close(): Promise<void>;
 };
 
-export async function startBrowserVoiceServer(options: {
+export type BrowserVoiceServerOptions = {
   port?: number;
-  runtimeConfig?: RuntimeConfig;
+  runtimeConfig?: BrowserRuntimeConfig;
   createRuntime?: RuntimeFactory;
   /** Serve the prompt reader's API, saving takes to an outside folder. */
   promptReader?: PromptReaderConfig;
@@ -65,7 +70,13 @@ export async function startBrowserVoiceServer(options: {
   hotwordsPath?: string;
   /** Display only take transcription; defaults to the Parakeet Ultra child. */
   transcriber?: Transcriber;
-} = {}): Promise<BrowserVoiceServer> {
+  setupExecutor?: SetupExecutor;
+  setupReadiness?: () => readonly SetupReadiness[];
+  providers?: ProviderRoutesConfig;
+  speechOutput?: Pick<SpeechOutputSessionOptions, "catalogue" | "createOutput" | "quiesce"> & { close?(): Promise<void> };
+};
+
+export async function startBrowserVoiceServer(options: BrowserVoiceServerOptions = {}): Promise<BrowserVoiceServer> {
   const promptReader = options.promptReader
     ? await PromptReader.load(options.promptReader)
     : undefined;
@@ -73,38 +84,60 @@ export async function startBrowserVoiceServer(options: {
   const transcriber = promptReader
     ? (options.transcriber ?? new ChildTranscriber({ hotwordsPath }))
     : undefined;
+  const lease = new AudioWorkLease();
+  const comparison = new SetupComparison({ executor: options.setupExecutor ?? new SetupWorkers() });
+  const setupRoutes = new SetupRoutes({ reader: promptReader, comparison, lease,
+    providers: options.providers, readiness: options.setupReadiness ?? (() => []) });
+  const sessions = new Set<BrowserConversationSession>();
   const server = createServer((request, response) => {
+    const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
+    if (pathname === "/speech-output/models") {
+      try {
+        requireLoopback(request);
+        if (request.method !== "GET" || !options.speechOutput) sendJson(response, 404, { error: "Speech output not configured" });
+        else sendJson(response, 200, currentOutputCatalogue(options.speechOutput, options.providers));
+      } catch (error) { sendHttpError(response, error); }
+      return;
+    }
+    if (setupRoutes.handles(pathname)) {
+      setupRoutes.serve(request, response);
+      return;
+    }
     if (request.url === "/health") {
       response.writeHead(200, { "content-type": "application/json" });
       response.end('{"ok":true}');
       return;
     }
     if (request.url?.startsWith(PROMPT_READER_API)) {
-      void servePromptReader(request, response, promptReader, transcriber, hotwordsPath);
+      void servePromptReader(request, response, promptReader, transcriber, hotwordsPath, lease);
       return;
     }
     void serveStatic(request.url ?? "/", response);
   });
   const sockets = new WebSocketServer({ noServer: true });
+  const outputSockets = new WebSocketServer({ noServer: true });
+  const outputSessions = new Set<SpeechOutputSession>();
   let activeSocket: WebSocket | undefined;
   const runtimeConfig = options.runtimeConfig ?? {};
   const createRuntime = options.createRuntime ?? createConversationRuntime;
 
   server.on("upgrade", (request, socket, head) => {
-    if (request.url !== "/voice") {
+    const output = request.url === "/speech-output" && !!options.speechOutput && !!options.providers;
+    if (request.url !== "/voice" && !output) {
       socket.destroy();
       return;
     }
-    const origin = request.headers.origin;
-    if (origin !== undefined && origin !== hostOrigin(request)) {
+    try { requireLoopback(request); } catch {
       socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
       socket.destroy();
       return;
     }
-    sockets.handleUpgrade(request, socket, head, (webSocket) => {
-      sockets.emit("connection", webSocket, request);
+    const target = output ? outputSockets : sockets;
+    target.handleUpgrade(request, socket, head, (webSocket) => {
+      target.emit("connection", webSocket, request);
     });
   });
+  outputSockets.on("connection", (socket) => connectSpeechOutput(socket, options, lease, outputSessions));
   sockets.on("connection", (socket) => {
     if (activeSocket?.readyState === WebSocket.OPEN) {
       socket.send(
@@ -118,9 +151,12 @@ export async function startBrowserVoiceServer(options: {
       return;
     }
     activeSocket = socket;
-    new BrowserConversationSession({ socket, runtimeConfig, createRuntime });
+    const session = new BrowserConversationSession({ socket, runtimeConfig, createRuntime,
+      acquire: () => lease.tryAcquire("room"), outputRegistry: () => options.providers?.registries().output ?? [] });
+    sessions.add(session);
     socket.once("close", () => {
       if (activeSocket === socket) activeSocket = undefined;
+      void session.close().then(() => sessions.delete(session), () => {});
     });
   });
 
@@ -130,18 +166,59 @@ export async function startBrowserVoiceServer(options: {
     throw new Error("browser voice server did not bind a TCP port");
   }
   const url = `http://127.0.0.1:${address.port}`;
+  let closing: Promise<void> | undefined;
   return {
     server,
     url,
-    close: async () => {
-      transcriber?.close();
-      for (const socket of sockets.clients) socket.close();
+    close: () => closing ??= (async () => {
+      lease.close();
+      const transcriberClosed = transcriber instanceof ChildTranscriber
+        ? transcriber.closeAndWait() : Promise.resolve(transcriber?.close());
+      for (const socket of sockets.clients) socket.terminate();
+      for (const socket of outputSockets.clients) socket.terminate();
+      const stopped = Promise.allSettled([transcriberClosed, setupRoutes.close(), ...[...sessions].map((session) => session.close()),
+        ...[...outputSessions].map((session) => session.close())]);
       sockets.close();
+      outputSockets.close();
+      server.closeIdleConnections();
       await new Promise<void>((resolveClose, rejectClose) => {
         server.close((error) => (error ? rejectClose(error) : resolveClose()));
       });
-    },
+      const results = await stopped;
+      await options.speechOutput?.close?.();
+      const failed = results.find((result) => result.status === "rejected");
+      if (failed?.status === "rejected") throw failed.reason;
+    })(),
   };
+}
+
+function connectSpeechOutput(
+  socket: WebSocket,
+  options: BrowserVoiceServerOptions,
+  lease: AudioWorkLease,
+  outputSessions: Set<SpeechOutputSession>,
+): void {
+  const session = new SpeechOutputSession({ sessionId: randomUUID(),
+    ...options.speechOutput!, catalogue: () => currentOutputCatalogue(options.speechOutput!, options.providers),
+    policy: options.providers!.policy,
+    acquire: () => lease.tryAcquire("tryout"),
+    sendEvent: (event) => { if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(event)); },
+    sendAudio: (packet) => { if (socket.readyState === WebSocket.OPEN) socket.send(packet); } });
+  outputSessions.add(session);
+  socket.on("message", (data, binary) => {
+    if (!binary) session.handle(data.toString());
+  });
+  socket.on("error", () => { void session.close().catch(() => {}); });
+  socket.once("close", () => { void session.close().then(() => outputSessions.delete(session), () => {}); });
+}
+
+/** Output metadata and dispatch bind to the same complete catalogue identity. */
+function currentOutputCatalogue(
+  output: NonNullable<BrowserVoiceServerOptions["speechOutput"]>,
+  providers: ProviderRoutesConfig | undefined,
+) {
+  const snapshot = output.catalogue();
+  return { ...snapshot, revision: providers?.catalogue().revision ?? snapshot.revision };
 }
 
 async function servePromptReader(
@@ -150,9 +227,11 @@ async function servePromptReader(
   reader: PromptReader | undefined,
   transcriber: Transcriber | undefined,
   hotwordsPath: string,
+  lease: AudioWorkLease,
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
   try {
+    requireLoopback(request, request.method !== "GET");
     if (!reader) {
       sendJson(response, 404, {
         error: "prompt reader not configured: start with --prompts <file> --out <dir>",
@@ -163,16 +242,14 @@ async function servePromptReader(
     } else if (url.pathname === "/prompt-reader/recordings" && request.method === "POST") {
       await saveTake(request, response, reader, url.searchParams);
     } else if (url.pathname === "/prompt-reader/transcriptions" && request.method === "POST" && transcriber) {
-      await transcribeTake(request, response, transcriber);
+      await transcribeTake(request, response, transcriber, lease);
     } else if (url.pathname.startsWith(PROMPT_READER_TAKES) && request.method === "GET") {
       await serveTake(request, response, reader, url.pathname.slice(PROMPT_READER_TAKES.length));
     } else {
       sendJson(response, 404, { error: "Not found" });
     }
   } catch (error) {
-    sendJson(response, 500, {
-      error: `prompt reader failed: ${error instanceof Error ? error.message : String(error)}`,
-    });
+    sendHttpError(response, error);
   }
 }
 
@@ -183,8 +260,7 @@ async function saveTake(
   reader: PromptReader,
   query: URLSearchParams,
 ): Promise<void> {
-  const samples = await readTakeSamples(request, response);
-  if (!samples) return;
+  const samples = await readTakeSamples(request);
   const preRoll = query.get("preRollMs");
   const preRollMs = preRoll === null ? undefined : Number(preRoll);
   const takeMs = (samples.length / PROMPT_SAMPLE_RATE) * 1_000;
@@ -214,9 +290,11 @@ async function transcribeTake(
   request: IncomingMessage,
   response: ServerResponse,
   transcriber: Transcriber,
+  lease: AudioWorkLease,
 ): Promise<void> {
-  const samples = await readTakeSamples(request, response);
-  if (!samples) return;
+  const samples = await readTakeSamples(request);
+  const release = lease.tryAcquire("legacy-input");
+  if (!release) throw new HttpError(409, "Other speech work is in progress", "AUDIO_BUSY");
   try {
     sendJson(response, 200, await transcriber.transcribe(samples));
   } catch (error) {
@@ -225,38 +303,7 @@ async function transcribeTake(
       model: error instanceof TranscriptionError ? error.model : TRANSCRIBE_MODEL_ID,
       ...(error instanceof TranscriptionError && error.hotwords ? { hotwords: error.hotwords } : {}),
     });
-  }
-}
-
-/**
- * A posted take as 16 kHz mono Float32 samples, or undefined once an error
- * response is sent. Only a same origin page on a loopback host may post: a
- * browser always sends Origin on POST, and the Host check defeats DNS
- * rebinding.
- */
-async function readTakeSamples(
-  request: IncomingMessage,
-  response: ServerResponse,
-): Promise<Float32Array | undefined> {
-  if (!isLoopbackHost(request) || request.headers.origin !== hostOrigin(request)) {
-    sendJson(response, 403, { error: "same origin loopback pages only" });
-    return undefined;
-  }
-  if (request.headers["content-type"] !== "application/octet-stream") {
-    sendJson(response, 415, { error: "body must be application/octet-stream Float32 samples" });
-    return undefined;
-  }
-  const body = await readBody(request, PROMPT_MAX_TAKE_BYTES);
-  if (body === null) {
-    sendJson(response, 413, { error: `take exceeds ${PROMPT_MAX_TAKE_BYTES} bytes` });
-    return undefined;
-  }
-  if (body.length === 0 || body.length % Float32Array.BYTES_PER_ELEMENT !== 0) {
-    sendJson(response, 400, { error: "body must be a non-empty whole number of Float32 samples" });
-    return undefined;
-  }
-  // Copy into a fresh buffer: pooled Buffers need not be 4 byte aligned.
-  return new Float32Array(new Uint8Array(body).buffer);
+  } finally { release(); }
 }
 
 /**
@@ -270,10 +317,7 @@ async function serveTake(
   reader: PromptReader,
   encodedName: string,
 ): Promise<void> {
-  if (!isLoopbackHost(request)) {
-    sendJson(response, 403, { error: "loopback pages only" });
-    return;
-  }
+  requireLoopback(request);
   let name: string;
   try {
     name = decodeURIComponent(encodedName);
@@ -293,36 +337,6 @@ async function serveTake(
     "x-content-type-options": "nosniff",
   });
   createReadStream(path).pipe(response);
-}
-
-/** The request body, or null once it passes `limit` bytes. */
-async function readBody(request: IncomingMessage, limit: number): Promise<Buffer | null> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of request as AsyncIterable<Buffer>) {
-    size += chunk.length;
-    if (size > limit) return null;
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks);
-}
-
-function sendJson(response: ServerResponse, status: number, body: unknown): void {
-  response.writeHead(status, {
-    "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store",
-    ...(status === 413 ? { connection: "close" } : {}),
-  });
-  response.end(JSON.stringify(body));
-}
-
-function isLoopbackHost(request: IncomingMessage): boolean {
-  const host = request.headers.host;
-  return !!host && LOOPBACK_HOSTNAMES.has(new URL(`http://${host}`).hostname);
-}
-
-function hostOrigin(request: IncomingMessage): string | undefined {
-  return request.headers.host ? `http://${request.headers.host}` : undefined;
 }
 
 async function serveStatic(

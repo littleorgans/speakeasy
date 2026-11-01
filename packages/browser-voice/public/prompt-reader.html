@@ -33,6 +33,31 @@
         <button id="previous" type="button">Previous <kbd>←</kbd></button>
         <button id="next" type="button">Skip <kbd>→</kbd></button>
       </div>
+      <section class="speech-input" aria-labelledby="speech-input-heading">
+        <h2 id="speech-input-heading">Speech input</h2>
+        <fieldset id="input-selection">
+          <legend class="heard-note">Choose the next comparison</legend>
+          <label class="input-field" for="input-provider">Speech input provider</label>
+          <select id="input-provider"><option value="local">Local</option></select>
+          <div id="input-local">
+            <fieldset id="input-modes">
+              <legend>Transcription mode</legend>
+              <label><input type="radio" name="input-mode" value="compare" checked /> Compare setups</label>
+              <label><input type="radio" name="input-mode" value="current-list" /> Current list</label>
+            </fieldset>
+            <div class="input-presets" id="input-presets"></div>
+          </div>
+          <label class="input-field" id="input-api" hidden>Transcription model <select id="input-model"></select></label>
+        </fieldset>
+        <p class="heard-note" id="input-transfer">Fixed presets. The editable known word list applies to Current list only.</p>
+        <p class="heard-note" id="comparison-source"></p>
+        <div class="controls">
+          <button id="compare-take" type="button" disabled>Compare take</button>
+          <button id="cancel-comparison" type="button" hidden>Cancel comparison</button>
+        </div>
+        <p class="heard-note" id="comparison-status" aria-live="polite">Loading setups</p>
+        <div class="setup-results" id="comparison-results"></div>
+      </section>
     </main>
 
     <footer class="bar">

@@ -6,9 +6,12 @@ import {
   DEFAULT_RULES,
   parseTtsModelId,
   SherpaTextToSpeech,
+  SpeechOutputFactory,
   withRewrite,
   type TextToSpeech,
   type TTSConfig,
+  type SpeechOutputConfig,
+  type SpeechOutputContext,
   type VoiceToText,
 } from "@speakeasy/speech-io";
 import {
@@ -40,12 +43,22 @@ export type RuntimeConfig = {
   ttsEngine?: TtsEngine;
   ttsModel?: string;
   voice?: string;
+  /** Explicit selection for Mercury cascade. Omitted callers retain legacy TTS defaults. */
+  speechOutput?: SpeechOutputConfig;
+};
+
+export type RuntimeOptions = {
+  /** Reuse the host's output factory so room and voice trials share resident graphs. */
+  speechOutputFactory?: Pick<SpeechOutputFactory, "create" | "quiesce">;
+  speechOutputContext?: SpeechOutputContext;
 };
 
 export type ConversationRuntime = {
   stt: VoiceToText;
   responder: VoiceResponder;
   label: string;
+  /** Await after responder close before releasing native work admission. */
+  quiesce?: () => Promise<void>;
 };
 
 /**
@@ -56,12 +69,14 @@ export async function createConversationRuntime(
   config: RuntimeConfig = {},
   env: NodeJS.ProcessEnv = process.env,
   stt?: VoiceToText,
+  options: RuntimeOptions = {},
 ): Promise<ConversationRuntime> {
-  const responder = buildResponder(config, env);
+  const responder = buildResponder(config, env, options);
   if (stt) {
     return {
       stt,
       responder: responder.value,
+      quiesce: responder.quiesce,
       label: `shared STT · ${responder.label}`,
     };
   }
@@ -70,6 +85,7 @@ export async function createConversationRuntime(
   return {
     stt: withRewrite(engine, { rules: DEFAULT_RULES, numbers: "off" }),
     responder: responder.value,
+    quiesce: responder.quiesce,
     label: `${engine.label} · ${responder.label}`,
   };
 }
@@ -77,7 +93,8 @@ export async function createConversationRuntime(
 function buildResponder(
   config: RuntimeConfig,
   env: NodeJS.ProcessEnv,
-): { value: VoiceResponder; label: string } {
+  options: RuntimeOptions,
+): { value: VoiceResponder; label: string; quiesce?: () => Promise<void> } {
   if ((config.responder ?? "cascade") === "realtime") {
     requireKey(env.OPENAI_API_KEY, "OPENAI_API_KEY", "realtime responder");
     const voice = parseRealtimeVoice(config.voice ?? DEFAULT_REALTIME_VOICE);
@@ -92,7 +109,7 @@ function buildResponder(
     };
   }
 
-  const voice = buildTts(config, env);
+  const voice = buildTts(config, env, options);
   const llm = buildChatModel(config, env);
   return {
     value: new CascadeResponder({
@@ -101,6 +118,7 @@ function buildResponder(
       ttsConfig: voice.config,
     }),
     label: `${llm.label} · ${voice.label}`,
+    quiesce: voice.quiesce,
   };
 }
 
@@ -140,7 +158,17 @@ function buildChatModel(
 function buildTts(
   config: RuntimeConfig,
   env: NodeJS.ProcessEnv,
-): { value: TextToSpeech; config: TTSConfig; label: string } {
+  options: RuntimeOptions,
+): { value: TextToSpeech; config?: TTSConfig; label: string; quiesce?: () => Promise<void> } {
+  if (config.llmProvider === "mercury" && config.speechOutput) {
+    const selected = { ...config.speechOutput, provider: { ...config.speechOutput.provider } };
+    const factory = options.speechOutputFactory ?? new SpeechOutputFactory();
+    return {
+      value: factory.create(selected, options.speechOutputContext),
+      label: `${selected.provider.kind} ${selected.model} · ${selected.voice}`,
+      quiesce: () => factory.quiesce(selected),
+    };
+  }
   if ((config.ttsEngine ?? "sherpa") === "cartesia") {
     requireKey(env.CARTESIA_API_KEY, "CARTESIA_API_KEY", "Cartesia voice");
     const voice = config.voice ?? DEFAULT_CARTESIA_VOICE;

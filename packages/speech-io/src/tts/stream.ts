@@ -316,52 +316,52 @@ export async function* fromArray(items: string[]): AsyncGenerator<string> {
  * yield an AudioSegment per chunk. While the consumer handles segment i, segment
  * i+1 is already synthesizing on the native worker thread; because RTF < 1 with
  * piper/kokoro, synthesis stays ahead and playback runs gapless. Timing is
- * measured from the first chunk pulled, so readyAtMs is honest for both the
- * fixed-string and the incremental (token-fed) callers.
+ * measured from iteration start, including initial text wait. Adapter open,
+ * queueing and browser rendering belong to the request observer.
  */
 export async function* synthPipeline(
   segments: AsyncIterable<string>,
   synth: SegmentSynth,
   speed: number = 1,
+  now: () => number = () => performance.now(),
 ): AsyncGenerator<SpeechSegment> {
+  const start = now();
   const iterator = segments[Symbol.asyncIterator]();
-  let current = await iterator.next();
-  if (current.done) {
-    return;
-  }
-  const start = performance.now();
-  let pending = synth.synth({ text: current.value, speed });
+  let cancelled = false;
+  const prepare = async () => {
+    const next = await iterator.next();
+    if (next.done || cancelled) return undefined;
+    const result = await synth.synth({ text: next.value, speed });
+    return { sentence: next.value, result, readyAtMs: now() - start };
+  };
+  const lookahead = () => {
+    const pending = prepare();
+    // A later text pull or native request may fail while the consumer plays.
+    void pending.catch(() => {});
+    return pending;
+  };
+  let pending = lookahead();
   let index = 0;
   try {
-    while (!current.done) {
-      const result = await pending;
-      const readyAtMs = performance.now() - start;
-      const next = await iterator.next();
-      if (!next.done) {
-        pending = synth.synth({ text: next.value, speed });
-      }
-      // Trim the model's ragged silence and append one controlled gap so
-      // continuous playback sounds like natural sentence rhythm. audioDurationMs
-      // reflects the trimmed+gapped samples, keeping the ahead-of-playback math
-      // honest against what actually plays.
+    for (;;) {
+      const current = await pending;
+      if (!current) return;
+      const { result, sentence, readyAtMs } = current;
+      // Start at most one future synthesis without awaiting future text.
+      pending = lookahead();
       const samples = trimSilence(result.samples, result.sampleRate);
       yield {
-        index,
-        sentence: current.value,
-        samples,
-        sampleRate: result.sampleRate,
-        readyAtMs,
+        index, sentence, samples, sampleRate: result.sampleRate, readyAtMs,
         synthMs: result.totalSynthMs,
         audioDurationMs: (samples.length / result.sampleRate) * 1_000,
       };
       index += 1;
-      current = next;
     }
   } finally {
-    // On an early return (barge-in breaks the consumer's loop) a prefetched
-    // synth may still be in flight; swallow it so it never surfaces as an
-    // unhandled rejection.
-    void Promise.resolve(pending).catch(() => {});
+    cancelled = true;
+    // Async generators cannot abort an outstanding next(). Request return without
+    // blocking cancellation; prepare suppresses synthesis if that pull arrives late.
+    void Promise.resolve(iterator.return?.()).catch(() => {});
   }
 }
 

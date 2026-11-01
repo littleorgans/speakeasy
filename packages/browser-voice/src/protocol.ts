@@ -4,6 +4,7 @@ import {
   type ConversationEvent,
   type RealtimeVoice,
 } from "@speakeasy/convo-engine";
+import { parseSpeechOutputConfig, type SpeechOutputConfig, type SpeechOutputRegistry } from "@speakeasy/speech-io/providers";
 
 export const INPUT_SAMPLE_RATE = 16_000;
 export const AUDIO_PACKET_KIND = 1;
@@ -29,6 +30,7 @@ export type ClientCommand =
       voice: RealtimeVoice;
       barge: boolean;
       systemPrompt?: string;
+      speechOutput?: SpeechOutputConfig;
     }
   | { type: "stop" }
   | { type: "interrupt" }
@@ -45,7 +47,7 @@ export type BrowserHostEvent =
       sampleRate?: number;
     };
 
-export function parseClientCommand(raw: string): ClientCommand {
+export function parseClientCommand(raw: string, outputRegistry: SpeechOutputRegistry = []): ClientCommand {
   let value: unknown;
   try {
     value = JSON.parse(raw);
@@ -81,6 +83,9 @@ export function parseClientCommand(raw: string): ClientCommand {
         pauseMs: Number(value.pauseMs),
         voice: parseRealtimeVoice(value.voice),
         barge: value.barge === true,
+        ...(value.speechOutput === undefined ? {} : {
+          speechOutput: parseSpeechOutputConfig(value.speechOutput, outputRegistry),
+        }),
         ...(typeof value.systemPrompt === "string" && value.systemPrompt.trim()
           ? { systemPrompt: value.systemPrompt.trim() }
           : {}),
@@ -121,8 +126,17 @@ export function decodeMicFrame(bytes: Uint8Array): Float32Array {
   if (samples > MAX_MIC_FRAME_SAMPLES) {
     throw new Error("microphone frame exceeds one second");
   }
-  const owned = bytes.slice();
-  const frame = new Float32Array(owned.buffer);
+  return decodePcmSamples(bytes);
+}
+
+/** Decode an exact byte view as finite little endian Float32 without clamping. */
+export function decodePcmSamples(bytes: Uint8Array): Float32Array {
+  if (bytes.byteLength === 0 || bytes.byteLength % 4 !== 0) {
+    throw new Error("body must be a non-empty whole number of Float32 samples");
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const frame = new Float32Array(bytes.byteLength / 4);
+  for (let index = 0; index < frame.length; index++) frame[index] = view.getFloat32(index * 4, true);
   for (const sample of frame) {
     if (!Number.isFinite(sample)) {
       throw new Error("microphone frame contains a non-finite sample");

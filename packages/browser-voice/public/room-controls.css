@@ -85,6 +85,18 @@
   background: var(--ink);
 }
 
+.speech-output { margin-top: 25px; padding-top: 20px; border-top: 1px solid var(--line); min-width: 0; }
+.speech-output h3 { margin: 0; font: inherit; font-size: 12px; font-weight: 600; }
+.output-note { font-size: 10px; line-height: 1.5; color: var(--paper-dim); overflow-wrap: anywhere; }
+.output-note:empty { display: none; }
+.output-model-summary { margin-top: 12px; padding: 14px; border: 1px solid var(--line); }
+.output-model-summary strong { font-size: 12px; font-weight: 600; }
+.output-model-summary p { margin: 8px 0 0; }
+.output-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+.output-actions button { min-height: 44px; padding: 0 18px; border: 1px solid var(--line); color: var(--paper); background: var(--ink); cursor: pointer; }
+.output-actions button:disabled { opacity: 0.5; cursor: default; }
+.output-actions button:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; }
+
 .field select {
   height: 44px;
   padding: 0 12px;

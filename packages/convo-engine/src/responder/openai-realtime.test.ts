@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ChatMessage } from "@speakeasy/llm";
+import { decodePcm16 as sharedDecodePcm16 } from "@speakeasy/speech-io";
 import type { ResponderEvent } from "./contract.ts";
 import {
   OpenAIRealtimeResponder,
@@ -632,6 +633,7 @@ test("open() fails fast without an API key", async () => {
 });
 
 test("decodePcm16 maps int16 to [-1, 1] floats", () => {
+  assert.equal(decodePcm16, sharedDecodePcm16);
   const samples = decodePcm16(pcm16Base64(0, 32767, -32768));
   assert.equal(samples.length, 3);
   assert.equal(samples[0], 0);

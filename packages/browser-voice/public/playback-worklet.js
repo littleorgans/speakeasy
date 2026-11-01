@@ -11,6 +11,9 @@ class SpeakEasyPlayback extends AudioWorkletProcessor {
     this.reportedDrain = false;
     this.fade = 0;
     this.playedInputSamples = 0;
+    this.closed = true;
+    this.reportFirstRender = false;
+    this.reportedFirstRender = false;
     this.port.onmessage = (event) => this.handle(event.data);
   }
 
@@ -27,12 +30,16 @@ class SpeakEasyPlayback extends AudioWorkletProcessor {
       this.reportedDrain = false;
       this.fade = 48;
       this.playedInputSamples = 0;
-    } else if (message.kind === "audio" && message.playbackId === this.playbackId) {
+      this.closed = false;
+      this.reportFirstRender = message.reportFirstRender === true;
+      this.reportedFirstRender = false;
+    } else if (message.kind === "audio" && message.playbackId === this.playbackId && !this.closed) {
       this.queue.push(message.samples);
     } else if (message.kind === "end" && message.playbackId === this.playbackId) {
       this.ended = true;
       this.maybeReportDrain();
     } else if (message.kind === "clear" && message.playbackId === this.playbackId) {
+      this.closed = true;
       this.queue.length = 0;
       this.readIndex = 0;
       this.fraction = 0;
@@ -85,6 +92,15 @@ class SpeakEasyPlayback extends AudioWorkletProcessor {
         this.fade -= 1;
       }
       primary[index] = value;
+      if (this.reportFirstRender && !this.reportedFirstRender && Number.isFinite(primary[index]) && primary[index] !== 0) {
+        this.reportedFirstRender = true;
+        this.port.postMessage({
+          kind: "first-render",
+          playbackId: this.playbackId,
+          audioTime: currentTime + index / sampleRate,
+          sampleOffset: index,
+        });
+      }
       for (let channel = 1; channel < channels.length; channel += 1) {
         channels[channel][index] = value;
       }

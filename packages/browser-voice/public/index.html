@@ -106,8 +106,8 @@
 
         <footer class="panel-footer">
           <span class="privacy-mark" aria-hidden="true"></span>
-          <p>
-            Microphone audio stays on this machine until an enabled engine handles the turn.
+          <p id="room-transfer">
+            Microphone audio is transcribed on this Mac. Transcript text is sent to OpenAI Realtime; reply audio returns.
           </p>
         </footer>
       </aside>
@@ -190,6 +190,24 @@
           </select>
           <small>The selected Realtime voice applies the next time you enter the room.</small>
         </label>
+
+        <section class="speech-output" aria-labelledby="output-heading">
+          <h3 id="output-heading">Speech output</h3>
+          <p id="output-mode-note" class="output-note">Realtime replies use the Realtime voice above.</p>
+          <label class="field"><span>Speech output provider</span><select id="output-provider" disabled><option>Loading</option></select></label>
+          <label class="field"><span>Speech output model</span><select id="output-model" disabled><option>Loading</option></select></label>
+          <div id="output-model-summary" class="output-model-summary" hidden></div>
+          <label class="field"><span>Speech output voice</span><select id="output-voice" disabled><option>Loading</option></select></label>
+          <p id="output-transfer" class="output-note"></p>
+          <label class="field"><span>Text to try</span><textarea id="output-text" rows="3">The room is ready. Take your time, then tell me what you would like to try.</textarea></label>
+          <div class="output-actions">
+            <button id="output-try" type="button" disabled>Try voice</button>
+            <button id="output-stop" type="button" hidden>Stop</button>
+          </div>
+          <p id="output-status" class="output-note" role="status">Loading voices</p>
+          <p id="output-error" class="output-note" role="alert"></p>
+          <p id="output-timing" class="output-note"></p>
+        </section>
 
         <label class="field">
           <span>How should the voice behave?</span>

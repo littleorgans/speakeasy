@@ -1,5 +1,6 @@
 import { WebSocket } from "ws";
-import type { AudioSegment } from "@speakeasy/speech-io";
+import { decodePcm16 } from "@speakeasy/speech-io";
+export { decodePcm16 } from "@speakeasy/speech-io";
 import type { ChatMessage } from "@speakeasy/llm";
 import type { ResponderEvent, ResponderSession, VoiceResponder } from "./contract.ts";
 
@@ -434,16 +435,6 @@ function isNoActiveResponseCancel(event: ServerEvent): boolean {
     event.error?.code === "response_cancel_not_active" ||
     /^Cancellation failed: no active response found\.?$/i.test(event.error?.message ?? "")
   );
-}
-
-/** Base64 PCM16 mono -> Float32 samples (the AudioSegment/player format). */
-export function decodePcm16(base64: string): Float32Array {
-  const bytes = Buffer.from(base64, "base64");
-  const samples = new Float32Array(Math.floor(bytes.length / 2));
-  for (let i = 0; i < samples.length; i += 1) {
-    samples[i] = bytes.readInt16LE(i * 2) / 32768;
-  }
-  return samples;
 }
 
 /** Unbounded push queue bridging socket callbacks to the respond() pull loop. */

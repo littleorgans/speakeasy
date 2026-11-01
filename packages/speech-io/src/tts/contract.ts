@@ -33,7 +33,7 @@ export type AudioSegment = {
   sentence: string;
   samples: Float32Array;
   sampleRate: number;
-  /** Wall-clock ms from the speak() call until this segment was ready. */
+  /** Pipeline iteration start to ready PCM, including initial text wait. Excludes open and queue time. */
   readyAtMs: number;
   /** Synth time for this segment alone. */
   synthMs: number;

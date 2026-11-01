@@ -6,6 +6,8 @@ import {
 } from "@speakeasy/convo-engine";
 import { WebSocket, type RawData } from "ws";
 import { BrowserAudioSink, BrowserAudioSource } from "./browser-audio.ts";
+import type { SpeechOutputRegistry } from "@speakeasy/speech-io/providers";
+import type { ReleaseAudioWork } from "./audio-lease.ts";
 import {
   decodeMicFrame,
   parseClientCommand,
@@ -13,38 +15,71 @@ import {
   type ClientCommand,
 } from "./protocol.ts";
 
+export type BrowserRuntimeConfig = RuntimeConfig;
+export type BrowserConversationRuntime = ConversationRuntime;
 export type RuntimeFactory = (
-  config: RuntimeConfig,
-) => Promise<ConversationRuntime>;
+  config: BrowserRuntimeConfig,
+) => Promise<BrowserConversationRuntime>;
 
 /** One browser socket owns one conversation loop and its audio adapters. */
 export class BrowserConversationSession {
   readonly #socket: WebSocket;
-  readonly #runtimeConfig: RuntimeConfig;
+  readonly #runtimeConfig: BrowserRuntimeConfig;
   readonly #createRuntime: RuntimeFactory;
+  readonly #acquire: (() => ReleaseAudioWork | undefined) | undefined;
+  readonly #outputRegistry: () => SpeechOutputRegistry;
   readonly #mic = new BrowserAudioSource();
   #loop: ConversationLoop | undefined;
+  #runtime: BrowserConversationRuntime | undefined;
   #activeSink: BrowserAudioSink | undefined;
   #nextPlaybackId = 1;
   #starting = false;
   #closed = false;
+  #startTask: Promise<void> | undefined;
+  #stopTask: Promise<void> | undefined;
+  #release: ReleaseAudioWork | undefined;
+  #retirementFailed = false;
 
   constructor(options: {
     socket: WebSocket;
-    runtimeConfig: RuntimeConfig;
+    runtimeConfig: BrowserRuntimeConfig;
     createRuntime: RuntimeFactory;
+    acquire?: () => ReleaseAudioWork | undefined;
+    outputRegistry?: () => SpeechOutputRegistry;
   }) {
     this.#socket = options.socket;
     this.#runtimeConfig = options.runtimeConfig;
     this.#createRuntime = options.createRuntime;
+    this.#acquire = options.acquire;
+    this.#outputRegistry = options.outputRegistry ?? (() => []);
     this.#wireSocket();
   }
 
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
+    if (this.#stopTask) return this.#stopTask;
+    const task = this.#stop();
+    this.#stopTask = task;
+    void task.then(() => { this.#stopTask = undefined; }, () => { this.#stopTask = undefined; });
+    return task;
+  }
+
+  async close(): Promise<void> {
+    this.#closed = true;
+    await this.stop();
+  }
+
+  async #stop(): Promise<void> {
     this.#starting = false;
+    void this.#activeSink?.interrupt();
+    this.#activeSink?.close();
+    await this.#startTask;
     await this.#loop?.stop();
+    await this.#quiesce();
     this.#loop = undefined;
+    this.#runtime = undefined;
     this.#activeSink = undefined;
+    this.#release?.();
+    this.#release = undefined;
     if (!this.#closed) {
       this.#send({ type: "session", phase: "stopped" });
     }
@@ -57,19 +92,17 @@ export class BrowserConversationSession {
         return;
       }
       try {
-        const command = parseClientCommand(rawText(data));
-        void this.#handle(command);
+        const command = parseClientCommand(rawText(data), this.#outputRegistry());
+        void this.#handle(command).catch((error) => this.#sendNotice("error", safeMessage(error)));
       } catch (error) {
         this.#sendNotice("error", safeMessage(error));
       }
     });
     this.#socket.once("close", () => {
-      this.#closed = true;
-      void this.stop();
+      void this.close().catch(() => {});
     });
     this.#socket.on("error", () => {
-      this.#closed = true;
-      void this.stop();
+      void this.close().catch(() => {});
     });
   }
 
@@ -96,16 +129,36 @@ export class BrowserConversationSession {
   }
 
   async #start(command: Extract<ClientCommand, { type: "start" }>): Promise<void> {
-    if (this.#starting || this.#loop) {
+    if (this.#closed || this.#startTask || this.#loop || this.#stopTask || this.#retirementFailed) return;
+    const release = this.#acquire?.();
+    if (this.#acquire && !release) {
+      this.#sendNotice("error", "Other speech work is in progress. Try again after it finishes.");
+      this.#send({ type: "session", phase: "stopped" });
       return;
     }
+    this.#release = release;
     this.#starting = true;
     this.#send({ type: "session", phase: "loading" });
+    this.#startTask = this.#open(command).finally(() => {
+      this.#starting = false;
+      this.#startTask = undefined;
+      if (!this.#loop && !this.#retirementFailed) {
+        this.#release?.();
+        this.#release = undefined;
+      }
+    });
+    await this.#startTask;
+  }
+
+  async #open(command: Extract<ClientCommand, { type: "start" }>): Promise<void> {
     try {
       const runtimeConfig =
         runtimeConfigFor(command, this.#runtimeConfig);
       const runtime = await this.#createRuntime(runtimeConfig);
+      this.#runtime = runtime;
       if (!this.#starting || this.#closed) {
+        await this.#quiesce();
+        this.#runtime = undefined;
         return;
       }
       const loop = new ConversationLoop(
@@ -125,19 +178,34 @@ export class BrowserConversationSession {
                 ? { mode: "manual" }
                 : { mode: "eager", minTrailingSilenceMs: command.pauseMs },
           },
-          onEvent: (event) => this.#send(event),
+          onEvent: (event) => {
+            if (this.#loop === loop && !this.#stopTask && !this.#closed) this.#send(event);
+          },
         },
       );
       this.#loop = loop;
       await loop.start();
+      if (!this.#starting || this.#closed) {
+        await loop.stop();
+        await this.#quiesce();
+        this.#loop = undefined;
+        this.#runtime = undefined;
+        return;
+      }
       this.#send({ type: "session", phase: "ready", label: runtime.label });
     } catch (error) {
+      await this.#loop?.stop();
+      await this.#quiesce();
       this.#loop = undefined;
+      this.#runtime = undefined;
       this.#sendNotice("error", safeMessage(error));
       this.#send({ type: "session", phase: "stopped" });
-    } finally {
-      this.#starting = false;
     }
+  }
+
+  async #quiesce(): Promise<void> {
+    try { await this.#runtime?.quiesce?.(); }
+    catch (error) { this.#retirementFailed = true; throw error; }
   }
 
   #createSink(sampleRate: number): BrowserAudioSink {
@@ -152,6 +220,7 @@ export class BrowserConversationSession {
       },
     });
     this.#activeSink = sink;
+    if (this.#closed || this.#stopTask) sink.close();
     return sink;
   }
 
@@ -178,13 +247,14 @@ export class BrowserConversationSession {
 
 export function runtimeConfigFor(
   command: Extract<ClientCommand, { type: "start" }>,
-  defaults: RuntimeConfig,
-): RuntimeConfig {
+  defaults: BrowserRuntimeConfig,
+): BrowserRuntimeConfig {
   const {
     responder: _responder,
     llmProvider: _llmProvider,
     llmReasoningEffort: _llmReasoningEffort,
     voice,
+    speechOutput,
     ...shared
   } = defaults;
   if (command.engine === "realtime") {
@@ -197,6 +267,9 @@ export function runtimeConfigFor(
     llmReasoningEffort:
       command.engine === "mercury-instant" ? "instant" : "low",
     ...(voice === undefined ? {} : { voice }),
+    ...(command.speechOutput === undefined && speechOutput === undefined ? {} : {
+      speechOutput: structuredClone(command.speechOutput ?? speechOutput),
+    }),
   };
 }
 

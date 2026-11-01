@@ -60,7 +60,66 @@ export {
   DEFAULT_CARTESIA_MODEL,
   DEFAULT_CARTESIA_VOICE,
   resolveCartesiaVoice,
+  type CartesiaOptions,
+  type FetchLike,
 } from "./tts/cartesia.ts";
+export {
+  OpenAITextToSpeech,
+  DEFAULT_OPENAI_OUTPUT_CONFIG,
+  DEFAULT_OPENAI_MODEL,
+  DEFAULT_OPENAI_VOICE,
+  OPENAI_SAMPLE_RATE,
+  OPENAI_VOICES,
+  type OpenAIOptions,
+  type OpenAISessionOptions,
+  type OpenAISocket,
+  type OpenAISocketFactory,
+  type OpenAILimits,
+  type OpenAIAudioSegment,
+  type OpenAISegmentObservation,
+  type OpenAISpeechStream,
+} from "./tts/openai.ts";
+export { LocalSpeechOutputFactory, type LocalSpeechOutputOptions } from "./tts/factory.ts";
+export {
+  SpeechOutputFactory,
+  type SpeechOutputContext,
+  type SpeechOutputFactoryOptions,
+} from "./tts/provider-factory.ts";
+export {
+  DEFAULT_LOCAL_OUTPUT,
+  LOCAL_OUTPUT_MODELS,
+  LOCAL_OUTPUT_REGISTRY,
+  LOCAL_OUTPUT_SPEED,
+  getLocalOutputCatalogue,
+  getLocalOutputReadiness,
+  resolveLocalOutput,
+  type LocalOutputModel,
+  type LocalOutputModelId,
+  type LocalOutputReadiness,
+} from "./tts/catalogue.ts";
+export {
+  CartesiaBatchTranscriber,
+  CARTESIA_STT_MODEL,
+  type CartesiaSttOptions,
+  type CartesiaSttResult,
+  type CartesiaSttMetadata,
+  type CartesiaSttFetch,
+} from "./engines/cartesia-stt.ts";
+export {
+  OpenAIFileTranscriber,
+  OPENAI_FILE_MODEL,
+  type OpenAIFileOptions,
+  type OpenAIFileResult,
+} from "./engines/openai-file.ts";
+export type {
+  SpeechInputConfig,
+  SpeechOutputConfig,
+  SpeechInputRegistry,
+  SpeechOutputRegistry,
+  SpeechTiming,
+  TimingObservation,
+} from "./provider-config.ts";
+export { decodePcm16 } from "./pcm.ts";
 export { createSegmentPlayer, type SegmentPlayer } from "./tts/player.ts";
 export {
   parseTtsModelId,
@@ -82,7 +141,9 @@ export {
 } from "./capture/ffmpeg.ts";
 
 // Recorded-audio helper (drives the mic-free live smoke).
-export { pacedFrames, readWavFrames, type WavAudio } from "./bench/wav.ts";
+export {
+  pacedFrames, readWavFrames, decodeWavSamples, decodeWavFrames, encodeWavFloat32, type WavAudio,
+} from "./bench/wav.ts";
 export { upsertReportSection } from "./bench/report.ts";
 export {
   DEFAULT_CORPUS_DIR,

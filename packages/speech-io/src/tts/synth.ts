@@ -7,9 +7,11 @@ import { createTtsFrontend, type TtsFrontend } from "./frontend.ts";
 import {
   ensureTtsModel,
   resolveTtsModelPaths,
-  TTS_MODELS,
-  type TtsModelId,
+  getTtsModel,
+  type SynthModelId,
   type TtsModelPaths,
+  type TtsModel,
+  TTS_ROOT,
 } from "./models.ts";
 
 /**
@@ -37,7 +39,7 @@ import {
  */
 
 const require = createRequire(import.meta.url);
-const sherpa = require("sherpa-onnx-node") as typeof import("sherpa-onnx-node");
+const loadSherpa = () => require("sherpa-onnx-node") as typeof import("sherpa-onnx-node");
 
 const DEFAULT_NUM_THREADS = 2;
 
@@ -67,14 +69,14 @@ export type SynthResult = {
 export class TtsSynth {
   #tts: import("sherpa-onnx-node").OfflineTts;
   #frontend: TtsFrontend;
-  readonly modelId: TtsModelId;
+  readonly modelId: SynthModelId;
   readonly numThreads: number;
   readonly loadMs: number;
 
   private constructor(
     tts: import("sherpa-onnx-node").OfflineTts,
     frontend: TtsFrontend,
-    modelId: TtsModelId,
+    modelId: SynthModelId,
     numThreads: number,
     loadMs: number,
   ) {
@@ -85,19 +87,31 @@ export class TtsSynth {
     this.loadMs = loadMs;
   }
 
-  /** Download the model and frontend if needed, then load an OfflineTts. */
+  /** Verify browser payloads or install legacy assets, then load without warmup. */
   static async create(
-    modelId: TtsModelId,
+    modelId: SynthModelId,
     numThreads: number = DEFAULT_NUM_THREADS,
+    options: { root?: string; allowDownload?: boolean } = {},
   ): Promise<TtsSynth> {
-    const paths = resolveTtsModelPaths(TTS_MODELS[modelId]);
+    const model: TtsModel = getTtsModel(modelId);
+    const root = options.root ?? TTS_ROOT;
+    if (options.allowDownload === false && !model.files) throw new Error("Model requires explicit provisioning");
+    const paths = resolveTtsModelPaths(model, root);
     await ensureTtsModel(paths);
     const start = performance.now();
-    const tts = new sherpa.OfflineTts(
-      createTtsConfig(TTS_MODELS[modelId].family, paths, numThreads),
+    const tts = new (loadSherpa().OfflineTts)(
+      createTtsConfig(model.family, paths, numThreads),
     );
     const loadMs = performance.now() - start;
-    const frontend = await createTtsFrontend({ tokens: paths.tokens, lang: tts.lang });
+    if (model.numSpeakers !== undefined && tts.numSpeakers !== model.numSpeakers) {
+      throw new Error(`TTS speaker count mismatch for ${modelId}`);
+    }
+    if (model.sampleRate !== undefined && tts.sampleRate !== model.sampleRate) {
+      throw new Error(`TTS sample rate mismatch for ${modelId}`);
+    }
+    const frontend = await createTtsFrontend({
+      tokens: paths.tokens, lang: model.lang ?? tts.lang, family: model.family,
+    }, root, options.allowDownload ?? true);
     return new TtsSynth(tts, frontend, modelId, numThreads, loadMs);
   }
 
@@ -121,6 +135,8 @@ export class TtsSynth {
   }
 
   async synth(request: SynthRequest): Promise<SynthResult> {
+    validateSpeaker(request.sid ?? 0, this.numSpeakers);
+    validateSpeed(request.speed ?? 1);
     const start = performance.now();
     // No onProgress: the 1.13.3 callback path aborts the process (module doc).
     const generate = this.#frontend.request(request.text, request.sid ?? 0, request.speed ?? 1);
@@ -146,13 +162,13 @@ export async function writeWav(
   audio: { samples: Float32Array; sampleRate: number },
 ): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  sherpa.writeWave(path, {
+  loadSherpa().writeWave(path, {
     samples: audio.samples,
     sampleRate: audio.sampleRate,
   });
 }
 
-function createTtsConfig(
+export function createTtsConfig(
   family: "vits" | "kokoro",
   paths: TtsModelPaths,
   numThreads: number = DEFAULT_NUM_THREADS,
@@ -183,4 +199,14 @@ function createTtsConfig(
       ...shared,
     },
   };
+}
+
+export function validateSpeaker(sid: number, numSpeakers: number): void {
+  if (!Number.isInteger(sid) || sid < 0 || sid >= numSpeakers) {
+    throw new Error(`Invalid TTS speaker ${sid}; model has ${numSpeakers} speakers`);
+  }
+}
+
+export function validateSpeed(speed: number): void {
+  if (!Number.isFinite(speed) || speed <= 0) throw new Error("TTS speed must be finite and positive");
 }

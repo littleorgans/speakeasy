@@ -1,4 +1,5 @@
 import { readFile, realpath } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PROMPT_ID, readCorpusEntries, saveCorpusPair } from "@speakeasy/speech-io";
@@ -80,6 +81,11 @@ export class PromptReader {
         return { ...prompt, recorded: audio.length > 0, takes: audio };
       }),
     };
+  }
+
+  /** Stable server corpus identity for narrow trusted saved replay grants. */
+  get corpusId(): string {
+    return createHash("sha256").update(this.#outputDir).digest("hex");
   }
 
   /**

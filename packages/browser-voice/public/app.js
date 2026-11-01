@@ -1,10 +1,10 @@
 import { CAPTURE_AUDIO_CONSTRAINTS } from "/capture-constraints.js";
 import { HoldReleaseGate } from "/hold-release.js";
 import { PreRollRing } from "/pre-roll.js";
+import { SpeechOutputControls, loadRoomSettings, clampPause, SETTINGS_KEY } from "/speech-output-controls.js";
 
 const AUDIO_HEADER_BYTES = 9;
 const AUDIO_PACKET_KIND = 1;
-const SETTINGS_KEY = "speak-easy.browser-room";
 
 class SpeakEasyRoom {
   constructor() {
@@ -19,6 +19,7 @@ class SpeakEasyRoom {
     this.sessionPhase = "stopped";
     this.state = "idle";
     this.muted = false;
+    this.keyboardHold = false;
     this.activeSettings = null;
     this.level = 0;
     this.turnNumber = 0;
@@ -36,7 +37,9 @@ class SpeakEasyRoom {
         this.renderControl();
       },
     });
-    this.settings = this.loadSettings();
+    this.settings = loadRoomSettings(this.elements, localStorage);
+    this.output = new SpeechOutputControls({ activeRoom: () => this.sessionPhase !== "stopped" });
+    void this.output.load(this.settings.speechOutput);
     this.createSignalBars();
     this.bindControls();
     this.applySettings();
@@ -103,7 +106,8 @@ class SpeakEasyRoom {
     this.elements.end.addEventListener("click", () => void this.end());
     this.elements.clear.addEventListener("click", () => this.clearTranscript());
     this.elements.settingsButton.addEventListener("click", () => void this.openSettings());
-    this.elements.saveSettings.addEventListener("click", () => this.saveSettings());
+    this.elements.saveSettings.addEventListener("click", (event) => { if (!this.saveSettings()) event.preventDefault(); });
+    this.elements.settingsDialog.addEventListener("close", () => this.output.stop());
     this.elements.modeOptions.forEach((option) => {
       option.addEventListener("change", () => this.renderSettingsMode());
     });
@@ -116,27 +120,32 @@ class SpeakEasyRoom {
         event.code === "Space" &&
         !event.repeat &&
         !this.elements.settingsDialog.open &&
-        !isTextEntry(event.target) &&
+        (!isNativeControl(event.target) || event.target === this.elements.main) &&
         this.usesHoldMode() &&
         this.sessionPhase === "ready"
       ) {
         event.preventDefault();
+        const held = this.hold.held;
         this.beginHold();
+        this.keyboardHold = !held && this.hold.held;
       }
     });
     window.addEventListener("keyup", (event) => {
-      if (event.code === "Space" && this.hold.held) {
+      if (event.code === "Space" && this.keyboardHold) {
+        this.keyboardHold = false;
         event.preventDefault();
         this.endHold();
       }
     });
     window.addEventListener("beforeunload", () => {
+      this.output.stop();
       this.send({ type: "stop" });
       this.socket?.close();
     });
   }
 
   async start() {
+    this.output.stop();
     this.activeSettings = { ...this.settings };
     this.setSession("loading");
     try {
@@ -149,6 +158,8 @@ class SpeakEasyRoom {
         pauseMs: this.activeSettings.pauseMs,
         voice: this.activeSettings.voice,
         barge: this.activeSettings.barge,
+        ...(this.activeSettings.engine !== "realtime" && this.activeSettings.speechOutput
+          ? { speechOutput: this.activeSettings.speechOutput } : {}),
         ...(this.activeSettings.systemPrompt
           ? { systemPrompt: this.activeSettings.systemPrompt }
           : {}),
@@ -281,6 +292,7 @@ class SpeakEasyRoom {
   setSession(phase, label) {
     this.sessionPhase = phase;
     if (phase === "stopped") {
+      this.keyboardHold = false;
       this.hold.cancel();
       this.activeSettings = null;
       this.setState("idle");
@@ -295,9 +307,11 @@ class SpeakEasyRoom {
     this.elements.end.disabled = phase === "stopped";
     if (label) this.elements.runtime.textContent = label;
     this.renderControl();
+    this.output.render();
   }
 
   setState(state) {
+    this.output.renderRoomPrivacy(this.activeSettings ?? this.settings, document.getElementById("room-transfer"));
     this.state = state;
     document.body.dataset.state = state;
     const states = {
@@ -552,6 +566,7 @@ class SpeakEasyRoom {
 
   openSettings() {
     this.elements.settingsDialog.showModal();
+    this.output.render();
     if (navigator.mediaDevices?.enumerateDevices) void this.refreshDevices();
   }
 
@@ -572,34 +587,6 @@ class SpeakEasyRoom {
       : "";
   }
 
-  loadSettings() {
-    const defaults = {
-      mode: "natural",
-      engine: this.elements.engine.value,
-      pauseMs: Number(this.elements.pause.value),
-      voice: this.elements.voice.value,
-      microphoneId: "",
-      systemPrompt: "",
-      barge: true,
-    };
-    try {
-      const stored = { ...defaults, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}") };
-      const engines = [...this.elements.engine.options].map((option) => option.value);
-      const voices = [...this.elements.voice.options].map((option) => option.value);
-      return {
-        mode: stored.mode === "hold" ? "hold" : "natural",
-        engine: engines.includes(stored.engine) ? stored.engine : defaults.engine,
-        pauseMs: clampPause(stored.pauseMs, this.elements.pause),
-        voice: voices.includes(stored.voice) ? stored.voice : defaults.voice,
-        microphoneId: typeof stored.microphoneId === "string" ? stored.microphoneId : "",
-        systemPrompt: typeof stored.systemPrompt === "string" ? stored.systemPrompt : "",
-        barge: stored.barge !== false,
-      };
-    } catch {
-      return defaults;
-    }
-  }
-
   applySettings() {
     const mode = this.elements.modeOptions.find((option) => option.value === this.settings.mode);
     if (mode) mode.checked = true;
@@ -615,7 +602,9 @@ class SpeakEasyRoom {
 
   saveSettings() {
     const mode = this.elements.modeOptions.find((option) => option.checked)?.value ?? "natural";
-    if (mode === "natural" && !this.elements.pause.reportValidity()) return;
+    if (mode === "natural" && !this.elements.pause.reportValidity()) return false;
+    const speechOutput = this.output.selection();
+    if (this.elements.engine.value !== "realtime" && this.output.catalog && !speechOutput) return false;
     this.settings = {
       mode,
       engine: this.elements.engine.value,
@@ -624,12 +613,15 @@ class SpeakEasyRoom {
       voice: this.elements.voice.value,
       systemPrompt: this.elements.systemPrompt.value.trim(),
       barge: this.elements.barge.checked,
+      ...(speechOutput ? { speechOutput } : this.settings.speechOutput ? { speechOutput: this.settings.speechOutput } : {}),
     };
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
     if (this.sessionPhase === "ready") {
       this.showToast("Saved. End and re-enter the room to apply voice or conversation changes.");
     }
     this.setState(this.state);
+    this.output.stop();
+    return true;
   }
 
   renderSettingsMode() {
@@ -638,6 +630,7 @@ class SpeakEasyRoom {
     this.elements.pause.disabled = mode === "hold";
     this.elements.bargeField.hidden = mode === "hold";
     this.elements.voiceField.hidden = this.elements.engine.value !== "realtime";
+    this.output.renderMode(this.elements.engine.value);
   }
 
   createSignalBars() {
@@ -687,16 +680,9 @@ class SpeakEasyRoom {
   }
 }
 
-function clampPause(value, input) {
-  const min = Number(input.min);
-  const max = Number(input.max);
-  const pause = Number(value);
-  return Math.min(max, Math.max(min, Number.isFinite(pause) ? Math.round(pause) : Number(input.value)));
-}
 
-function isTextEntry(target) {
-  return target instanceof HTMLElement &&
-    (target.matches("input, textarea, select") || target.isContentEditable);
+function isNativeControl(target) {
+  return Boolean(target?.closest?.("input, select, textarea, button, a, summary, [contenteditable]:not([contenteditable=false]), [role=button]"));
 }
 
 new SpeakEasyRoom();

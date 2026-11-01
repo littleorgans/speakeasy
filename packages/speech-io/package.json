@@ -8,7 +8,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./stt": "./src/stt.ts",
-    "./ort": "./src/ort.ts"
+    "./ort": "./src/ort.ts",
+    "./providers": "./src/provider-config.ts"
   },
   "engines": {
     "node": ">=22.6.0"

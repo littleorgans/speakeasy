@@ -1,5 +1,6 @@
+import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import { ensureAsset } from "../engines/assets.ts";
+import { ensureAsset, sha256File } from "../engines/assets.ts";
 
 /**
  * Registry of offline TTS models for the head-to-head sweep.
@@ -11,6 +12,7 @@ import { ensureAsset } from "../engines/assets.ts";
  *
  * Digests are the release assets' published GitHub sha256, read 2026-11-01.
  * Releases are mutable, so an upstream change fails closed in `ensureAsset`.
+ * Approved browser payloads are separate below, preserving CLI sweep defaults.
  * Text to phonemes lives in frontend.ts, shared by every descriptor.
  */
 
@@ -22,12 +24,19 @@ export const TTS_ROOT = join(process.cwd(), "models", "tts");
 
 export type TtsModelFamily = "vits" | "kokoro";
 
+export type TtsModelFile = { name: string; sha256: string; bytes: number };
+
 export type TtsModel = {
   /** Release tarball basename; doubles as the extracted directory name. */
   name: string;
-  /** Release tarball sha256 (hex). */
-  sha256: string;
-  bytes: number;
+  /** Legacy release archives are pinned as archives. Browser bundles pin payloads. */
+  sha256?: string;
+  bytes?: number;
+  files?: readonly TtsModelFile[];
+  attribution?: readonly string[];
+  lang?: string;
+  sampleRate?: number;
+  numSpeakers?: number;
   /** Human note: architecture / voice count / size. */
   note: string;
   family: TtsModelFamily;
@@ -38,6 +47,45 @@ export type TtsModel = {
   voices?: string;
 };
 
+/** Payload pins from the approved local research records. Explicit provisioning only. */
+export const LOCAL_TTS_MODELS = {
+  "piper-kristin-medium": {
+    name: "vits-piper-en_US-kristin-medium",
+    note: "Piper Kristin medium, pinned fp32, single voice, 22050 Hz",
+    family: "vits",
+    model: "en_US-kristin-medium.onnx",
+    tokens: "tokens.txt",
+    lang: "en",
+    sampleRate: 22_050,
+    numSpeakers: 1,
+    files: [
+      { name: "en_US-kristin-medium.onnx", bytes: 63_531_507, sha256: "f9a5c375c70ddc33ccdb3969c76a4d7cc5255ac08119a312b0034a1d07041be6" },
+      { name: "tokens.txt", bytes: 940, sha256: "ef3a7e4a8d1af0c9d4dc45aaae1a6242ebe24a7ed6f3d025a49eb29682784c6d" },
+      { name: "en_US-kristin-medium.onnx.json", bytes: 4_968, sha256: "5681426d4aead22195de70531eeeeddb46493cfaffc5764b2ea3db73428b651c" },
+    ],
+    attribution: ["MODEL_CARD"],
+  },
+  "kokoro-v1.0": {
+    name: "kokoro-multi-lang-v1_0",
+    note: "Kokoro v1.0 fp32, exact 54 speaker bundle, 24000 Hz",
+    family: "kokoro",
+    model: "model.onnx",
+    tokens: "tokens.txt",
+    voices: "voices.bin",
+    lang: "en-us",
+    sampleRate: 24_000,
+    numSpeakers: 54,
+    files: [
+      { name: "model.onnx", bytes: 325_560_556, sha256: "b40f62b166ac8164b0627ef48a0b358eda0985e272fb03ef5252e7206305da11" },
+      { name: "voices.bin", bytes: 28_200_960, sha256: "1c5a5b983d3d50d8586d437a51f3faa2da7919ce76a013c081e65671a3447c29" },
+      { name: "tokens.txt", bytes: 687, sha256: "6ebb6bb288f20f3ae8d004d3c2ca27697da27c037d75e81a60e2a6a663f95425" },
+      { name: "LICENSE", bytes: 11_358, sha256: "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30" },
+    ],
+    attribution: ["LICENSE", "README.md"],
+  },
+} as const satisfies Record<string, TtsModel>;
+
+/** Legacy CLI sweep registry, including its original iteration order. */
 export const TTS_MODELS = {
   "piper-amy": {
     name: "vits-piper-en_US-amy-low",
@@ -98,12 +146,21 @@ export const TTS_MODELS = {
 } as const satisfies Record<string, TtsModel>;
 
 export type TtsModelId = keyof typeof TTS_MODELS;
+export type LocalTtsModelId = keyof typeof LOCAL_TTS_MODELS;
+export type SynthModelId = TtsModelId | LocalTtsModelId;
+
+export function getTtsModel(id: SynthModelId): TtsModel {
+  return Object.hasOwn(LOCAL_TTS_MODELS, id)
+    ? LOCAL_TTS_MODELS[id as LocalTtsModelId]
+    : TTS_MODELS[id as TtsModelId];
+}
 
 export type TtsModelPaths = {
   dir: string;
   archive: string;
   url: string;
-  sha256: string;
+  sha256?: string;
+  files?: readonly TtsModelFile[];
   model: string;
   tokens: string;
   voices?: string;
@@ -127,20 +184,27 @@ export function resolveTtsModelPaths(
     archive: join(root, `${model.name}.tar.bz2`),
     url: `${TTS_MODELS_BASE}/${model.name}.tar.bz2`,
     sha256: model.sha256,
+    files: model.files,
     model: join(dir, model.model),
     tokens: join(dir, model.tokens),
     voices: model.voices ? join(dir, model.voices) : undefined,
-    members: [model.model, model.tokens, ...(model.voices ? [model.voices] : [])],
-    attribution: ATTRIBUTION_FILES,
+    members: model.files?.map((file) => file.name) ?? [model.model, model.tokens, ...(model.voices ? [model.voices] : [])],
+    attribution: model.attribution ?? ATTRIBUTION_FILES,
   };
 }
 
 /**
- * Download the model tarball and extract its members and attribution unless
+ * Verify provisioned browser payloads, or download and extract a legacy tarball.
+ * Download the legacy tarball and extract its members and attribution unless
  * already present. An install made before members were listed keeps its
  * files: the completion marker is the archive digest either way.
  */
 export async function ensureTtsModel(paths: TtsModelPaths): Promise<void> {
+  if (paths.files) {
+    await verifyTtsFiles(paths.dir, paths.files, paths.attribution);
+    return;
+  }
+  if (!paths.sha256) throw new Error("TTS archive has no digest");
   await ensureAsset({
     url: paths.url,
     sha256: paths.sha256,
@@ -151,8 +215,30 @@ export async function ensureTtsModel(paths: TtsModelPaths): Promise<void> {
   });
 }
 
+/** Read only verification. Completion markers never substitute for payload hashes. */
+export async function verifyTtsFiles(
+  dir: string,
+  files: readonly TtsModelFile[],
+  attribution: readonly string[] = [],
+): Promise<void> {
+  for (const file of files) {
+    const path = join(dir, file.name);
+    const info = await stat(path).catch(() => undefined);
+    if (!info?.isFile() || info.size !== file.bytes) {
+      throw new Error(`TTS asset missing or wrong size: ${file.name}`);
+    }
+    if (await sha256File(path) !== file.sha256) {
+      throw new Error(`TTS asset digest mismatch: ${file.name}`);
+    }
+  }
+  for (const name of attribution) {
+    const info = await stat(join(dir, name)).catch(() => undefined);
+    if (!info?.isFile() || info.size === 0) throw new Error(`TTS notice missing: ${name}`);
+  }
+}
+
 export function isTtsModelId(value: string): value is TtsModelId {
-  return value in TTS_MODELS;
+  return Object.hasOwn(TTS_MODELS, value);
 }
 
 /** Parse a CLI `--model` value into a typed id, or throw with the valid set. */

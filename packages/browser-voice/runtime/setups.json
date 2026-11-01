@@ -1,0 +1,211 @@
+{
+  "schema": 1,
+  "defaultSetupId": "mlx-parakeet/v3-greedy",
+  "idleReleaseMs": 300000,
+  "setups": [
+    {
+      "id": "mlx-parakeet/v3-greedy",
+      "label": "Parakeet v3 MLX",
+      "model": "mlx-community/parakeet-tdt-0.6b-v3",
+      "revision": "ed2b7e8c15f9aaa0b5772e2efb986255eaef7e15",
+      "runtime": {
+        "python": "3.12.5",
+        "parakeet-mlx": "0.5.3",
+        "mlx": "0.32.4",
+        "mlx-metal": "0.32.4",
+        "device": "GPU Metal"
+      },
+      "quantization": {
+        "onDisk": "FP32",
+        "loaded": "BF16",
+        "lowBitQuantization": false
+      },
+      "controls": {
+        "decoding": "DecodingConfig(decoding=Greedy())",
+        "attention": "stock full attention",
+        "seed": 0,
+        "context": null,
+        "hotwords": null,
+        "chunking": null,
+        "gate": "off",
+        "rewrite": "off",
+        "audio": "unmodified finite Float32 mono 16000 Hz, get_logmel with stock 128 mel preprocessor"
+      },
+      "operation": "transcribe",
+      "maxSamples": 1920000
+    },
+    {
+      "id": "mlx-parakeet/ultra-greedy",
+      "label": "Ultra MLX",
+      "model": "selcukkubur/parakeet-ultra-mlx",
+      "revision": "b554592c50b2a48471add2daa3d46fa9f00fef5e",
+      "runtime": {
+        "python": "3.12.5",
+        "parakeet-mlx": "0.5.3",
+        "mlx": "0.32.4",
+        "mlx-metal": "0.32.4",
+        "device": "GPU Metal"
+      },
+      "quantization": {
+        "onDisk": "BF16",
+        "loaded": "BF16",
+        "lowBitQuantization": false
+      },
+      "controls": {
+        "decoding": "DecodingConfig(decoding=Greedy())",
+        "attention": "stock full attention",
+        "seed": 0,
+        "context": null,
+        "hotwords": null,
+        "chunking": null,
+        "gate": "off",
+        "rewrite": "off",
+        "audio": "unmodified finite Float32 mono 16000 Hz, get_logmel with stock 128 mel preprocessor"
+      },
+      "operation": "transcribe",
+      "maxSamples": 1920000
+    },
+    {
+      "id": "qwen/context",
+      "label": "Qwen3 context",
+      "model": "sakasegawa/Qwen3-ASR-0.6B-GGUF",
+      "revision": "ee78f8709547f39bea3b924a16c72403826cac92",
+      "file": "Qwen3-ASR-0.6B-Q8_0.gguf",
+      "fileBytes": 841502336,
+      "sha256": "416e10c15b4a3d9002bd337d18fc450233fdf68502b6e10d1379d2789838afd0",
+      "runtime": {
+        "speech.cpp": "0.10.0",
+        "commit": "06590811a90041f935a470ba0e2b85346d2fc041",
+        "library": "libspeech.4.dylib",
+        "librarySha256": "e3fac058886bc215cb237a6745fced4d1555263808569998a42478fc889d85b6",
+        "archive": {
+          "name": "speech-0.10.0-macos-arm64-metal.zip",
+          "bytes": 5972186,
+          "sha256": "4f48ac4aefe65a00e2724e94749f01f7993de6190998c49bb347662f96f7af6d"
+        },
+        "python": "3.13.2, ctypes C API wrapper",
+        "loadDeviceRequest": "gpu",
+        "observedDevice": "MTL0",
+        "loadThreadsRequested": 2,
+        "modelInfoThreadsReported": 0
+      },
+      "quantization": "Q8_0 GGUF",
+      "controls": {
+        "language": "auto",
+        "prompt": "launch, claude, grok",
+        "nativeAutomaticWarmup": false,
+        "otherDecodeSettings": "pinned speech.cpp defaults; no unrecorded temperature or token override",
+        "gate": "off",
+        "rewrite": "off",
+        "padding": "none",
+        "request": "speech_request_new + speech_request_set_audio Float32 16000 Hz + speech_transcribe"
+      },
+      "operation": "transcribe",
+      "maxSamples": 1920000
+    },
+    {
+      "id": "sweep/score-2",
+      "label": "CPU shipped strength 2",
+      "model": "en-parakeet-ultra-int8",
+      "revision": "b86784a3a5356cbd126f710b61cd90c5fe5898f1",
+      "artifactRepository": "tpmaerk/parakeet-ultra-sherpa-onnx-int8",
+      "files": [
+        {
+          "path": "encoder.int8.onnx",
+          "bytes": 652282347,
+          "sha256": "f4d06712d32431b1718eceba2153c314ac4425e8fe708a3534f5e56c5ad53697"
+        },
+        {
+          "path": "decoder.int8.onnx",
+          "bytes": 11845275,
+          "sha256": "94373c6405c8149d1c9d1e9862514e0e3e88dab1c7de18fac9d5df9c6ba5efdd"
+        },
+        {
+          "path": "joiner.int8.onnx",
+          "bytes": 6355277,
+          "sha256": "8a71aaccfdba3d451775507a889afd2257d2e754463fd81095a8c8f290f924c2"
+        },
+        {
+          "path": "tokens.txt",
+          "bytes": 93939,
+          "sha256": "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d"
+        }
+      ],
+      "runtime": {
+        "version": "2.0.1",
+        "gitSha1": "af2d8d81",
+        "onnxruntimeVersion": "1.28.2",
+        "node": "v26.13.0"
+      },
+      "quantization": "int8 ONNX",
+      "controls": {
+        "provider": "cpu",
+        "threads": 2,
+        "sampleRate": 16000,
+        "featureDim": 80,
+        "modelType": "nemo_transducer",
+        "modelingUnit": "bpe",
+        "decodingMethod": "modified_beam_search",
+        "maxActivePaths": 4,
+        "hotwordsScore": 2,
+        "lengthReward": 0,
+        "list": {
+          "content": "launch\nclaude\ngrok\n",
+          "sha256": "0f5d821e73171e540a688d50c481007f58662609e1e7892b20829ba7092ea79b"
+        },
+        "bpeVocabularySha256": "41130ff456706304a1adec782ccc9e003c4d417e8e324353d281be958cac4e17",
+        "gate": "off",
+        "rewrite": "off",
+        "padding": "none"
+      },
+      "operation": "transcribe",
+      "maxSamples": 960000
+    },
+    {
+      "id": "mlx-cleanup/qwen-targeted",
+      "label": "Ultra plus Qwen 1.5B cleanup",
+      "model": "mlx-community/Qwen2.5-1.5B-Instruct-4bit",
+      "revision": "8b403126fc14f14cfc99bb4cfa72ecbc129ea677",
+      "runtime": {
+        "python": "3.13.2",
+        "mlx": "0.32.4",
+        "mlx-metal": "0.32.4",
+        "mlx-lm": "0.32.2",
+        "device": "GPU Metal"
+      },
+      "quantization": {
+        "group_size": 64,
+        "bits": 4
+      },
+      "controls": {
+        "temperature": 0,
+        "sampler": "greedy argmax",
+        "seed": 0,
+        "maxTokens": 512,
+        "promptCache": "fresh per request",
+        "kvQuantization": null,
+        "logitsProcessors": null,
+        "draftModel": null,
+        "batchLimit": 20,
+        "userSchema": {
+          "A": "string",
+          "B": "string or null"
+        },
+        "userEncoding": "UTF8 JSON, ensure_ascii=False, compact separators, A then B",
+        "chatTemplate": "native tokenizer, system then user, add_generation_prompt=True",
+        "chatTemplateTokenize": true,
+        "trustRemoteCode": false
+      },
+      "baseSetup": "mlx-parakeet/ultra-greedy",
+      "promptSha256": "6feb2afb47f1bfcb5ea926ba72588f8776a12eed77e06e4fc9fdf0bc555502fd",
+      "chatTemplateSha256": "71672240b1a3b068067b6a332bc38d3fc05aaade9d41b4b27d7510ff4335504b",
+      "input": {
+        "A": "exact raw output of Ultra MLX for this same take; compute once",
+        "B": null
+      },
+      "outputPolicy": "Raw detokenized response copied unchanged into text/rawText. Any completed string including empty is parseStatus ok. outputShape is a diagnostic only. No extraction, strip, quote removal, validation fallback, output selection or retries. Errors have null text and preserve partial rawText.",
+      "operation": "cleanup",
+      "maxSamples": 1920000
+    }
+  ]
+}
