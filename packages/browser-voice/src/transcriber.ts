@@ -244,7 +244,7 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function duration(value: unknown): value is number { return typeof value === "number" && Number.isFinite(value) && value >= 0; }
-function validLoad(value: unknown): value is CpuLoadMetadata {
+function validLoad(value: unknown): value is CpuLoadMetadata & Record<string, unknown> {
   return record(value) && duration(value.loadMs) && (value.modelConstructionMs === null || duration(value.modelConstructionMs));
 }
 function validTiming(value: unknown): value is CpuComparisonTiming {

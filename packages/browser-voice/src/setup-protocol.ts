@@ -6,7 +6,7 @@ export const SETUP_IDS = Object.freeze([
 ] as const);
 export type SetupId = typeof SETUP_IDS[number];
 export const DEFAULT_SETUP_ID: SetupId = SETUP_IDS[0];
-export const ULTRA_SETUP_ID: SetupId = "mlx-parakeet/ultra-greedy";
+export const ULTRA_SETUP_ID = "mlx-parakeet/ultra-greedy" as const;
 export const CLEANUP_SETUP_ID = "mlx-cleanup/qwen-targeted" as const;
 export const SETUP_PROTOCOL_VERSION = 1;
 export const SETUP_SAMPLE_RATE = 16_000;

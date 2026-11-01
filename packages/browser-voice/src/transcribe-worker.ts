@@ -32,7 +32,7 @@ async function start(): Promise<void> {
       send({ type: "ready", version: 1, preset: CPU_PRESET, load, assets } satisfies CpuReady);
     } catch (error) {
       send({ type: "startup-error", error: message(error) });
-      process.disconnect();
+      process.disconnect?.();
       return;
     }
   }
@@ -43,7 +43,7 @@ async function answer(request: unknown): Promise<void> {
   if (typeof request !== "object" || request === null ||
       !Number.isSafeInteger((request as TranscribeRequest).id) || (request as TranscribeRequest).id <= 0 ||
       !((request as TranscribeRequest).samples instanceof Float32Array)) {
-    process.disconnect();
+    process.disconnect?.();
     return;
   }
   const { id, samples } = request as TranscribeRequest;

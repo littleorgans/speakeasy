@@ -148,8 +148,8 @@ export async function preflightCpuModel(modelRoot: string): Promise<Record<strin
   return hashes;
 }
 
-export function validateCpuRuntime(binding: SherpaBinding): void {
-  const runtime = binding as SherpaBinding & { gitSha1?: string; onnxruntimeVersion?: string };
+export function validateCpuRuntime(binding: SherpaBinding & { gitSha1?: string; onnxruntimeVersion?: string }): void {
+  const runtime = binding;
   if (runtime.version !== CPU_PRESET.runtimeVersion || runtime.gitSha1 !== CPU_PRESET.runtimeGitSha1 ||
       runtime.onnxruntimeVersion !== CPU_PRESET.onnxruntimeVersion) {
     throw new Error("CPU comparison requires the pinned sherpa 2.0.1 parent and ONNX Runtime 1.28.2");
