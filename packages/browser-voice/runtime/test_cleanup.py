@@ -121,7 +121,7 @@ class CleanupTests(unittest.TestCase):
         self.assertGreaterEqual(ready["loadMs"], 0)
 
     def test_exact_unicode_payload_native_template_and_fresh_request_controls(self):
-        texts = ['  Écoute "claude"\n七 🗣️  ', ""]
+        texts = ['  Écoute "claude"\n七 🗣️  ', " \tlaunch\n "]
         rows = [self.backend.cleanup(text) for text in texts]
         calls = self.tokenizer.apply_chat_template.call_args_list
         self.assertIsNot(calls[0].args[0], calls[1].args[0])
@@ -147,6 +147,30 @@ class CleanupTests(unittest.TestCase):
         self.assertIsNot(self.lm.stream_generate.call_args_list[0].kwargs["prompt"],
                          self.lm.stream_generate.call_args_list[1].kwargs["prompt"])
         self.assertEqual(self.lm.load.call_count, 1)
+
+    def test_blank_source_returns_empty_without_prompting_or_generation(self):
+        ready = self.backend.load()
+        self.lm.stream_generate.side_effect = lambda *args, **kwargs: iter(
+            [response("Return only corrected text.")])
+        for text in ("", " \t\r\n ", "\u00a0\u3000"):
+            with self.subTest(text=text):
+                row = self.backend.cleanup(text)
+                self.assertEqual(row["status"], "ok")
+                self.assertEqual(row["text"], "")
+                self.assertEqual(row["rawText"], "")
+                self.assertIsNone(row["error"])
+                self.assertEqual(row["diagnostics"]["tokenIds"], [])
+                payload = json.dumps({"A": text, "B": None}, ensure_ascii=False,
+                                     separators=(",", ":"))
+                self.assertEqual(row["diagnostics"]["userPayloadSha256"],
+                                 hashlib.sha256(payload.encode("utf-8")).hexdigest())
+                self.assertGreaterEqual(row["processingMs"], 0)
+                self.assertGreaterEqual(row["wallMs"], row["processingMs"])
+        self.assertIs(self.backend.load(), ready)
+        self.lm.load.assert_called_once()
+        self.tokenizer.apply_chat_template.assert_not_called()
+        self.lm.stream_generate.assert_not_called()
+        self.mx.random.seed.assert_not_called()
 
     def test_completed_output_is_preserved_including_empty_and_token_limit(self):
         for chunks, finish in (([""], "stop"), ([" \n", "```json\n", '{"é":1}', "\n```  "], "stop"),
@@ -183,10 +207,10 @@ class CleanupTests(unittest.TestCase):
         self.lm.stream_generate.side_effect = lambda *args, **kwargs: iter([response("next")])
         self.assertEqual(self.backend.cleanup("new take")["rawText"], "next")
 
-    def test_no_response_is_error_but_empty_completed_response_is_success(self):
+    def test_no_response_for_nonempty_source_is_error(self):
         self.lm.stream_generate.side_effect = lambda *args, **kwargs: iter([])
         with self.assertRaises(cleanup.CleanupError) as caught:
-            self.backend.cleanup("")
+            self.backend.cleanup("base")
         row = caught.exception.result
         self.assertEqual(row["status"], "error")
         self.assertIsNone(row["text"])
@@ -249,8 +273,8 @@ class CleanupTests(unittest.TestCase):
                             "pcmBytes": 0}
                 worker.write_frame(source, {**envelope, "id": 1, "operation": "load", "options": {}})
                 worker.write_frame(source, {**envelope, "id": 2, "operation": "cleanup",
-                                           "text": "", "B": None, "basePcm": base,
-                                           "transcriptSha256": hashlib.sha256(b"").hexdigest()})
+                                           "text": "base", "B": None, "basePcm": base,
+                                           "transcriptSha256": hashlib.sha256(b"base").hexdigest()})
                 source.seek(0)
                 with patch.object(worker.sys, "stderr", io.StringIO()):
                     code = worker.serve(source, target, cleanup.SETUP_ID, "fake",
@@ -266,6 +290,50 @@ class CleanupTests(unittest.TestCase):
                 else:
                     self.assertEqual(reply["rawText"], "  partial é\n")
                 self.assertIsNone(worker.read_frame(target))
+
+    def test_worker_dispatches_blank_then_nonempty_with_exact_identity(self):
+        import worker
+
+        source, target = io.BytesIO(), io.BytesIO()
+        base = {"sampleRate": 16000, "channels": 1, "sampleCount": 4,
+                "pcmBytes": 16, "sha256": hashlib.sha256(bytes(16)).hexdigest()}
+        envelope = {"version": 1, "generation": "fake", "setupId": cleanup.SETUP_ID,
+                    "pcmBytes": 0}
+        worker.write_frame(source, {**envelope, "id": 1, "operation": "load",
+                                   "options": {"modelPath": str(self.path)}})
+        cases = (("", ""), (" \t\r\n ", ""), ("\u00a0\u3000", ""), (" \tlaunch\n ", "ok"))
+        for request_id, (text, _) in enumerate(cases, 2):
+            worker.write_frame(source, {**envelope, "id": request_id, "operation": "cleanup",
+                                       "text": text, "B": None, "basePcm": base,
+                                       "transcriptSha256": hashlib.sha256(text.encode()).hexdigest()})
+        worker.write_frame(source, {**envelope, "id": 6, "operation": "close"})
+        source.seek(0)
+        with patch.object(worker.sys, "stderr", io.StringIO()):
+            code = worker.serve(source, target, cleanup.SETUP_ID, "fake")
+        self.assertEqual(code, 0)
+        target.seek(0)
+        ready = worker.read_frame(target)[0]
+        self.assertEqual(ready["type"], "ready")
+        self.assertEqual(ready["metadata"]["model"], cleanup.MODEL)
+        self.assertEqual(ready["metadata"]["revision"], cleanup.REVISION)
+        self.assertEqual(ready["metadata"]["promptSha256"], cleanup.PROMPT_SHA256)
+        for request_id, (text, expected) in enumerate(cases, 2):
+            reply = worker.read_frame(target)[0]
+            self.assertEqual({key: reply[key] for key in envelope}, envelope)
+            self.assertEqual(reply["id"], request_id)
+            self.assertEqual(reply["type"], "result")
+            self.assertEqual(reply["result"]["text"], expected)
+            self.assertEqual(reply["result"]["rawText"], expected)
+            payload = json.dumps({"A": text, "B": None}, ensure_ascii=False,
+                                 separators=(",", ":"))
+            self.assertEqual(reply["result"]["diagnostics"]["userPayloadSha256"],
+                             hashlib.sha256(payload.encode()).hexdigest())
+        self.assertEqual(worker.read_frame(target)[0]["type"], "closed")
+        self.assertIsNone(worker.read_frame(target))
+        self.lm.load.assert_called_once()
+        self.lm.stream_generate.assert_called_once()
+        messages = self.tokenizer.apply_chat_template.call_args.args[0]
+        self.assertEqual(json.loads(messages[1]["content"]), {"A": cases[-1][0], "B": None})
 
     def test_prompt_drift_is_rejected_before_native_load(self):
         with (self.root / "cleanup-prompt.txt").open("ab") as prompt:

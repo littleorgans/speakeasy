@@ -161,32 +161,34 @@ class Backend:
             started = time.perf_counter()
             payload = json.dumps({"A": text, "B": None}, ensure_ascii=False, separators=(",", ":"))
             diagnostics["userPayloadSha256"] = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-            mx.random.seed(0)
-            messages = [{"role": "system", "content": self.system},
-                        {"role": "user", "content": payload}]
-            prompt = self.tokenizer.apply_chat_template(
-                messages, tokenize=True, add_generation_prompt=True)
-            diagnostics["promptTokens"] = len(prompt)
-            diagnostics["promptTokenIdsSha256"] = hashlib.sha256(
-                json.dumps(prompt, separators=(",", ":")).encode()).hexdigest()
-            for response in self.generate(
-                self.model, self.tokenizer, prompt=prompt, max_tokens=512,
-                sampler=self.sampler, stream=self.stream, prompt_cache=None,
-                logits_processors=None,
-            ):
-                raw += response.text
-                tokens.append(response.token)
-                final = response
-            mx.synchronize()
-            if final is None:
-                raise RuntimeError("Generator yielded no finish response")
-            diagnostics.update({
-                "finishReason": final.finish_reason,
-                "hitTokenLimit": final.finish_reason == "length",
-                "generationTokens": final.generation_tokens,
-                "enginePromptTokensPerSecond": final.prompt_tps,
-                "engineGenerationTokensPerSecond": final.generation_tps,
-            })
+            # Blank recognition has no speech for the generator to correct.
+            if text.strip():
+                mx.random.seed(0)
+                messages = [{"role": "system", "content": self.system},
+                            {"role": "user", "content": payload}]
+                prompt = self.tokenizer.apply_chat_template(
+                    messages, tokenize=True, add_generation_prompt=True)
+                diagnostics["promptTokens"] = len(prompt)
+                diagnostics["promptTokenIdsSha256"] = hashlib.sha256(
+                    json.dumps(prompt, separators=(",", ":")).encode()).hexdigest()
+                for response in self.generate(
+                    self.model, self.tokenizer, prompt=prompt, max_tokens=512,
+                    sampler=self.sampler, stream=self.stream, prompt_cache=None,
+                    logits_processors=None,
+                ):
+                    raw += response.text
+                    tokens.append(response.token)
+                    final = response
+                mx.synchronize()
+                if final is None:
+                    raise RuntimeError("Generator yielded no finish response")
+                diagnostics.update({
+                    "finishReason": final.finish_reason,
+                    "hitTokenLimit": final.finish_reason == "length",
+                    "generationTokens": final.generation_tokens,
+                    "enginePromptTokensPerSecond": final.prompt_tps,
+                    "engineGenerationTokensPerSecond": final.generation_tps,
+                })
         except Exception as error:
             failure = {"type": type(error).__name__}
         finally:
