@@ -338,7 +338,7 @@ test("effective hosted defaults cannot bypass selection; local legacy and Realti
       await room.open();
       const rejected = await room.reply(START, (event) => event.phase === "stopped" || event.phase === "ready");
       assert.equal(rejected.phase, "stopped");
-      assert.deepEqual(created, []);
+      assert.deepEqual<RuntimeConfig[]>(created, []);
       await room.reply({ ...START, speechOutput: DEFAULT_LOCAL_OUTPUT }, (event) => event.phase === "ready");
       assert.deepEqual(created[0]!.speechOutput, DEFAULT_LOCAL_OUTPUT);
       await room.stop();

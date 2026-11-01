@@ -233,7 +233,7 @@ test("room response text dispatches exactly the selected hosted output", async (
     const before = f.calls;
     const selection = f.select("output", config);
     assert.equal(f.calls, before);
-    const result = await f.policy.dispatch(f.request(selection, response), (context) => {
+    const result: string = await f.policy.dispatch(f.request(selection, response), (context) => {
       assert.deepEqual(context.authorization, {
         ...selection, source: response, grantId: null,
       });
