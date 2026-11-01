@@ -18,7 +18,9 @@ function element(): Record<string, unknown> {
     textContent: "",
     listeners: new Map<string, (event?: unknown) => void>(),
     addEventListener(type: string, callback: (event?: unknown) => void) { (this.listeners as Map<string, (event?: unknown) => void>).set(type, callback); },
-    append: (child: unknown) => children.push(child),
+    append: (...nodes: unknown[]) => children.push(...nodes),
+    querySelector: (selector: string) => children.find((child: any) => `.${child.className}` === selector),
+    scrollTo() {},
     replaceChildren(...nodes: unknown[]) { children.splice(0, children.length, ...nodes); },
     reportValidity: () => true,
     setAttribute() {},
@@ -334,67 +336,168 @@ test("unavailable restored output remains unavailable and Realtime starts with i
   await h.room.end();
 });
 
-test("coupled room producer accepts both actual hosted catalogue selections and retires their trusted contexts on Stop", async () => {
+type CoupledRuntimeFactory = (
+  config: import("./session.ts").BrowserRuntimeConfig,
+  context: import("./session.ts").BrowserRuntimeContext | undefined,
+  assembly: ReturnType<typeof import("./provider-runtime.ts").createProviderRuntime>,
+) => Promise<import("@speakeasy/convo-engine").ConversationRuntime>;
+
+async function coupledRoom(kind: string, createRuntime?: CoupledRuntimeFactory, fetch?: typeof globalThis.fetch) {
   const { EventEmitter } = await import("node:events");
   const { createProviderRuntime } = await import("./provider-runtime.ts");
   const { createProviderCredentials } = await import("./provider-availability.ts");
   const { BrowserConversationSession } = await import("./session.ts");
+  const { AudioWorkLease } = await import("./audio-lease.ts");
   const { DEFAULT_LOCAL_OUTPUT, LOCAL_OUTPUT_MODELS } = await import("../../speech-io/src/tts/catalogue.ts");
   type HostSocket = import("ws").WebSocket;
   type RuntimeContext = import("./session.ts").BrowserRuntimeContext;
-  for (const kind of ["cartesia", "openai"]) {
-    const h = await roomHarness("natural");
-    let transports = 0;
-    const assembly = createProviderRuntime({
-      credentials: createProviderCredentials(() => ({ CARTESIA_API_KEY: "fake-cartesia", OPENAI_API_KEY: "fake-openai" })),
-      readiness: () => [],
-      localOutput: { create() { throw new Error("Unexpected local synthesis"); }, async quiesce() {}, async close() {} },
-      localCatalogue: { default: DEFAULT_LOCAL_OUTPUT, models: LOCAL_OUTPUT_MODELS.map((model) => ({ ...model, readiness: { state: "ready", reason: null } })) },
-      createSocket() { transports++; throw new Error("Unexpected provider socket"); },
-      fetch: async () => { transports++; throw new Error("Unexpected provider request"); },
-    });
-    const outputCatalogue = () => ({ ...assembly.speechOutput.catalogue(), revision: assembly.providers.catalogue().revision });
-    const catalog = outputCatalogue();
-    const selection = catalog.output.find((entry) => entry.config.provider.kind === kind)!.config;
-    h.room.output.catalog = catalog;
-    h.room.output.models = catalog.models;
-    h.room.output.draft = selection;
-    const captured: { config?: unknown; context?: RuntimeContext } = {};
-    class ServerSocket extends EventEmitter {
-      readyState = 1;
-      send(data: string) { h.socket.event(JSON.parse(data)); }
+  const h = await roomHarness("natural");
+  let transports = 0;
+  const environment: Record<string, string | undefined> = { CARTESIA_API_KEY: "fake-cartesia", OPENAI_API_KEY: "fake-openai" };
+  const assembly = createProviderRuntime({
+    credentials: createProviderCredentials(() => environment),
+    readiness: () => [],
+    localOutput: { create() { throw new Error("Unexpected local synthesis"); }, async quiesce() {}, async close() {} },
+    localCatalogue: { default: DEFAULT_LOCAL_OUTPUT, models: LOCAL_OUTPUT_MODELS.map((model) => ({ ...model, readiness: { state: "ready", reason: null } })) },
+    createSocket() { transports++; throw new Error("Unexpected provider socket"); },
+    fetch: async (...args) => { transports++; if (fetch) return fetch(...args); throw new Error("Unexpected provider request"); },
+  });
+  const outputCatalogue = () => ({ ...assembly.speechOutput.catalogue(), revision: assembly.providers.catalogue().revision });
+  const catalog = outputCatalogue();
+  const selection = catalog.output.find((entry) => entry.config.provider.kind === kind)!.config;
+  h.room.output.catalog = catalog;
+  h.room.output.models = catalog.models;
+  h.room.output.draft = selection;
+  const captured: { config?: unknown; context?: RuntimeContext } = {};
+  const events: any[] = [];
+  class ServerSocket extends EventEmitter {
+    readyState = 1;
+    send(data: string | Uint8Array) {
+      if (typeof data === "string") { const event = JSON.parse(data); events.push(event); h.socket.event(event); }
+      else h.socket.listeners.get("message")?.({ data: data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) });
     }
-    const serverSocket = new ServerSocket();
-    const session = new BrowserConversationSession({
-      socket: serverSocket as unknown as HostSocket, sessionId: "protected-room", runtimeConfig: {},
-      outputRegistry: () => assembly.providers.registries().output,
-      outputCatalogue, policy: assembly.providers.policy,
-      createRuntime: async (config, context) => {
-        captured.config = config.speechOutput;
-        captured.context = context;
-        context!.speechOutputContext!.beforeRequest!();
-        return new Promise<never>((_resolve, reject) => {
-          context!.speechOutputContext!.signal!.addEventListener("abort", () => reject(new Error("Fake runtime opening cancelled")), { once: true });
-        });
-      },
-    });
-    const send = h.socket.send.bind(h.socket);
-    h.socket.send = (raw: string) => { send(raw); serverSocket.emit("message", Buffer.from(raw), false); };
+  }
+  const serverSocket = new ServerSocket();
+  const lease = new AudioWorkLease();
+  const session = new BrowserConversationSession({
+    socket: serverSocket as unknown as HostSocket, sessionId: "protected-room", runtimeConfig: {},
+    acquire: () => lease.tryAcquire("room"),
+    outputRegistry: () => assembly.providers.registries().output,
+    outputCatalogue, policy: assembly.providers.policy,
+    createRuntime: async (config, context) => {
+      captured.config = config.speechOutput;
+      captured.context = context;
+      if (createRuntime) return createRuntime(config, context, assembly);
+      context!.speechOutputContext!.beforeRequest!();
+      return new Promise<never>((_resolve, reject) => {
+        context!.speechOutputContext!.signal!.addEventListener("abort", () => reject(new Error("Fake runtime opening cancelled")), { once: true });
+      });
+    },
+  });
+  const send = h.socket.send.bind(h.socket);
+  h.socket.send = (raw: string) => { send(raw); serverSocket.emit("message", Buffer.from(raw), false); };
+  return { ...h, assembly, catalog, selection, captured, events, lease, environment, session, get transports() { return transports; } };
+}
+
+test("coupled room producer accepts both actual hosted catalogue selections and retires their trusted contexts on Stop", async () => {
+  for (const kind of ["cartesia", "openai"]) {
+    const h = await coupledRoom(kind);
     try {
       await h.room.start();
       await settle();
       assert.deepEqual(h.commands().map((command) => command.type), ["select-output", "start"]);
-      assert.deepEqual(captured.config, selection);
-      assert.equal(h.commands()[1].catalogueRevision, catalog.revision);
-      assert.equal(captured.context!.speechOutputContext!.signal!.aborted, false);
-      assert.equal(transports, 0, "metadata, selection and a fake opening runtime issue no speech request");
+      assert.deepEqual(h.captured.config, h.selection);
+      assert.equal(h.commands()[1].catalogueRevision, h.catalog.revision);
+      assert.equal(h.captured.context!.speechOutputContext!.signal!.aborted, false);
+      assert.equal(h.transports, 0, "metadata, selection and a fake opening runtime issue no speech request");
       await h.room.end();
-      assert.equal(captured.context!.speechOutputContext!.signal!.aborted, true);
-      assert.throws(() => captured.context!.speechOutputContext!.beforeRequest!());
+      assert.equal(h.captured.context!.speechOutputContext!.signal!.aborted, true);
+      assert.throws(() => h.captured.context!.speechOutputContext!.beforeRequest!());
     } finally {
-      await session.close();
-      await assembly.output.close();
+      await h.session.close();
+      await h.assembly.output.close();
     }
+  }
+});
+
+for (const kind of ["cartesia", "openai"]) test(`guard failure during ${kind} room opening stops the browser and retires admission`, async () => {
+  let h: Awaited<ReturnType<typeof coupledRoom>>;
+  h = await coupledRoom(kind, async (_config, context) => {
+    h.environment[kind === "cartesia" ? "CARTESIA_API_KEY" : "OPENAI_API_KEY"] = undefined;
+    context!.speechOutputContext!.beforeRequest!();
+    throw new Error("Revoked opening unexpectedly continued");
+  });
+  try {
+    await h.room.start();
+    await settle();
+    assert.equal(h.captured.context!.speechOutputContext!.signal!.aborted, true);
+    assert.equal(h.room.sessionPhase, "stopped");
+    assert.equal(h.room.micStream, null);
+    assert.equal(h.lease.active, undefined);
+    assert.equal(h.transports, 0);
+    assert.equal(h.events.some((event) => event.phase === "ready"), false);
+  } finally { await h.session.close(); await h.assembly.output.close(); }
+});
+
+for (const failedRetirement of [false, true]) test(`guard failure between actual room sentences ${failedRetirement ? "blocks reuse after failed retirement" : "retires the loop before releasing admission"}`, async (t) => {
+  const { EventEmitter } = await import("node:events");
+  const { createConversationRuntime } = await import("@speakeasy/convo-engine");
+  const { MercuryChatModel } = await import("../../llm/src/mercury.ts");
+  t.mock.method(MercuryChatModel.prototype, "stream", async function* () { yield "First sentence. Second sentence."; });
+  let release!: () => void;
+  const retirement = new Promise<void>((resolve) => { release = resolve; });
+  let retiring = false;
+  let ended = 0;
+  class Recognizer extends EventEmitter {
+    pushAudio() {} reset() {}
+    flush() { this.emit("endpoint", {}); this.emit("final", { text: "Current live turn" }); }
+    async end() { ended++; }
+  }
+  let h: Awaited<ReturnType<typeof coupledRoom>>;
+  h = await coupledRoom("cartesia", async (config, context, assembly) => {
+    const runtime = await createConversationRuntime(config, { INCEPTIONLABS_API_KEY: "fake-chat" },
+      { open: async () => new Recognizer() }, { speechOutputFactory: assembly.output, speechOutputContext: context!.speechOutputContext });
+    return { ...runtime, quiesce: async () => {
+      retiring = true;
+      await retirement;
+      if (failedRetirement) throw new Error("Fake runtime retirement failed");
+      await runtime.quiesce!();
+    } };
+  }, async () => {
+    h.environment.CARTESIA_API_KEY = undefined;
+    return new Response(Float32Array.of(0.25).buffer);
+  });
+  try {
+    await h.room.start();
+    await settle();
+    assert.equal(h.room.sessionPhase, "ready");
+    h.room.send({ type: "commit-input" });
+    await settle();
+    assert.equal(h.transports, 1);
+    assert.equal(h.captured.context!.speechOutputContext!.signal!.aborted, true);
+    assert.ok(h.events.some((event) => event.type === "playback" && event.action === "clear"));
+    assert.equal(retiring, true, "failed policy must retire the active room loop");
+    assert.equal(ended, 1);
+    assert.equal(h.lease.active, "room");
+    assert.equal(h.events.some((event) => event.phase === "stopped"), false);
+    release();
+    await settle();
+    if (failedRetirement) {
+      assert.equal(h.lease.active, "room");
+      assert.equal(h.events.some((event) => event.phase === "stopped"), false);
+      h.room.send({ type: "select-output", requestId: "blocked", catalogueRevision: h.catalog.revision, selection: h.catalog.default });
+      assert.equal(h.events.at(-1).code, "BUSY");
+      await assert.rejects(h.session.close());
+    } else {
+      assert.equal(h.room.sessionPhase, "stopped");
+      assert.equal(h.room.micStream, null);
+      assert.equal(h.lease.active, undefined);
+    }
+    assert.throws(() => h.captured.context!.speechOutputContext!.getKey!());
+  } finally {
+    release();
+    await h.session.close().catch((error) => { if (!failedRetirement) throw error; });
+    await h.assembly.output.close();
   }
 });
 

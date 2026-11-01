@@ -302,6 +302,9 @@ export class BrowserConversationSession {
         catch (error) {
           this.#invalidate();
           this.#sendNotice("error", safeSpeechOutputError(error).message);
+          // Opening may still be assigning #startTask. Retire after it is tracked.
+          void Promise.resolve().then(() => this.stop()).catch((failure) =>
+            this.#sendNotice("error", safeSpeechOutputError(failure).message));
           throw error;
         }
       };
