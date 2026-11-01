@@ -19,7 +19,7 @@ type Port = { messages: any[]; onmessage?: (event: { data: any }) => void; postM
 
 async function outputHarness({ stored, active = false, catalog = catalogue, audioTime = 4, setupMs = 0 }: { stored?: unknown; active?: boolean; catalog?: any; audioTime?: number; setupMs?: number } = {}) {
   const elements = new Map<string, any>();
-  const element = () => ({ value: "", disabled: false, hidden: false, textContent: "", children: [] as any[], listeners: new Map<string, (event?: any) => void>(), addEventListener(type: string, callback: (event?: any) => void) { this.listeners.set(type, callback); }, replaceChildren(...nodes: any[]) { this.children = nodes; } });
+  const element = () => ({ value: "", disabled: false, hidden: false, textContent: "", children: [] as any[], listeners: new Map<string, (event?: any) => void>(), addEventListener(type: string, callback: (event?: any) => void) { this.listeners.set(type, callback); }, append(...nodes: any[]) { this.children.push(...nodes); }, replaceChildren(...nodes: any[]) { this.children = nodes; } });
   const document = { createElement: element, getElementById(id: string) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); } };
   document.getElementById("output-text").value = "  The room is ready.\nTake your time.  ";
   const ports: Port[] = [];
@@ -64,7 +64,8 @@ async function outputHarness({ stored, active = false, catalog = catalogue, audi
     location: { protocol: "http:", host: "fake-host" }, performance: { now: () => now },
     fetch: async (url: string) => { fetches.push(url); return { ok: true, json: async () => catalog }; },
   });
-  vm.runInContext(readFileSync(new URL("../public/speech-output-controls.js", import.meta.url), "utf8").replace(/^export /gm, "") + "\nglobalThis.Controls = SpeechOutputControls;", context);
+  vm.runInContext(readFileSync(new URL("../public/speech-observations.js", import.meta.url), "utf8").replace(/^export /gm, ""), context);
+  vm.runInContext(readFileSync(new URL("../public/speech-output-controls.js", import.meta.url), "utf8").replace(/^import .*;$/gm, "").replace(/^export /gm, "") + "\nglobalThis.Controls = SpeechOutputControls;", context);
   const controls = new context.Controls({ activeRoom: () => active });
   await controls.load(stored);
   const click = (id: string, type = "click") => elements.get(id).listeners.get(type)?.();
@@ -90,6 +91,106 @@ function packet(playbackId: number, sampleRate = 24_000) {
   view.setFloat32(9, 0.25, true); view.setFloat32(13, -0.25, true);
   return bytes;
 }
+
+test("room selection uses its own socket and exact current snapshot, never the Try acknowledgement", async () => {
+  const h = await outputHarness();
+  const trial = await h.start();
+  const commands: any[] = [];
+  const room = { readyState: 1, send: (raw: string) => commands.push(JSON.parse(raw)) };
+  const waiting = h.controls.selectForRoom(room);
+  const sent = commands[0];
+  assert.equal(sent.type, "select-output");
+  assert.notEqual(sent.requestId, trial.requestId);
+  const acknowledgement = { ...sent, type: "output-selected", selectionRevision: 19 };
+  h.controls.acceptRoom(trial.socket, acknowledgement);
+  h.controls.acceptRoom(room, { ...acknowledgement, requestId: trial.requestId });
+  assert.ok(h.controls.roomSelection, "wrong socket/request cannot resolve the pending exchange");
+  h.controls.acceptRoom(room, acknowledgement);
+  const selected = await waiting;
+  assert.deepEqual(JSON.parse(JSON.stringify(selected)), { speechOutput: local, catalogueRevision: catalogue.revision, selectionRevision: 19 });
+  assert.equal(h.controls.job.requestId, trial.requestId, "room selection does not replace the Try job");
+  h.controls.stop();
+});
+
+for (const [name, change] of Object.entries({
+  catalogue: { catalogueRevision: "stale" },
+  selection: { selection: { ...local, speed: 1.1 } },
+  "typed voice": { selection: { ...local, voice: 1 } },
+  revision: { selectionRevision: 0 },
+})) test(`room rejects mismatched ${name} without starting or borrowing another permit`, async () => {
+  const h = await outputHarness();
+  const sent: any[] = [];
+  const socket = { readyState: 1, send: (raw: string) => sent.push(JSON.parse(raw)) };
+  const waiting = h.controls.selectForRoom(socket);
+  const rejection = assert.rejects(waiting, /match|selection/i);
+  h.controls.acceptRoom(socket, { ...sent[0], type: "output-selected", selectionRevision: 4, ...change });
+  await rejection;
+  assert.equal(h.controls.roomSelection, null);
+  assert.equal(sent.length, 1);
+});
+
+test("room cancellation, replacement, null errors and stopped events retire pending exchanges", async () => {
+  const h = await outputHarness();
+  const sent: any[] = [];
+  const socket = { readyState: 1, send: (raw: string) => sent.push(JSON.parse(raw)) };
+  for (const event of [null, { type: "output-selection-error", requestId: null, message: "Selection unavailable" }, { type: "session", phase: "stopped" }]) {
+    const pending = h.controls.selectForRoom(socket);
+    const rejection = assert.rejects(pending);
+    if (event) h.controls.acceptRoom(socket, event);
+    else h.controls.cancelRoomSelection();
+    await rejection;
+  }
+  const first = h.controls.selectForRoom(socket);
+  const rejected = assert.rejects(first);
+  const latest = h.controls.selectForRoom(socket);
+  await rejected;
+  h.controls.acceptRoom(socket, { ...sent.at(-2), type: "output-selected", selectionRevision: 2 });
+  assert.ok(h.controls.roomSelection);
+  h.controls.acceptRoom(socket, { ...sent.at(-1), type: "output-selected", selectionRevision: 3 });
+  assert.equal((await latest).selectionRevision, 3);
+});
+
+test("produced and drained snapshots retain exact requested text and each real request's observations", async () => {
+  const h = await outputHarness();
+  const { socket, requestId, port } = await h.start();
+  h.accepted(socket, requestId);
+  const measured = (ms: number) => ({ status: "measured", ms, clock: "server", boundary: "provider request" });
+  const unavailable = { status: "unavailable", reason: "not exposed" };
+  const requests = [
+    { model: "applied-a", voice: "resolved-a", text: "First <sentence>.", returnedTranscript: "First <sentence>.", timing: { providerRequestWallMs: measured(0), providerProcessingMs: unavailable, providerNetworkMs: unavailable } },
+    { model: "applied-b", voice: "resolved-b", text: "Second sentence.", returnedTranscript: "", timing: { providerRequestWallMs: measured(25), providerProcessingMs: unavailable, providerNetworkMs: unavailable }, sessionSetupWallMs: measured(7), providerFirstAudioMs: measured(9) },
+    { model: "applied-c", voice: 0, text: "Third.", returnedTranscript: null, timing: { providerRequestWallMs: measured(11), providerProcessingMs: unavailable, providerNetworkMs: unavailable } },
+  ];
+  const completion = { type: "sample-complete", requestId, playbackId: 7, selection: local, textId: "typed-text-id", timing: { serverFirstAudioReadyMs: measured(0) },
+    segments: [{ index: 0, sentence: "First <sentence>.", sampleRate: 24000, audioDurationMs: 500, timing: {} }], requests };
+  socket.event({ ...completion, outcome: "produced" });
+  assert.equal(h.controls.result.text, "  The room is ready.\nTake your time.  ");
+  assert.equal(h.controls.result.generation, 2);
+  assert.deepEqual(JSON.parse(JSON.stringify(h.controls.result.requests)), requests);
+  const detailText = () => h.elements.get("output-observations").children.map((node: any) => node.textContent).join("\n");
+  assert.match(detailText(), /First <sentence>\./);
+  assert.match(detailText(), /0 ms.*measured.*server/);
+  assert.match(detailText(), /Transcript: same/);
+  assert.match(detailText(), /Returned transcript: "".*Transcript: different/);
+  assert.match(detailText(), /Returned transcript: Unavailable.*Transcript: unavailable/);
+  assert.match(detailText(), /Setup wall: 7 ms.*First provider PCM: 9 ms/);
+  assert.match(detailText(), /Provider network: Unavailable: not exposed/);
+  socket.event({ ...completion, textId: "stale-text", requests: [], outcome: "drained" });
+  assert.equal(h.controls.result.textId, "typed-text-id");
+  port.onmessage?.({ data: { kind: "drained", playbackId: 7, audioEndMs: 500 } });
+  socket.event({ ...completion, outcome: "drained" });
+  assert.equal(h.controls.job, null);
+  assert.equal(h.controls.result.outcome, "drained");
+  h.elements.get("output-model").value = "kokoro-v1.0";
+  h.click("output-model", "change");
+  assert.equal(h.controls.result.selection.model, local.model);
+  const next = await h.start();
+  assert.equal(h.controls.result, null, "new trial clears the prior snapshot");
+  socket.event({ ...completion, outcome: "produced" });
+  assert.equal(h.controls.result, null, "late old completion cannot label the new job");
+  h.accepted(next.socket, next.requestId);
+  h.controls.stop();
+});
 
 test("catalogue and selector changes only change the draft; Try preserves exact typed text", async () => {
   const h = await outputHarness();
@@ -176,12 +277,12 @@ test("browser TTFA uses the audio clock and Finished waits for server and browse
   assert.equal(h.controls.browserMs, 125, "first observation only");
   socket.event({ type: "playback", requestId, action: "end", playbackId: 7 });
   const timing = { serverFirstAudioReadyMs: { status: "measured", ms: 42, clock: "server", boundary: "acceptance to PCM" } };
-  socket.event({ type: "sample-complete", requestId, playbackId: 7, outcome: "produced", selection: local, textId: "typed-text-id", timing, segments: [{}] });
+  socket.event({ type: "sample-complete", requestId, playbackId: 7, selection: local, textId: "typed-text-id", outcome: "produced", timing, segments: [{}] });
   assert.notEqual(h.controls.status, "Finished");
   port.onmessage?.({ data: { kind: "drained", playbackId: 7, audioEndMs: 40 } });
   assert.equal(socket.sent.at(-1).type, "playback-drained");
   assert.notEqual(h.controls.status, "Finished");
-  socket.event({ type: "sample-complete", requestId, playbackId: 7, outcome: "drained", selection: local, textId: "typed-text-id", timing, segments: [{}] });
+  socket.event({ type: "sample-complete", requestId, playbackId: 7, selection: local, textId: "typed-text-id", outcome: "drained", timing, segments: [{}] });
   assert.equal(h.controls.status, "Finished");
   assert.equal(h.controls.hostMs, 42);
   assert.equal(h.controls.job, null);
@@ -206,11 +307,11 @@ for (const { name, outputTimestamp, expected } of [
   else assert.ok(Math.abs(h.controls.browserMs - expected) < 0.000001);
   assert.notEqual(h.controls.browserMs, 83802.20000004768 - 83659.30000001192, "callback delivery is a separate boundary");
   const timing = { serverFirstAudioReadyMs: { status: "measured", ms: 80.36745899997186 } };
-  socket.event({ type: "sample-complete", requestId, playbackId: 7, outcome: "produced", timing, segments: [{}] });
+  socket.event({ type: "sample-complete", requestId, playbackId: 7, selection: local, textId: "typed-text-id", outcome: "produced", timing, segments: [{}] });
   socket.event({ type: "playback", requestId, playbackId: 7, action: "end" });
   port.onmessage?.({ data: { kind: "drained", playbackId: 7, audioEndMs: 40 } });
   assert.equal(socket.sent.at(-1).type, "playback-drained");
-  socket.event({ type: "sample-complete", requestId, playbackId: 7, outcome: "drained", timing, segments: [{}] });
+  socket.event({ type: "sample-complete", requestId, playbackId: 7, selection: local, textId: "typed-text-id", outcome: "drained", timing, segments: [{}] });
   assert.equal(h.controls.job, null);
   assert.equal(h.controls.hostMs, timing.serverFirstAudioReadyMs.ms);
   if (expected == null) {
@@ -242,13 +343,13 @@ for (const { name, getOutputTimestamp } of [
   port.onmessage?.({ data: { kind: "first-render", playbackId: 7, audioTime: 4.5 } });
   assert.equal(h.controls.browserMs, null, "a later notification cannot replace the first render");
   const timing = { serverFirstAudioReadyMs: { status: "measured", ms: 42 } };
-  socket.event({ type: "sample-complete", requestId, playbackId: 7, outcome: "produced", timing, segments: [{}] });
+  socket.event({ type: "sample-complete", requestId, playbackId: 7, selection: local, textId: "typed-text-id", outcome: "produced", timing, segments: [{}] });
   socket.event({ type: "playback", requestId, action: "end", playbackId: 7 });
   assert.notEqual(h.controls.job, null, "production alone cannot finish playback");
   port.onmessage?.({ data: { kind: "drained", playbackId: 7, audioEndMs: 40 } });
   assert.equal(socket.sent.at(-1).type, "playback-drained");
   assert.notEqual(h.controls.job, null, "browser drain still waits for service completion");
-  socket.event({ type: "sample-complete", requestId, playbackId: 7, outcome: "drained", timing, segments: [{}] });
+  socket.event({ type: "sample-complete", requestId, playbackId: 7, selection: local, textId: "typed-text-id", outcome: "drained", timing, segments: [{}] });
   assert.equal(h.controls.job, null);
   assert.equal(h.controls.browserMs, null);
   assert.equal(h.controls.hostMs, 42);
@@ -279,6 +380,9 @@ test("missing, stale and invalid selections stay unavailable without substitutio
   await h.controls.tryVoice();
   assert.equal(h.sockets.length, 0);
   assert.match(h.elements.get("output-error").textContent, /Saved speech output is unavailable/);
+  await h.controls.load();
+  assert.equal(h.controls.draft.voice, "removed-voice", "metadata refresh retains the unavailable preference");
+  assert.equal(h.controls.selection(), null);
 });
 
 test("active room, blank text, too long text and missing assets prevent preview", async () => {
@@ -311,7 +415,7 @@ test("a local drain before production is held until the service can accept it", 
   h.accepted(socket, requestId);
   port.onmessage?.({ data: { kind: "drained", playbackId: 7, audioEndMs: 5 } });
   assert.equal(socket.sent.some((command) => command.type === "playback-drained"), false);
-  socket.event({ type: "sample-complete", requestId, playbackId: 7, outcome: "produced", timing: {}, segments: [{}] });
+  socket.event({ type: "sample-complete", requestId, playbackId: 7, selection: local, textId: "typed-text-id", outcome: "produced", timing: {}, segments: [{}] });
   assert.equal(socket.sent.at(-1).type, "playback-drained");
   h.controls.stop();
 });
@@ -340,10 +444,10 @@ test("silent audio drains successfully while first nonzero render timing stays u
   const h = await outputHarness();
   const { socket, requestId, port } = await h.start();
   h.accepted(socket, requestId);
-  socket.event({ type: "sample-complete", requestId, playbackId: 7, outcome: "produced", timing: {}, segments: [{}] });
+  socket.event({ type: "sample-complete", requestId, playbackId: 7, selection: local, textId: "typed-text-id", outcome: "produced", timing: {}, segments: [{}] });
   socket.event({ type: "playback", requestId, action: "end", playbackId: 7 });
   port.onmessage?.({ data: { kind: "drained", playbackId: 7, audioEndMs: 50 } });
-  socket.event({ type: "sample-complete", requestId, playbackId: 7, outcome: "drained", timing: {}, segments: [{}] });
+  socket.event({ type: "sample-complete", requestId, playbackId: 7, selection: local, textId: "typed-text-id", outcome: "drained", timing: {}, segments: [{}] });
   assert.equal(h.controls.job, null);
   assert.equal(h.controls.browserMs, null);
   assert.match(h.controls.status, /No nonzero audio rendered/);

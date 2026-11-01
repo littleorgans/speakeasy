@@ -12,6 +12,7 @@ export const OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime";
 export const DEFAULT_OPENAI_MODEL = "gpt-realtime-2.1-mini";
 export const DEFAULT_OPENAI_VOICE = "marin";
 export const OPENAI_SAMPLE_RATE = 24_000;
+export const OPENAI_SPEED = Object.freeze({ min: 0.25, max: 1.5 });
 export const OPENAI_VOICES = [
   "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar",
 ] as const;
@@ -114,7 +115,7 @@ function configuration(config: TTSConfig): AppliedConfig {
   const speed = config.speed ?? 1;
   if (model !== DEFAULT_OPENAI_MODEL || typeof voice !== "string" ||
     !OPENAI_VOICES.includes(voice as typeof OPENAI_VOICES[number]) ||
-    !Number.isFinite(speed) || speed < 0.25 || speed > 1.5) throw unsupported();
+    !Number.isFinite(speed) || speed < OPENAI_SPEED.min || speed > OPENAI_SPEED.max) throw unsupported();
   return { model, voice, speed };
 }
 

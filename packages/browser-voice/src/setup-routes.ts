@@ -346,9 +346,10 @@ export function createHostProviderConfig(options: {
         config: { schema: 1, provider: { kind: adapter.kind, model: adapter.model } },
         selectable: true, transfer: "audio-to-api", samples: [] });
     }
-    const output = options.outputCatalogue?.().output ?? [];
+    const snapshot = options.outputCatalogue?.();
+    const output = snapshot?.output ?? [];
     const revision = createHash("sha256").update(JSON.stringify({ input, output,
-      outputRevision: options.outputCatalogue?.().revision })).digest("hex");
+      outputRevision: snapshot?.revision })).digest("hex");
     return { schema: 1, revision, input, output };
   };
   const registries = (): SpeechConfigRegistries => ({ input: { localPresets: SETUPS,

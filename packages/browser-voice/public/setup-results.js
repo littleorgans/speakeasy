@@ -1,3 +1,5 @@
+import { formatMs, formatObservation } from "/speech-observations.js";
+
 /** Display jobs own no capture or saved audio. The page supplies the one take. */
 export class SetupResults {
   constructor(page) {
@@ -141,6 +143,7 @@ export class SetupResults {
     this.message = "";
     this.resultSource = "";
     this.resultIdentity = null;
+    this.resultManifest = null;
     this.renderRows();
   }
 
@@ -163,6 +166,8 @@ export class SetupResults {
     const job = { requestId: `reader-${Date.now()}-${++this.serial}`, sourceKind: source.kind, controller: new AbortController() };
     this.job = job;
     this.resultSource = this.sourceLabel();
+    this.resultIdentity = null;
+    this.resultManifest = null;
     this.rows = setups.map((setup) => ({ setup, phase: "queued", result: null }));
     this.renderRows();
     this.page.render();
@@ -201,11 +206,18 @@ export class SetupResults {
     const entry = this.apiEntries?.find((candidate) => candidate.id === this.elements["input-model"].value);
     if (!entry) return;
     this.cancel();
-    const job = { requestId: `reader-api-${Date.now()}-${++this.serial}`, controller: new AbortController() };
+    const job = {
+      requestId: `reader-api-${Date.now()}-${++this.serial}`, controller: new AbortController(),
+      config: JSON.parse(JSON.stringify(entry.config)), catalogueRevision: this.providers.revision,
+      samples: new Float32Array(source.take.samples), sourceLabel: this.sourceLabel(),
+    };
     this.job = job;
     this.message = "Transcribing with selected API";
-    this.resultSource = this.sourceLabel();
-    this.rows = [{ setup: { id: entry.id, label: entry.label, controls: entry.config }, phase: "processing", result: null }];
+    this.resultSource = job.sourceLabel;
+    this.resultIdentity = null;
+    this.resultManifest = null;
+    const row = { setup: { id: entry.id, label: entry.label, controls: job.config }, phase: "processing", result: null };
+    this.rows = [row];
     this.renderRows();
     this.page.render();
     const post = async (url, init) => {
@@ -215,20 +227,37 @@ export class SetupResults {
       return body;
     };
     try {
-      await post("/speech-providers/session", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+      const session = await post("/speech-providers/session", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
       if (this.job !== job) return;
-      const selected = await post("/speech-providers/selection", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ direction: "input", catalogueRevision: this.providers.revision, config: entry.config }) });
+      if (typeof session.sessionId !== "string" || !session.sessionId.trim()) throw new Error("API speech session is incomplete");
+      job.session = JSON.parse(JSON.stringify(session));
+      const selected = await post("/speech-providers/selection", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ direction: "input", catalogueRevision: job.catalogueRevision, config: job.config }) });
       if (this.job !== job) return;
-      const query = new URLSearchParams({ requestId: job.requestId, config: JSON.stringify(entry.config), catalogueRevision: selected.catalogueRevision, selectionRevision: String(selected.selectionRevision) });
-      const result = await post(`/prompt-reader/api-transcriptions?${query}`, { method: "POST", headers: { "content-type": "application/octet-stream" }, body: source.take.samples.buffer });
+      if (selected.sessionId !== job.session.sessionId || selected.direction !== "input" ||
+          !sameApiConfig(selected.config, job.config) || selected.catalogueRevision !== job.catalogueRevision ||
+          !Number.isSafeInteger(selected.selectionRevision) || selected.selectionRevision <= 0) throw new Error("API selection response does not match this take");
+      job.selected = JSON.parse(JSON.stringify(selected));
+      job.selectionRevision = selected.selectionRevision;
+      const query = new URLSearchParams({ requestId: job.requestId, config: JSON.stringify(job.config), catalogueRevision: job.catalogueRevision, selectionRevision: String(job.selectionRevision) });
+      const result = await post(`/prompt-reader/api-transcriptions?${query}`, { method: "POST", headers: { "content-type": "application/octet-stream" }, body: job.samples.buffer });
       if (this.job !== job) return;
-      if (typeof result.result?.text !== "string") throw new Error("API transcription response is incomplete");
-      this.rows[0].result = { ...result.result, status: "complete", providerTiming: result.result.timings, appliedConfig: result.config };
-      this.rows[0].phase = "complete";
+      const { pcm, source: returnedSource } = result;
+      if (result.requestId !== job.requestId || !sameApiConfig(result.config, job.config) || typeof result.result?.text !== "string" ||
+          returnedSource?.kind !== "live-capture" || returnedSource.sessionId !== job.session.sessionId ||
+          typeof returnedSource.operationId !== "string" || !returnedSource.operationId.trim() ||
+          pcm?.sampleRate !== 16000 || pcm.channels !== 1 || pcm.sampleCount !== job.samples.length ||
+          pcm.pcmBytes !== job.samples.length * 4 || typeof pcm.pcmSha256 !== "string" || !/^[a-f0-9]{64}$/i.test(pcm.pcmSha256)) {
+        throw new Error("API transcription response does not match this take");
+      }
+      row.identity = JSON.parse(JSON.stringify({ requestId: result.requestId, config: result.config, source: returnedSource, pcm,
+        catalogueRevision: job.catalogueRevision, selectionRevision: job.selectionRevision }));
+      row.adapterResult = result.result;
+      row.result = { ...result.result, status: "complete", providerTiming: result.result.timings, appliedConfig: row.identity.config };
+      row.phase = "complete";
       this.message = "Transcription finished";
     } catch (error) {
       if (this.job !== job) return;
-      this.rows[0].phase = "error";
+      row.phase = "error";
       this.message = error.message;
     } finally {
       if (this.job === job) { this.job = null; this.renderRows(); this.page.render(); }
@@ -303,7 +332,7 @@ export class SetupResults {
     this.elements["input-local"].hidden = !local;
     this.elements["input-api"].hidden = local;
     this.elements["input-presets"].hidden = this.mode !== "compare";
-    this.elements["input-transfer"].textContent = local ? "Fixed presets. The editable known word list applies to Current list only." : `Audio is sent to ${this.provider()} for transcription. Saved takes stay local.`;
+    this.elements["input-transfer"].textContent = local ? "Speech input is processed on this Mac. The editable known word list applies to Current list only." : `Audio is sent to ${this.provider()} for transcription. Saved takes stay local.`;
     this.elements["comparison-source"].textContent = this.resultSource || this.sourceLabel();
     this.elements["comparison-status"].textContent = this.message || (local && this.mode === "compare" && !this.selected.size ? "Select a setup to compare." : this.job ? `${this.rows.filter((row) => row.result).length} of ${this.rows.length} complete` : "Record once to compare selected setups.");
     const button = this.elements["compare-take"];
@@ -357,7 +386,11 @@ export class SetupResults {
         ? [["Provider request wall", "providerRequestWallMs"], ["Provider processing", "providerProcessingMs"], ["Provider network", "providerNetworkMs"]].map(([label, key]) => `${label}: ${formatObservation(result.providerTiming[key])}`).join(" · ")
         : [["Queue", "queueMs"], ["Startup", "startupMs"], ["Load", "loadMs"], ["Processing", "processingMs"], ["Worker wall", "workerWallMs"], ["Request wall", "requestWallMs"], ["Service wall", "serviceWallMs"], ["Ultra dependency processing", "dependencyProcessingMs"]].map(([label, key]) => `${label}: ${formatMs(result?.timings?.[key])}`).join(" · ");
       if (!result?.providerTiming) timing.textContent += ` · First use: ${result?.timings?.firstUse == null ? "Unavailable" : result.timings.firstUse ? "yes" : "no"}`;
-      identity.textContent = JSON.stringify({ manifestSha256: this.resultManifest, setupId: row.setup.id, revision: row.setup.revision, pcm: result?.pcm ?? this.resultIdentity, controls: row.setup.controls, runtime: row.setup.runtime, rawText: result?.text ?? result?.error?.rawText, backendRawText: result?.rawText, applied: result?.appliedConfig });
+      const api = row.setup.controls?.provider?.kind && row.setup.controls.provider.kind !== "local";
+      identity.textContent = JSON.stringify({ manifestSha256: api ? null : this.resultManifest,
+        identity: row.identity, adapterResult: row.adapterResult, setupId: row.setup.id, revision: row.setup.revision,
+        pcm: api ? row.identity?.pcm : result?.pcm ?? this.resultIdentity, controls: row.setup.controls, runtime: row.setup.runtime,
+        rawText: result?.text ?? result?.error?.rawText, backendRawText: result?.rawText, applied: result?.appliedConfig });
     }
     const root = this.elements["comparison-results"];
     // Preserve native disclosure focus/open state during progressive updates.
@@ -366,13 +399,8 @@ export class SetupResults {
 
 }
 
-function formatMs(value) {
-  return typeof value === "number" && Number.isFinite(value) ? `${Math.round(value)} ms` : "Unavailable";
-}
-
-function formatObservation(value) {
-  if (!value || value.status === "unavailable") return `Unavailable${value?.reason ? `: ${value.reason}` : ""}`;
-  return `${formatMs(value.ms)} (${value.status === "provider-reported" ? "provider reported" : "measured"}; ${value.boundary})`;
+function sameApiConfig(actual, expected) {
+  return actual?.schema === expected.schema && actual.provider?.kind === expected.provider.kind && actual.provider?.model === expected.provider.model;
 }
 
 /** Case and punctuation insensitive word key; empty for pure punctuation. */

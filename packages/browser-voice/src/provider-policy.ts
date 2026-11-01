@@ -19,10 +19,12 @@ import type { ProviderCredentials } from "./provider-availability.ts";
 /**
  * Host supplied workflow metadata, never decoded from a browser source flag.
  * Live routes assign their operation; saved routes first use PromptReader.takePath.
+ * The session owns live operation lifetime.
  * This describes the application path, without attesting physical microphone origin.
  */
 export type ProviderSource =
   | { kind: "live-capture"; sessionId: string; operationId: string }
+  | { kind: "live-response-text"; sessionId: string; operationId: string }
   | { kind: "saved-take"; corpusId: string; takeId: string }
   | { kind: "typed-text"; sessionId: string }
   | { kind: "catalogue-sample"; sampleId: string }
@@ -209,6 +211,9 @@ export class ProviderPolicy {
     switch (source.kind) {
       case "live-capture":
         if (direction === "input" && source.sessionId === sessionId && nonempty(source.operationId)) return;
+        break;
+      case "live-response-text":
+        if (direction === "output" && source.sessionId === sessionId && nonempty(source.operationId)) return;
         break;
       case "typed-text":
         if (direction === "output" && source.sessionId === sessionId) return;

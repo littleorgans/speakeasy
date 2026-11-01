@@ -10,6 +10,7 @@ class SpeakEasyRoom {
   constructor() {
     this.socket = null;
     this.socketPromise = null;
+    this.roomAttempt = null;
     this.audioContext = null;
     this.micStream = null;
     this.captureNode = null;
@@ -139,6 +140,8 @@ class SpeakEasyRoom {
     });
     window.addEventListener("beforeunload", () => {
       this.output.stop();
+      this.roomAttempt = null;
+      this.output.cancelRoomSelection();
       this.send({ type: "stop" });
       this.socket?.close();
     });
@@ -146,38 +149,45 @@ class SpeakEasyRoom {
 
   async start() {
     this.output.stop();
-    this.activeSettings = { ...this.settings };
-    this.setSession("loading");
+    this.output.cancelRoomSelection();
+    const attempt = this.roomAttempt = {};
     try {
-      await this.setupAudio();
+      const output = this.settings.engine === "realtime" ? null : this.output.roomSnapshot();
+      const settings = this.activeSettings = { ...this.settings, speechOutput: output?.speechOutput };
+      this.setSession("loading");
+      this.setState("idle");
+      await this.setupAudio(attempt);
+      if (this.roomAttempt !== attempt) return;
       await this.connect();
+      if (this.roomAttempt !== attempt) return;
+      const socket = this.socket;
+      const selected = output ? await this.output.selectForRoom(socket, output) : {};
+      if (this.roomAttempt !== attempt || socket !== this.socket) return;
+      if (socket?.readyState !== WebSocket.OPEN) throw new Error("Room channel closed before start.");
       this.send({
         type: "start",
-        engine: this.activeSettings.engine,
-        mode: this.activeSettings.mode,
-        pauseMs: this.activeSettings.pauseMs,
-        voice: this.activeSettings.voice,
-        barge: this.activeSettings.barge,
-        ...(this.activeSettings.engine !== "realtime" && this.activeSettings.speechOutput
-          ? { speechOutput: this.activeSettings.speechOutput } : {}),
-        ...(this.activeSettings.systemPrompt
-          ? { systemPrompt: this.activeSettings.systemPrompt }
-          : {}),
+        engine: settings.engine, mode: settings.mode, pauseMs: settings.pauseMs,
+        voice: settings.voice, barge: settings.barge, ...selected,
+        ...(settings.systemPrompt ? { systemPrompt: settings.systemPrompt } : {}),
       });
     } catch (error) {
+      if (this.roomAttempt !== attempt) return;
+      this.roomAttempt = null;
+      this.output.cancelRoomSelection();
+      try { this.send({ type: "stop" }); } catch { this.socket?.close(); }
       this.showError(this.errorMessage(error));
-      await this.teardownAudio();
-      this.activeSettings = null;
       this.setSession("stopped");
+      await this.teardownAudio();
     }
   }
 
   async end() {
+    this.roomAttempt = null;
+    this.output.cancelRoomSelection();
     this.hold.cancel();
-    this.send({ type: "stop" });
-    await this.teardownAudio();
-    this.setState("idle");
+    try { this.send({ type: "stop" }); } catch { this.socket?.close(); }
     this.setSession("stopped");
+    await this.teardownAudio();
   }
 
   interrupt() {
@@ -218,11 +228,14 @@ class SpeakEasyRoom {
       const failed = () => reject(new Error("Could not open the local voice channel"));
       socket.addEventListener("open", () => {
         socket.removeEventListener("error", failed);
+        socket.removeEventListener("close", failed);
+        this.output.cancelRoomSelection("Room channel replaced.");
         this.socket = socket;
         this.wireSocket(socket);
         resolve();
       }, { once: true });
       socket.addEventListener("error", failed, { once: true });
+      socket.addEventListener("close", failed, { once: true });
     }).finally(() => {
       this.socketPromise = null;
     });
@@ -230,19 +243,26 @@ class SpeakEasyRoom {
   }
 
   wireSocket(socket) {
+    socket.addEventListener("error", () => { if (this.socket === socket) void this.end(); });
     socket.addEventListener("message", (event) => {
+      if (this.socket !== socket) return;
       if (event.data instanceof ArrayBuffer) {
         this.acceptAudioPacket(event.data);
         return;
       }
       try {
-        this.acceptEvent(JSON.parse(event.data));
+        const message = JSON.parse(event.data);
+        this.output.acceptRoom(socket, message);
+        this.acceptEvent(message);
       } catch {
+        void this.end();
         this.showError("The voice host sent an unreadable event");
       }
     });
     socket.addEventListener("close", () => {
       if (this.socket !== socket) return;
+      this.roomAttempt = null;
+      this.output.cancelRoomSelection("Room channel closed.");
       this.socket = null;
       void this.teardownAudio();
       this.setState("idle");
@@ -292,6 +312,8 @@ class SpeakEasyRoom {
   setSession(phase, label) {
     this.sessionPhase = phase;
     if (phase === "stopped") {
+      this.roomAttempt = null;
+      this.output.cancelRoomSelection("Room stopped.");
       this.keyboardHold = false;
       this.hold.cancel();
       this.activeSettings = null;
@@ -300,7 +322,7 @@ class SpeakEasyRoom {
     document.body.dataset.session = phase;
     const copy = {
       stopped: "Room closed",
-      loading: "Preparing local engines",
+      loading: "Preparing room",
       ready: "Private room open",
     };
     this.elements.connection.textContent = copy[phase] ?? phase;
@@ -316,45 +338,37 @@ class SpeakEasyRoom {
     document.body.dataset.state = state;
     const states = {
       idle: {
-        word: "Come in.",
-        kicker: "A quiet line, ready when you are",
+        word: "Come in.", kicker: "A quiet line, ready when you are",
         caption: "Start the room, speak naturally, then pause. Your reply will arrive as audio.",
       },
       listening: {
-        word: "I’m listening.",
-        kicker: "Your side of the line is open",
+        word: "I’m listening.", kicker: "Your side of the line is open",
         caption: "Take your time. A natural pause closes the turn and starts the reply.",
       },
       thinking: {
-        word: "One moment.",
-        kicker: "The room is shaping a reply",
+        word: "One moment.", kicker: "The room is shaping a reply",
         caption: "Tap the signal control or press Escape if you want to take the floor back.",
       },
       speaking: {
-        word: "Here it comes.",
-        kicker: "The reply is playing now",
+        word: "Here it comes.", kicker: "The reply is playing now",
         caption: "Speak over it or tap the signal control to interrupt immediately.",
       },
     };
     const holdStates = {
       idle: {
-        word: "Come in.",
-        kicker: "A quiet line, ready when you are",
+        word: "Come in.", kicker: "A quiet line, ready when you are",
         caption: "Enter the room, then hold the signal control or Space while you speak.",
       },
       listening: {
-        word: "Your turn.",
-        kicker: "The line opens when you hold",
+        word: "Your turn.", kicker: "The line opens when you hold",
         caption: "Hold the signal control or Space. Release when your thought is complete.",
       },
       thinking: {
-        word: "One moment.",
-        kicker: "The room is shaping a reply",
+        word: "One moment.", kicker: "The room is shaping a reply",
         caption: "Hold the signal control or Space to interrupt and take the floor.",
       },
       speaking: {
-        word: "Here it comes.",
-        kicker: "The reply is playing now",
+        word: "Here it comes.", kicker: "The reply is playing now",
         caption: "Hold the signal control or Space to interrupt and speak immediately.",
       },
     };
@@ -371,8 +385,8 @@ class SpeakEasyRoom {
     this.elements.mute.hidden = holdMode;
     this.elements.mute.disabled = this.sessionPhase !== "ready" || holdMode;
     if (this.sessionPhase === "loading") {
-      this.elements.mainLabel.textContent = "Warming up";
-      this.elements.mainHint.textContent = "Loading local speech models";
+      this.elements.mainLabel.textContent = "Preparing";
+      this.elements.mainHint.textContent = "Preparing speech and audio";
       this.elements.main.setAttribute("aria-label", "Preparing the voice room");
       return;
     }
@@ -481,11 +495,7 @@ class SpeakEasyRoom {
 
   handlePlayback(event) {
     this.playbackId = event.playbackId;
-    this.playbackNode?.port.postMessage({
-      kind: event.action,
-      playbackId: event.playbackId,
-      sampleRate: event.sampleRate,
-    });
+    this.playbackNode?.port.postMessage({ kind: event.action, playbackId: event.playbackId, sampleRate: event.sampleRate });
   }
 
   acceptAudioPacket(packet) {
@@ -503,26 +513,30 @@ class SpeakEasyRoom {
     );
   }
 
-  async setupAudio() {
+  async setupAudio(attempt = this.roomAttempt) {
     await this.teardownAudio();
+    if (this.roomAttempt !== attempt) return;
     const device = this.settings.microphoneId;
-    this.micStream = await navigator.mediaDevices.getUserMedia({
+    const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         ...(device ? { deviceId: { exact: device } } : {}),
         ...CAPTURE_AUDIO_CONSTRAINTS,
       },
     });
+    if (this.roomAttempt !== attempt) { stream.getTracks().forEach((track) => track.stop()); return; }
+    this.micStream = stream;
     const context = new AudioContext({ latencyHint: "interactive" });
+    this.audioContext = context;
     await Promise.all([
       context.audioWorklet.addModule("/capture-worklet.js"),
       context.audioWorklet.addModule("/playback-worklet.js"),
     ]);
-    this.audioContext = context;
+    if (this.roomAttempt !== attempt) return;
     this.captureNode = new AudioWorkletNode(context, "speak-easy-capture");
     this.playbackNode = new AudioWorkletNode(context, "speak-easy-playback", {
       outputChannelCount: [2],
     });
-    const source = context.createMediaStreamSource(this.micStream);
+    const source = context.createMediaStreamSource(stream);
     const silent = context.createGain();
     silent.gain.value = 0;
     source.connect(this.captureNode).connect(silent).connect(context.destination);
@@ -538,14 +552,11 @@ class SpeakEasyRoom {
     };
     this.playbackNode.port.onmessage = (event) => {
       if (event.data?.kind === "drained") {
-        this.send({
-          type: "playback-drained",
-          playbackId: event.data.playbackId,
-          audioEndMs: event.data.audioEndMs,
-        });
+        this.send({ type: "playback-drained", playbackId: event.data.playbackId, audioEndMs: event.data.audioEndMs });
       }
     };
     await context.resume();
+    if (this.roomAttempt !== attempt) return;
     await this.refreshDevices();
   }
 
@@ -558,10 +569,9 @@ class SpeakEasyRoom {
     this.playbackNode?.disconnect();
     this.captureNode = null;
     this.playbackNode = null;
-    if (this.audioContext && this.audioContext.state !== "closed") {
-      await this.audioContext.close();
-    }
+    const context = this.audioContext;
     this.audioContext = null;
+    if (context && context.state !== "closed") await context.close();
   }
 
   openSettings() {

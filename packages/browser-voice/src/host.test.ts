@@ -25,6 +25,11 @@ test("host serves the room shell and reports health", async () => {
       /frame-ancestors 'none'/,
     );
     assert.match(await page.text(), /Speak Easy · Live room/);
+    const helper = await fetch(host.url + "/speech-observations.js");
+    assert.equal(helper.status, 200);
+    assert.match(helper.headers.get("content-type") ?? "", /^text\/javascript/);
+    assert.equal(helper.headers.get("content-security-policy"), page.headers.get("content-security-policy"));
+    assert.match(await helper.text(), /export function transcriptStatus/);
   } finally {
     await host.close();
   }
@@ -405,8 +410,8 @@ test("room Stop clears buffered browser audio before shared factory native retir
     speechOutput: { catalogue: () => output.catalogue,
       createOutput: (selection, context) => factory.create(selection, { beforeRequest: context.recheck, signal: context.signal }),
       quiesce: (selection) => factory.quiesce(selection), close: () => factory.close() },
-    createRuntime: (config) => createConversationRuntime(config, { INCEPTIONLABS_API_KEY: "fake-only" }, fakeRuntime().stt,
-      { speechOutputFactory: factory }) });
+    createRuntime: (config, context) => createConversationRuntime(config, { INCEPTIONLABS_API_KEY: "fake-only" }, fakeRuntime().stt,
+      { speechOutputFactory: factory, speechOutputContext: context?.speechOutputContext }) });
   const room = new WebSocket(host.url.replace("http", "ws") + "/voice");
   const trial = new WebSocket(host.url.replace("http", "ws") + "/speech-output");
   const observed = observe(room);

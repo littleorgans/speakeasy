@@ -13,6 +13,7 @@ import type {
 import { createProviderCredentials } from "./provider-availability.ts";
 import { ProviderPolicy } from "./provider-policy.ts";
 import type {
+  ProviderDispatchContext,
   ProviderDispatchRequest,
   ProviderSelection,
   ProviderSource,
@@ -45,6 +46,7 @@ const siblingRegisteredOutput: SpeechOutputConfig = {
   ...localOutput, provider: { kind: "local", runtimeKind: "sherpa-kokoro" },
 };
 const live: ProviderSource = { kind: "live-capture", sessionId: "session-one", operationId: "capture-one" };
+const response: ProviderSource = { kind: "live-response-text", sessionId: "session-one", operationId: "room-one" };
 const typed: ProviderSource = { kind: "typed-text", sessionId: "session-one" };
 const saved: ProviderSource = { kind: "saved-take", corpusId: "test-corpus", takeId: "take-one" };
 
@@ -221,6 +223,100 @@ test("dispatch invokes exactly the selected provider with truthful transfer boun
     });
     assert.equal(result, "one provider result");
   }
+  assert.equal(f.calls, 2);
+});
+
+test("room response text dispatches exactly the selected hosted output", async () => {
+  const f = fixture();
+  for (const output of [apiOutput, siblingOutput]) {
+    const config = { ...output, voice: 0, speed: 0.75 };
+    const before = f.calls;
+    const selection = f.select("output", config);
+    assert.equal(f.calls, before);
+    const result: string = await f.policy.dispatch(f.request(selection, response), (context) => {
+      assert.deepEqual(context.authorization, {
+        ...selection, source: response, grantId: null,
+      });
+      assert.deepEqual(context.recheck(), context.authorization);
+      assert.equal(context.apiKey?.(), output === apiOutput ? "fixture-cartesia" : "fixture-openai");
+      f.calls++;
+      return "room output";
+    });
+    assert.equal(result, "room output");
+  }
+  assert.equal(f.calls, 2);
+});
+
+test("room response text denies input, another session and blank operations before execution", async () => {
+  const f = fixture();
+  const input = f.select("input", apiInput);
+  await denied(f, f.request(input, response), "SOURCE_UNVERIFIED");
+  const output = f.select("output", apiOutput);
+  for (const source of [
+    { ...response, sessionId: "other-session" },
+    { ...response, operationId: "" },
+    { ...response, operationId: " \t\n" },
+  ]) await denied(f, f.request(output, source), "SOURCE_UNVERIFIED");
+  assert.equal(f.calls, 0);
+});
+
+test("room response text needs exact explicit selection and cannot authorize saved or unclassified text", async () => {
+  const f = fixture();
+  const config = { ...apiOutput, voice: 0, speed: 0.75 };
+  const restored: ProviderDispatchRequest = { sessionId: "session-one", direction: "output", config,
+    catalogueRevision: f.catalogue.revision, source: response };
+  await denied(f, restored, "SELECTION_REQUIRED");
+  await denied(f, { ...restored, selectionRevision: 1 }, "SELECTION_REQUIRED");
+  const selection = f.select("output", config);
+  const request = f.request(selection, response);
+  for (const changed of [
+    { ...config, provider: { kind: "openai" } },
+    { ...config, voice: "0" },
+    { ...config, voice: "voice-two" },
+    { ...config, speed: 1 },
+  ]) await denied(f, { ...request, config: changed }, "SELECTION_STALE");
+  await denied(f, { ...request, selectionRevision: selection.selectionRevision + 1 }, "SELECTION_STALE");
+  f.catalogue.revision = "catalogue-two";
+  await denied(f, request, "SELECTION_STALE");
+  f.catalogue.revision = selection.catalogueRevision;
+  await denied(f, f.request(selection, saved), "SAVED_REPLAY_NOT_AUTHORIZED");
+  await denied(f, f.request(selection, { kind: "unclassified-upload" }), "SOURCE_UNVERIFIED");
+  f.policy.revoke("session-one", "output");
+  await denied(f, request, "SELECTION_REQUIRED");
+  assert.equal(f.calls, 0);
+});
+
+test("captured room context blocks later transmissions after key removal, revoke and reselection", async () => {
+  const f = fixture();
+  const selection = f.select("output", apiOutput);
+  const request = f.request(selection, response);
+  const context: ProviderDispatchContext = await f.policy.dispatch(request, (context) => context);
+  assert.ok(context.apiKey);
+  const getKey = context.apiKey;
+  const transmit = () => {
+    context.recheck();
+    const key = getKey();
+    f.calls++;
+    return key;
+  };
+  const assertBlocked = (code: ProviderErrorCode) => {
+    const before = f.calls;
+    for (const handle of [context.recheck, getKey, transmit]) {
+      assert.throws(handle, (error: unknown) => error instanceof ProviderError && error.code === code);
+    }
+    assert.equal(f.calls, before);
+  };
+  assert.equal(transmit(), "fixture-cartesia");
+  request.source = { ...response, operationId: "replacement-room" };
+  assert.deepEqual(context.recheck().source, response);
+  delete f.environment.CARTESIA_API_KEY;
+  assertBlocked("PROVIDER_UNAVAILABLE");
+  f.environment.CARTESIA_API_KEY = "replacement-fixture";
+  assert.equal(transmit(), "replacement-fixture");
+  f.policy.revoke("session-one", "output");
+  assertBlocked("SELECTION_REQUIRED");
+  f.select("output", apiOutput);
+  assertBlocked("SELECTION_STALE");
   assert.equal(f.calls, 2);
 });
 

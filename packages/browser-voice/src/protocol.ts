@@ -5,6 +5,8 @@ import {
   type RealtimeVoice,
 } from "@speakeasy/convo-engine";
 import { parseSpeechOutputConfig, type SpeechOutputConfig, type SpeechOutputRegistry } from "@speakeasy/speech-io/providers";
+import { parseSpeechOutputCommand, type SpeechOutputCommand, type SpeechOutputErrorCode,
+  type SpeechOutputEvent } from "./speech-output-protocol.ts";
 
 export const INPUT_SAMPLE_RATE = 16_000;
 export const AUDIO_PACKET_KIND = 1;
@@ -31,7 +33,10 @@ export type ClientCommand =
       barge: boolean;
       systemPrompt?: string;
       speechOutput?: SpeechOutputConfig;
+      catalogueRevision?: string;
+      selectionRevision?: number;
     }
+  | Extract<SpeechOutputCommand, { type: "select-output" }>
   | { type: "stop" }
   | { type: "interrupt" }
   | { type: "commit-input" }
@@ -39,6 +44,8 @@ export type ClientCommand =
 
 export type BrowserHostEvent =
   | ConversationEvent
+  | Extract<SpeechOutputEvent, { type: "output-selected" }>
+  | { type: "output-selection-error"; requestId: string | null; code: SpeechOutputErrorCode; message: string }
   | { type: "session"; phase: "loading" | "ready" | "stopped"; label?: string }
   | {
       type: "playback";
@@ -58,7 +65,16 @@ export function parseClientCommand(raw: string, outputRegistry: SpeechOutputRegi
     throw new Error("command must have a type");
   }
   switch (value.type) {
+    case "select-output": {
+      const command = parseSpeechOutputCommand(raw, outputRegistry);
+      if (command.type === "select-output") return command;
+      throw new Error("room requires an output selection");
+    }
     case "start": {
+      if (Object.keys(value).some((key) => !["type", "engine", "mode", "pauseMs", "voice", "barge",
+        "systemPrompt", "speechOutput", "catalogueRevision", "selectionRevision"].includes(key))) {
+        throw new Error("start contains unsupported fields");
+      }
       const engine = RESPONSE_ENGINES.find((candidate) => candidate === value.engine);
       if (engine === undefined) {
         throw new Error(`start requires engine: ${RESPONSE_ENGINES.join(", ")}`);
@@ -76,6 +92,17 @@ export function parseClientCommand(raw: string, outputRegistry: SpeechOutputRegi
       if (typeof value.voice !== "string") {
         throw new Error("start requires a Realtime voice");
       }
+      const speechOutput = value.speechOutput === undefined ? undefined :
+        parseSpeechOutputConfig(value.speechOutput, outputRegistry);
+      const hasRevision = value.catalogueRevision !== undefined || value.selectionRevision !== undefined;
+      if (hasRevision && (typeof value.catalogueRevision !== "string" || !value.catalogueRevision.trim() ||
+          value.catalogueRevision.length > 128 || !Number.isSafeInteger(value.selectionRevision) ||
+          Number(value.selectionRevision) < 1)) {
+        throw new Error("start requires paired catalogue and selection revisions");
+      }
+      if (engine !== "realtime" && speechOutput && speechOutput.provider.kind !== "local" && !hasRevision) {
+        throw new Error("hosted output requires an explicit room selection");
+      }
       return {
         type: "start",
         engine,
@@ -83,9 +110,9 @@ export function parseClientCommand(raw: string, outputRegistry: SpeechOutputRegi
         pauseMs: Number(value.pauseMs),
         voice: parseRealtimeVoice(value.voice),
         barge: value.barge === true,
-        ...(value.speechOutput === undefined ? {} : {
-          speechOutput: parseSpeechOutputConfig(value.speechOutput, outputRegistry),
-        }),
+        ...(speechOutput === undefined ? {} : { speechOutput }),
+        ...(hasRevision ? { catalogueRevision: value.catalogueRevision as string,
+          selectionRevision: Number(value.selectionRevision) } : {}),
         ...(typeof value.systemPrompt === "string" && value.systemPrompt.trim()
           ? { systemPrompt: value.systemPrompt.trim() }
           : {}),
@@ -166,5 +193,5 @@ export function encodeAudioPacket(playbackId: number, segment: AudioSegment): Ui
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

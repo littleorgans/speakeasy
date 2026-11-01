@@ -1,38 +1,27 @@
 import { loadEnvFile } from "node:process";
 import { createConversationRuntime } from "@speakeasy/convo-engine";
-import { SpeechOutputFactory } from "@speakeasy/speech-io";
+import { WebSocket } from "ws";
 import { startBrowserVoiceServer } from "./host.ts";
 import { createSetupRuntime, readBrowserVoiceOptions } from "./server-options.ts";
 import { createProviderCredentials } from "./provider-availability.ts";
-import { createFileInputAdapters, createHostProviderConfig } from "./setup-routes.ts";
+import { createProviderRuntime } from "./provider-runtime.ts";
 import { LocalSpeechOutputFactory } from "../../speech-io/src/tts/factory.ts";
-import { getLocalOutputCatalogue, LOCAL_OUTPUT_REGISTRY } from "../../speech-io/src/tts/catalogue.ts";
-import { buildSpeechOutputCatalogue } from "./speech-output-catalog.ts";
+import { getLocalOutputCatalogue } from "../../speech-io/src/tts/catalogue.ts";
 
 loadLocalEnv();
 const options = readBrowserVoiceOptions(process.argv.slice(2), process.env);
 const setup = await createSetupRuntime(options.setupRuntimeFile);
 const credentials = createProviderCredentials();
 const localOutput = new LocalSpeechOutputFactory({ root: options.outputRoot });
-const output = new SpeechOutputFactory({ local: localOutput });
-const outputCatalogue = buildSpeechOutputCatalogue({ local: await getLocalOutputCatalogue(options.outputRoot),
-  localRegistry: LOCAL_OUTPUT_REGISTRY });
-const inputAdapters = createFileInputAdapters();
-const providers = createHostProviderConfig({ credentials, readiness: setup.readiness, inputAdapters,
-  outputCatalogue: () => outputCatalogue });
+const { output, providers, speechOutput } = createProviderRuntime({ credentials,
+  readiness: setup.readiness, localOutput, localCatalogue: await getLocalOutputCatalogue(options.outputRoot),
+  createSocket: (url, apiKey) => new WebSocket(url, { headers: { Authorization: `Bearer ${apiKey}` } }),
+});
 const host = await startBrowserVoiceServer({ ...options,
-  createRuntime: (config) => createConversationRuntime(config, process.env, undefined, { speechOutputFactory: output }),
+  createRuntime: (config, context) => createConversationRuntime(config, process.env, undefined,
+    { speechOutputFactory: output, speechOutputContext: context?.speechOutputContext }),
   setupExecutor: setup.executor, setupReadiness: setup.readiness, providers,
-  speechOutput: {
-    catalogue: () => outputCatalogue,
-    createOutput: (config, context) => {
-      context.recheck();
-      return output.create(config, { beforeRequest: context.recheck, getKey: context.apiKey,
-        signal: context.signal, observe: context.observe });
-    },
-    quiesce: (config) => output.quiesce(config),
-    close: () => output.close(),
-  },
+  speechOutput,
 });
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => { void host.close().catch(() => { process.exitCode = 1; }); });

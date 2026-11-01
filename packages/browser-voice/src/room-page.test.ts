@@ -18,7 +18,9 @@ function element(): Record<string, unknown> {
     textContent: "",
     listeners: new Map<string, (event?: unknown) => void>(),
     addEventListener(type: string, callback: (event?: unknown) => void) { (this.listeners as Map<string, (event?: unknown) => void>).set(type, callback); },
-    append: (child: unknown) => children.push(child),
+    append: (...nodes: unknown[]) => children.push(...nodes),
+    querySelector: (selector: string) => children.find((child: any) => `.${child.className}` === selector),
+    scrollTo() {},
     replaceChildren(...nodes: unknown[]) { children.splice(0, children.length, ...nodes); },
     reportValidity: () => true,
     setAttribute() {},
@@ -40,12 +42,15 @@ async function roomHarness(mode: "hold" | "natural") {
     createElement: element,
   };
   const workletPorts: PagePort[] = [];
+  const contexts: AudioContext[] = [];
+  const audioWaits: { mic?: Promise<unknown>; module?: Promise<void>; resume?: Promise<void> } = {};
   class AudioContext {
     state = "running";
     destination = {};
-    audioWorklet = { async addModule() {} };
-    async resume() {}
-    async close() {}
+    constructor() { contexts.push(this); }
+    audioWorklet = { async addModule() { await audioWaits.module; } };
+    async resume() { await audioWaits.resume; }
+    async close() { this.state = "closed"; }
     createGain() { return { gain: { value: 1 }, connect: (node: unknown) => node }; }
     createMediaStreamSource() { return { connect: (node: unknown) => node }; }
   }
@@ -55,36 +60,63 @@ async function roomHarness(mode: "hold" | "natural") {
     connect(node: unknown) { return node; }
     disconnect() {}
   }
-  const track = { stop() {} };
+  const track = { stopped: false, stop() { this.stopped = true; } };
+  const sockets: Socket[] = [];
+  class Socket {
+    static OPEN = 1;
+    readyState = 0;
+    failStart = false;
+    listeners = new Map<string, (event: any) => void>();
+    constructor() { sockets.push(this); }
+    addEventListener(type: string, callback: (event: any) => void) { this.listeners.set(type, callback); }
+    removeEventListener(type: string, callback: (event: any) => void) { if (this.listeners.get(type) === callback) this.listeners.delete(type); }
+    send(data: string) { if (this.failStart && JSON.parse(data).type === "start") throw new Error("client send failed"); sent.push(data); }
+    close() { this.readyState = 3; this.listeners.get("close")?.({}); }
+    open() { this.readyState = 1; this.listeners.get("open")?.({}); }
+    event(data: any) { this.listeners.get("message")?.({ data: JSON.stringify(data) }); }
+  }
   class HTMLElement { matches() { return false; } closest() { return this; } }
   const source = readFileSync(new URL("../public/app.js", import.meta.url), "utf8")
     .replace(/^import .*;$/gm, "")
     .replace("new SpeakEasyRoom();", "globalThis.Room = SpeakEasyRoom;");
   const context = vm.createContext({
     ...preRoll,
-    document, AudioContext, AudioWorkletNode, HoldReleaseGate, Float32Array, HTMLElement,
+    document, AudioContext, AudioWorkletNode, HoldReleaseGate, Float32Array, ArrayBuffer, HTMLElement, Error, DOMException,
+    Option: function(text: string, value: string) { return { text, value }; },
+    location: { protocol: "http:", host: "fake-host" },
     fetch: async () => ({ ok: false, json: async () => ({ error: "catalogue unavailable in this room test" }) }),
     localStorage: { getItem: () => JSON.stringify({ mode }), setItem() {} },
     requestAnimationFrame() {},
     performance,
     clearTimeout,
-    WebSocket: { OPEN: 1 },
-    navigator: { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [track] }) } },
+    WebSocket: Socket,
+    navigator: { mediaDevices: { getUserMedia: async () => audioWaits.mic ?? ({ getTracks: () => [track] }) } },
     window: { setTimeout, clearTimeout, addEventListener(type: string, callback: (event: any) => void) { listeners.set(type, callback); } },
   });
   vm.runInContext(readFileSync(new URL("../public/capture-constraints.js", import.meta.url), "utf8").replace(/^export /gm, ""), context);
-  vm.runInContext(readFileSync(new URL("../public/speech-output-controls.js", import.meta.url), "utf8").replace(/^export /gm, ""), context);
+  vm.runInContext(readFileSync(new URL("../public/speech-observations.js", import.meta.url), "utf8").replace(/^export /gm, ""), context);
+  vm.runInContext(readFileSync(new URL("../public/speech-output-controls.js", import.meta.url), "utf8").replace(/^import .*;$/gm, "").replace(/^export /gm, ""), context);
   vm.runInContext(source, context);
   const room = new context.Room();
   await room.setupAudio();
+  Object.assign(room.settings, { engine: "mercury-instant", pauseMs: 700, voice: "cedar" });
+  const selection = { schema: 1, provider: { kind: "local" }, model: "piper-kristin-medium", voice: "kristin", speed: 1 };
+  room.output.catalog = { revision: "combined-revision", default: selection };
+  room.output.models = [{ id: selection.model, provider: selection.provider, label: "Kristin", voices: [{ id: "kristin", label: "Kristin" }], speed: { min: 1, max: 1 }, readiness: { state: "ready" } }];
+  room.output.draft = selection;
   room.activeSettings = { ...room.settings };
-  room.socket = { readyState: 1, send: (data: unknown) => sent.push(data) };
+  const socket = new Socket();
+  socket.readyState = 1;
+  room.socket = socket;
+  room.wireSocket(socket);
   room.sessionPhase = "ready";
   const capture = workletPorts[0]!;
   const frame = (value: number, length = 320) =>
     capture.onmessage!({ data: { kind: "frame", samples: new Float32Array(length).fill(value), level: 0.2 } });
   const audio = () => sent.filter((data) => data instanceof ArrayBuffer).map((data) => new Float32Array(data as ArrayBuffer));
-  return { room, frame, sent, audio, elements, listeners, nativeTarget: new HTMLElement() };
+  const commands = () => sent.filter((data) => typeof data === "string").map((data) => JSON.parse(data as string));
+  const acknowledge = (changes = {}, target = socket) => target.event({ ...commands().findLast((command: any) => command.type === "select-output"), type: "output-selected", selectionRevision: 11, ...changes });
+  return { room, frame, sent, audio, elements, listeners, socket, sockets, commands, acknowledge, track, audioWaits, contexts, nativeTarget: new HTMLElement() };
 }
 
 const samplesOf = (buffers: Float32Array[]) => preRoll.concat(buffers);
@@ -145,7 +177,7 @@ test("room Space preserves focused native controls and releases only its keyboar
 });
 
 test("output drafts leave the active room unchanged; saved output is sent only on next Mercury entry", async () => {
-  const { room, sent, elements } = await roomHarness("natural");
+  const { room, sent, elements, acknowledge } = await roomHarness("natural");
   const oldOutput = { schema: 1, provider: { kind: "local" }, model: "piper-kristin-medium", voice: "kristin", speed: 1 };
   const newOutput = { ...oldOutput, model: "kokoro-v1.0", voice: "af_heart" };
   room.settings.speechOutput = oldOutput;
@@ -158,7 +190,10 @@ test("output drafts leave the active room unchanged; saved output is sent only o
   assert.equal(room.activeSettings.speechOutput, oldOutput);
   assert.equal(sent.length, 0, "saving does not send a start or change the running room");
   room.setupAudio = room.connect = async () => {};
-  await room.start();
+  const opening = room.start();
+  await settle();
+  acknowledge();
+  await opening;
   const start = JSON.parse(sent.at(-1) as string);
   assert.equal(start.engine, "mercury-instant");
   assert.equal(start.speechOutput.model, "kokoro-v1.0");
@@ -166,6 +201,304 @@ test("output drafts leave the active room unchanged; saved output is sent only o
   room.settings.engine = "realtime";
   await room.start();
   assert.equal(Object.hasOwn(JSON.parse(sent.at(-1) as string), "speechOutput"), false);
+});
+
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+test("Enter selects the displayed default and waits for its exact acknowledgement before start", async () => {
+  const h = await roomHarness("natural");
+  h.room.settings.speechOutput = { ...h.room.output.draft, model: "old-preference" };
+  const opening = h.room.start();
+  await settle();
+  assert.deepEqual(h.commands().map((command) => command.type), ["select-output"]);
+  assert.equal(h.commands()[0].selection.model, "piper-kristin-medium");
+  h.acknowledge({ requestId: "old-try-request", selectionRevision: 99 });
+  assert.equal(h.commands().length, 1);
+  h.acknowledge();
+  await opening;
+  const start = h.commands()[1];
+  assert.equal(start.type, "start");
+  assert.equal(start.selectionRevision, 11);
+  assert.equal(start.catalogueRevision, "combined-revision");
+  assert.equal(start.speechOutput.model, "piper-kristin-medium");
+  assert.match(h.elements.get("room-transfer")!.textContent as string, /Reply speech is generated on this Mac/);
+  await h.room.end();
+});
+
+for (const phase of ["mic", "module", "resume", "connect", "selection"] as const) test(`Stop while awaiting ${phase} prevents room continuation and releases audio`, async () => {
+  const h = await roomHarness("natural");
+  let release!: (value?: any) => void;
+  const waiting = new Promise<any>((resolve) => { release = resolve; });
+  if (phase === "connect") h.room.connect = () => waiting;
+  else if (phase !== "selection") h.audioWaits[phase] = waiting;
+  const opening = h.room.start();
+  await settle();
+  assert.equal(h.commands().some((command) => command.type === "start"), false);
+  await h.room.end();
+  release({ getTracks: () => [h.track] });
+  h.acknowledge();
+  await opening;
+  assert.equal(h.commands().some((command) => command.type === "start"), false);
+  assert.equal(h.commands().filter((command) => command.type === "select-output").length, phase === "selection" ? 1 : 0);
+  assert.equal(h.track.stopped, true);
+  assert.equal(h.room.micStream, null);
+  assert.ok(h.contexts.every((context) => context.state === "closed"));
+});
+
+test("ending during an actual socket connection prevents select and start when it later opens", async () => {
+  const h = await roomHarness("natural");
+  h.room.socket = null;
+  const opening = h.room.start();
+  await settle();
+  assert.equal(h.sockets.length, 2);
+  await h.room.end();
+  h.sockets[1]!.open();
+  await opening;
+  assert.equal(h.commands().length, 0);
+  assert.equal(h.room.sessionPhase, "stopped");
+});
+
+test("Stop immediately after acknowledgement prevents the queued start continuation", async () => {
+  const h = await roomHarness("natural");
+  const opening = h.room.start();
+  await settle();
+  h.acknowledge();
+  await h.room.end();
+  await opening;
+  assert.deepEqual(h.commands().map((command) => command.type), ["select-output", "stop"]);
+});
+
+test("a newer Enter invalidates the earlier selection and old socket traffic is ignored", async () => {
+  const h = await roomHarness("natural");
+  const first = h.room.start();
+  await settle();
+  const firstSelection = h.commands()[0];
+  const second = h.room.start();
+  await settle();
+  h.socket.event({ ...firstSelection, type: "output-selected", selectionRevision: 99 });
+  assert.equal(h.commands().some((command) => command.type === "start"), false);
+  h.acknowledge();
+  await Promise.all([first, second]);
+  assert.equal(h.commands().filter((command) => command.type === "start").length, 1);
+  const current = h.room.roomAttempt;
+  h.room.socket = null;
+  h.socket.event({ type: "session", phase: "stopped" });
+  assert.equal(h.room.roomAttempt, current, "the replaced socket cannot mutate the current attempt");
+  await h.room.end();
+});
+
+test("a changed display, mismatched acknowledgement or null selection error never starts and sends Stop", async () => {
+  for (const kind of ["config", "revision", "display", "error", "client-send"]) {
+    const h = await roomHarness("natural");
+    const opening = h.room.start();
+    await settle();
+    if (kind === "display") h.room.output.draft = { ...h.room.output.draft, voice: "removed" };
+    if (kind === "client-send") h.socket.failStart = true;
+    if (kind === "error") h.socket.event({ type: "output-selection-error", requestId: null, message: "Selection unavailable" });
+    else h.acknowledge(kind === "config" ? { selection: { ...h.room.output.draft, speed: 9 } } : kind === "revision" ? { catalogueRevision: "stale" } : {});
+    await opening;
+    assert.equal(h.commands().some((command) => command.type === "start"), false, kind);
+    assert.equal(h.commands().at(-1).type, "stop", kind);
+    assert.equal(h.room.sessionPhase, "stopped");
+  }
+});
+
+test("stopped and close invalidate pending room attempts; late old socket events cannot start the next attempt", async () => {
+  const h = await roomHarness("natural");
+  const first = h.room.start();
+  await settle();
+  const oldSelection = h.commands()[0];
+  h.socket.event({ type: "session", phase: "stopped" });
+  await first;
+  const second = h.room.start();
+  await settle();
+  h.socket.event({ ...oldSelection, type: "output-selected", selectionRevision: 22 });
+  assert.equal(h.commands().some((command) => command.type === "start"), false);
+  h.socket.close();
+  await second;
+  assert.equal(h.room.sessionPhase, "stopped");
+});
+
+test("unavailable restored output remains unavailable and Realtime starts with its separate voice", async () => {
+  const h = await roomHarness("natural");
+  h.room.output.draft = { ...h.room.output.draft, voice: "unavailable" };
+  await h.room.start();
+  assert.equal(h.commands().some((command) => command.type === "select-output" || command.type === "start"), false);
+  assert.equal(h.room.output.draft.voice, "unavailable");
+  h.sent.length = 0;
+  h.room.settings.engine = "realtime";
+  h.room.settings.voice = "independent-realtime-voice";
+  await h.room.start();
+  assert.equal(h.commands().length, 1);
+  const command = h.commands()[0];
+  assert.equal(command.voice, "independent-realtime-voice");
+  for (const field of ["speechOutput", "catalogueRevision", "selectionRevision"]) assert.equal(Object.hasOwn(command, field), false);
+  await h.room.end();
+});
+
+type CoupledRuntimeFactory = (
+  config: import("./session.ts").BrowserRuntimeConfig,
+  context: import("./session.ts").BrowserRuntimeContext | undefined,
+  assembly: ReturnType<typeof import("./provider-runtime.ts").createProviderRuntime>,
+) => Promise<import("@speakeasy/convo-engine").ConversationRuntime>;
+
+async function coupledRoom(kind: string, createRuntime?: CoupledRuntimeFactory, fetch?: typeof globalThis.fetch) {
+  const { EventEmitter } = await import("node:events");
+  const { createProviderRuntime } = await import("./provider-runtime.ts");
+  const { createProviderCredentials } = await import("./provider-availability.ts");
+  const { BrowserConversationSession } = await import("./session.ts");
+  const { AudioWorkLease } = await import("./audio-lease.ts");
+  const { DEFAULT_LOCAL_OUTPUT, LOCAL_OUTPUT_MODELS } = await import("../../speech-io/src/tts/catalogue.ts");
+  type HostSocket = import("ws").WebSocket;
+  type RuntimeContext = import("./session.ts").BrowserRuntimeContext;
+  const h = await roomHarness("natural");
+  let transports = 0;
+  const environment: Record<string, string | undefined> = { CARTESIA_API_KEY: "fake-cartesia", OPENAI_API_KEY: "fake-openai" };
+  const assembly = createProviderRuntime({
+    credentials: createProviderCredentials(() => environment),
+    readiness: () => [],
+    localOutput: { create() { throw new Error("Unexpected local synthesis"); }, async quiesce() {}, async close() {} },
+    localCatalogue: { default: DEFAULT_LOCAL_OUTPUT, models: LOCAL_OUTPUT_MODELS.map((model) => ({ ...model, readiness: { state: "ready", reason: null } })) },
+    createSocket() { transports++; throw new Error("Unexpected provider socket"); },
+    fetch: async (...args) => { transports++; if (fetch) return fetch(...args); throw new Error("Unexpected provider request"); },
+  });
+  const outputCatalogue = () => ({ ...assembly.speechOutput.catalogue(), revision: assembly.providers.catalogue().revision });
+  const catalog = outputCatalogue();
+  const selection = catalog.output.find((entry) => entry.config.provider.kind === kind)!.config;
+  h.room.output.catalog = catalog;
+  h.room.output.models = catalog.models;
+  h.room.output.draft = selection;
+  const captured: { config?: unknown; context?: RuntimeContext } = {};
+  const events: any[] = [];
+  class ServerSocket extends EventEmitter {
+    readyState = 1;
+    send(data: string | Uint8Array) {
+      if (typeof data === "string") { const event = JSON.parse(data); events.push(event); h.socket.event(event); }
+      else h.socket.listeners.get("message")?.({ data: data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) });
+    }
+  }
+  const serverSocket = new ServerSocket();
+  const lease = new AudioWorkLease();
+  const session = new BrowserConversationSession({
+    socket: serverSocket as unknown as HostSocket, sessionId: "protected-room", runtimeConfig: {},
+    acquire: () => lease.tryAcquire("room"),
+    outputRegistry: () => assembly.providers.registries().output,
+    outputCatalogue, policy: assembly.providers.policy,
+    createRuntime: async (config, context) => {
+      captured.config = config.speechOutput;
+      captured.context = context;
+      if (createRuntime) return createRuntime(config, context, assembly);
+      context!.speechOutputContext!.beforeRequest!();
+      return new Promise<never>((_resolve, reject) => {
+        context!.speechOutputContext!.signal!.addEventListener("abort", () => reject(new Error("Fake runtime opening cancelled")), { once: true });
+      });
+    },
+  });
+  const send = h.socket.send.bind(h.socket);
+  h.socket.send = (raw: string) => { send(raw); serverSocket.emit("message", Buffer.from(raw), false); };
+  return { ...h, assembly, catalog, selection, captured, events, lease, environment, session, get transports() { return transports; } };
+}
+
+test("coupled room producer accepts both actual hosted catalogue selections and retires their trusted contexts on Stop", async () => {
+  for (const kind of ["cartesia", "openai"]) {
+    const h = await coupledRoom(kind);
+    try {
+      await h.room.start();
+      await settle();
+      assert.deepEqual(h.commands().map((command) => command.type), ["select-output", "start"]);
+      assert.deepEqual(h.captured.config, h.selection);
+      assert.equal(h.commands()[1].catalogueRevision, h.catalog.revision);
+      assert.equal(h.captured.context!.speechOutputContext!.signal!.aborted, false);
+      assert.equal(h.transports, 0, "metadata, selection and a fake opening runtime issue no speech request");
+      await h.room.end();
+      assert.equal(h.captured.context!.speechOutputContext!.signal!.aborted, true);
+      assert.throws(() => h.captured.context!.speechOutputContext!.beforeRequest!());
+    } finally {
+      await h.session.close();
+      await h.assembly.output.close();
+    }
+  }
+});
+
+for (const kind of ["cartesia", "openai"]) test(`guard failure during ${kind} room opening stops the browser and retires admission`, async () => {
+  let h: Awaited<ReturnType<typeof coupledRoom>>;
+  h = await coupledRoom(kind, async (_config, context) => {
+    h.environment[kind === "cartesia" ? "CARTESIA_API_KEY" : "OPENAI_API_KEY"] = undefined;
+    context!.speechOutputContext!.beforeRequest!();
+    throw new Error("Revoked opening unexpectedly continued");
+  });
+  try {
+    await h.room.start();
+    await settle();
+    assert.equal(h.captured.context!.speechOutputContext!.signal!.aborted, true);
+    assert.equal(h.room.sessionPhase, "stopped");
+    assert.equal(h.room.micStream, null);
+    assert.equal(h.lease.active, undefined);
+    assert.equal(h.transports, 0);
+    assert.equal(h.events.some((event) => event.phase === "ready"), false);
+  } finally { await h.session.close(); await h.assembly.output.close(); }
+});
+
+for (const failedRetirement of [false, true]) test(`guard failure between actual room sentences ${failedRetirement ? "blocks reuse after failed retirement" : "retires the loop before releasing admission"}`, async (t) => {
+  const { EventEmitter } = await import("node:events");
+  const { createConversationRuntime } = await import("@speakeasy/convo-engine");
+  const { MercuryChatModel } = await import("../../llm/src/mercury.ts");
+  t.mock.method(MercuryChatModel.prototype, "stream", async function* () { yield "First sentence. Second sentence."; });
+  let release!: () => void;
+  const retirement = new Promise<void>((resolve) => { release = resolve; });
+  let retiring = false;
+  let ended = 0;
+  class Recognizer extends EventEmitter {
+    pushAudio() {} reset() {}
+    flush() { this.emit("endpoint", {}); this.emit("final", { text: "Current live turn" }); }
+    async end() { ended++; }
+  }
+  let h: Awaited<ReturnType<typeof coupledRoom>>;
+  h = await coupledRoom("cartesia", async (config, context, assembly) => {
+    const runtime = await createConversationRuntime(config, { INCEPTIONLABS_API_KEY: "fake-chat" },
+      { open: async () => new Recognizer() }, { speechOutputFactory: assembly.output, speechOutputContext: context!.speechOutputContext });
+    return { ...runtime, quiesce: async () => {
+      retiring = true;
+      await retirement;
+      if (failedRetirement) throw new Error("Fake runtime retirement failed");
+      await runtime.quiesce!();
+    } };
+  }, async () => {
+    h.environment.CARTESIA_API_KEY = undefined;
+    return new Response(Float32Array.of(0.25).buffer);
+  });
+  try {
+    await h.room.start();
+    await settle();
+    assert.equal(h.room.sessionPhase, "ready");
+    h.room.send({ type: "commit-input" });
+    await settle();
+    assert.equal(h.transports, 1);
+    assert.equal(h.captured.context!.speechOutputContext!.signal!.aborted, true);
+    assert.ok(h.events.some((event) => event.type === "playback" && event.action === "clear"));
+    assert.equal(retiring, true, "failed policy must retire the active room loop");
+    assert.equal(ended, 1);
+    assert.equal(h.lease.active, "room");
+    assert.equal(h.events.some((event) => event.phase === "stopped"), false);
+    release();
+    await settle();
+    if (failedRetirement) {
+      assert.equal(h.lease.active, "room");
+      assert.equal(h.events.some((event) => event.phase === "stopped"), false);
+      h.room.send({ type: "select-output", requestId: "blocked", catalogueRevision: h.catalog.revision, selection: h.catalog.default });
+      assert.equal(h.events.at(-1).code, "BUSY");
+      await assert.rejects(h.session.close());
+    } else {
+      assert.equal(h.room.sessionPhase, "stopped");
+      assert.equal(h.room.micStream, null);
+      assert.equal(h.lease.active, undefined);
+    }
+    assert.throws(() => h.captured.context!.speechOutputContext!.getKey!());
+  } finally {
+    release();
+    await h.session.close().catch((error) => { if (!failedRetirement) throw error; });
+    await h.assembly.output.close();
+  }
 });
 
 test("closing Room setup stops its independent tryout", async () => {

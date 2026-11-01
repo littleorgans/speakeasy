@@ -126,3 +126,40 @@ test("PCM decoder owns offset Buffer views and preserves finite out of range val
   buffer.fill(0);
   assert.equal(result[1], 1.25);
 });
+
+test("room selection reuses strict output parsing and excludes trial commands", () => {
+  const command = { type: "select-output", requestId: "room_1", catalogueRevision: "revision",
+    selection: DEFAULT_LOCAL_OUTPUT };
+  const parse = (value: unknown) => parseClientCommand(JSON.stringify(value), LOCAL_OUTPUT_REGISTRY);
+  assert.deepEqual(parse(command), command);
+  for (const value of [
+    { ...command, source: { kind: "typed-text" } },
+    { ...command, requestId: "bad id" },
+    { ...command, requestId: "x".repeat(97) },
+    { ...command, catalogueRevision: "x".repeat(129) },
+    { ...command, selection: { ...DEFAULT_LOCAL_OUTPUT, voice: "missing" } },
+    { ...command, type: "speak-sample", text: "hello" },
+    { type: "cancel-sample", requestId: "trial" },
+  ]) assert.throws(() => parse(value));
+});
+
+test("room start binds paired bounded revisions and rejects client authority", () => {
+  const command = { type: "start", engine: "mercury-low", mode: "hold", pauseMs: 700,
+    voice: "cedar", speechOutput: DEFAULT_LOCAL_OUTPUT, catalogueRevision: "current", selectionRevision: 3 };
+  const parse = (value: unknown) => parseClientCommand(JSON.stringify(value), LOCAL_OUTPUT_REGISTRY);
+  const parsed = parse(command);
+  assert.ok(parsed.type === "start");
+  assert.equal(parsed.catalogueRevision, "current");
+  assert.equal(parsed.selectionRevision, 3);
+  for (const fields of [
+    { catalogueRevision: undefined }, { selectionRevision: undefined },
+    { catalogueRevision: " " }, { catalogueRevision: "x".repeat(129) },
+    { selectionRevision: 0 }, { selectionRevision: 1.1 }, { selectionRevision: Number.MAX_SAFE_INTEGER + 1 },
+    { sessionId: "client" }, { source: { kind: "live-response-text" } },
+    { grantId: "client" }, { approval: true },
+  ]) assert.throws(() => parse({ ...command, ...fields }));
+  const hosted = { ...DEFAULT_LOCAL_OUTPUT, provider: { kind: "cartesia" }, model: "sonic-test", voice: "katie" };
+  assert.throws(() => parseClientCommand(JSON.stringify({ ...command, speechOutput: hosted,
+    catalogueRevision: undefined, selectionRevision: undefined }),
+  [{ kind: "cartesia", model: hosted.model, voices: ["katie"], speed: { min: 0.6, max: 1.5 } }]));
+});
