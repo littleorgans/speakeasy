@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { test } from "node:test";
-import type { ConversationRuntime, RuntimeConfig } from "@speakeasy/convo-engine";
+import { createConversationRuntime, type ConversationRuntime, type RuntimeConfig } from "@speakeasy/convo-engine";
+import { MercuryChatModel } from "../../llm/src/mercury.ts";
+import { LocalSpeechOutputFactory, SpeechOutputFactory } from "@speakeasy/speech-io";
 import { WebSocket } from "ws";
 import { startBrowserVoiceServer } from "./host.ts";
 import { runtimeConfigFor, safeMessage } from "./session.ts";
@@ -382,6 +384,86 @@ test("room stop waits for its runtime quiescence before admitting tryout", async
     speak("after-retirement");
     await waitFor(() => output.opens === 1);
   } finally { finish(); room.close(); trial.close(); await host.close(); }
+});
+
+test("room Stop clears buffered browser audio before shared factory native retirement finishes", async (t) => {
+  const output = fakeOutput();
+  let finish!: () => void;
+  const retirement = new Promise<void>((resolve) => { finish = resolve; });
+  let loads = 0;
+  let synths = 0;
+  const factory = new SpeechOutputFactory({ local: new LocalSpeechOutputFactory({ createSynth: async () => {
+    loads++;
+    return { numSpeakers: 1, sampleRate: 22_050, synth: async () => {
+      if (++synths === 2) await retirement;
+      return { samples: Float32Array.of(0.25), sampleRate: 22_050, firstAudioMs: undefined,
+        totalSynthMs: 1, audioDurationMs: 1 / 22.05, rtf: 1 };
+    } };
+  } }) });
+  t.mock.method(MercuryChatModel.prototype, "stream", async function* () { yield "One. Two."; });
+  const host = await startBrowserVoiceServer({ port: 0, providers: output.providers,
+    speechOutput: { catalogue: () => output.catalogue,
+      createOutput: (selection, context) => factory.create(selection, { beforeRequest: context.recheck, signal: context.signal }),
+      quiesce: (selection) => factory.quiesce(selection), close: () => factory.close() },
+    createRuntime: (config) => createConversationRuntime(config, { INCEPTIONLABS_API_KEY: "fake-only" }, fakeRuntime().stt,
+      { speechOutputFactory: factory }) });
+  const room = new WebSocket(host.url.replace("http", "ws") + "/voice");
+  const trial = new WebSocket(host.url.replace("http", "ws") + "/speech-output");
+  const observed = observe(room);
+  const trialEvents = observe(trial);
+  let packets = 0;
+  room.on("message", (_data, binary) => { if (binary) packets++; });
+  const speak = (requestId: string) => trial.send(JSON.stringify({ type: "speak-sample", requestId,
+    catalogueRevision: output.providers.catalogue().revision, selection: { ...DEFAULT_LOCAL_OUTPUT, voice: 0 }, text: "Trial." }));
+  try {
+    await Promise.all([onceOpen(room), onceOpen(trial)]);
+    room.send(JSON.stringify({ type: "start", engine: "mercury-instant", mode: "hold", pauseMs: 700,
+      voice: "cedar", barge: false, speechOutput: DEFAULT_LOCAL_OUTPUT }));
+    await waitFor(() => observed.some((event) => event.phase === "ready"));
+    room.send(new Float32Array(320).fill(0.2));
+    room.send(JSON.stringify({ type: "commit-input" }));
+    await waitFor(() => packets === 1 && synths === 2);
+    const playback = observed.find((event) => event.type === "playback" && event.action === "start")!;
+    room.send(JSON.stringify({ type: "stop" }));
+    await waitFor(() => observed.some((event) => event.type === "playback" && event.action === "clear" &&
+      event.playbackId === playback.playbackId));
+    assert.ok(!observed.some((event) => event.phase === "stopped"));
+    speak("busy");
+    await waitFor(() => trialEvents.some((event) => event.requestId === "busy" && event.code === "BUSY"));
+    finish();
+    await waitFor(() => observed.some((event) => event.phase === "stopped"));
+    assert.equal(packets, 1, "cancelled native lookahead must not reach the room");
+    speak("after-room");
+    await waitFor(() => trialEvents.some((event) => event.requestId === "after-room" && event.outcome === "produced"));
+    assert.equal(loads, 1, "room and independent trial must reuse the same actual graph");
+    assert.equal(synths, 3);
+  } finally { finish(); room.close(); trial.close(); await host.close(); }
+});
+
+test("retired room recognizers cannot publish into a restarted room", async () => {
+  const recognizers: FakeSttSession[] = [];
+  const host = await startBrowserVoiceServer({ port: 0, createRuntime: async () => {
+    const recognizer = new FakeSttSession();
+    recognizers.push(recognizer);
+    return { ...fakeRuntime(), stt: { open: async () => recognizer } };
+  } });
+  const room = new WebSocket(host.url.replace("http", "ws") + "/voice");
+  const observed = observe(room);
+  try {
+    await onceOpen(room);
+    roomStart(room);
+    await waitFor(() => observed.some((event) => event.phase === "ready"));
+    room.send(JSON.stringify({ type: "stop" }));
+    await waitFor(() => observed.some((event) => event.phase === "stopped"));
+    roomStart(room);
+    await waitFor(() => observed.filter((event) => event.phase === "ready").length === 2);
+    recognizers[0]!.emit("final", { text: "stale old transcript" });
+    recognizers[0]!.emit("error", { err: new Error("stale old error") });
+    recognizers[1]!.emit("partial", { text: "current transcript" });
+    await waitFor(() => observed.some((event) => event.text === "current transcript"));
+    assert.ok(!observed.some((event) => event.text === "stale old transcript" || event.message?.includes("stale old error")),
+      "events from the retired loop must be invalidated");
+  } finally { room.close(); await host.close(); }
 });
 
 function fakeRuntime(

@@ -70,6 +70,7 @@ export class BrowserConversationSession {
 
   async #stop(): Promise<void> {
     this.#starting = false;
+    void this.#activeSink?.interrupt();
     this.#activeSink?.close();
     await this.#startTask;
     await this.#loop?.stop();
@@ -177,7 +178,9 @@ export class BrowserConversationSession {
                 ? { mode: "manual" }
                 : { mode: "eager", minTrailingSilenceMs: command.pauseMs },
           },
-          onEvent: (event) => this.#send(event),
+          onEvent: (event) => {
+            if (this.#loop === loop && !this.#stopTask && !this.#closed) this.#send(event);
+          },
         },
       );
       this.#loop = loop;
