@@ -116,7 +116,7 @@ export class CartesiaTextToSpeech implements TextToSpeech {
     }
     const voiceId = resolveCartesiaVoice(config.voice ?? DEFAULT_CARTESIA_VOICE);
     return new CartesiaSession(new CartesiaSynth(this.#options, model, voiceId), speed,
-      this.#options.signal);
+      this.#options.signal, this.#options.now);
   }
 }
 
@@ -125,10 +125,13 @@ class CartesiaSession implements TTSSession {
   readonly #speed: number;
   readonly #controller = new AbortController();
   readonly #signal: AbortSignal;
+  readonly #now: () => number;
 
-  constructor(synth: CartesiaSynth, speed: number, signal?: AbortSignal) {
+  constructor(synth: CartesiaSynth, speed: number, signal?: AbortSignal,
+    now: () => number = () => performance.now()) {
     this.#synth = synth;
     this.#speed = speed;
+    this.#now = now;
     this.#signal = signal
       ? AbortSignal.any([this.#controller.signal, signal]) : this.#controller.signal;
   }
@@ -159,7 +162,7 @@ class CartesiaSession implements TTSSession {
         return pending;
       },
     };
-    const pipeline = synthPipeline(segments, synth, this.#speed);
+    const pipeline = synthPipeline(segments, synth, this.#speed, this.#now);
     signal.addEventListener("abort", () => {
       // Neither a stalled token source nor a transport can delay close().
       void pipeline.return(undefined).catch(() => {});

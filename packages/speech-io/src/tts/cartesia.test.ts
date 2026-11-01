@@ -268,6 +268,7 @@ test("request wall includes complete body receipt and excludes policy and callba
   }).open({ model: "sonic-3.6-2026-08-27", voice: "DANIEL" });
   const [segment] = await collect(session.speak("Hello."));
   assert.equal(segment?.synthMs, 75);
+  assert.equal(segment?.readyAtMs, 375);
   assert.deepEqual(completed, [{
     model: "sonic-3.6-2026-08-27", voice: CARTESIA_VOICES.daniel, text: "Hello.",
     timing: {

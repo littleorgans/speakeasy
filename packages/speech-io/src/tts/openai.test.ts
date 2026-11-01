@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { setImmediate, setTimeout } from "node:timers/promises";
 import { test } from "node:test";
+import { ProviderError } from "@speakeasy/speech-io/providers";
 import {
   DEFAULT_OPENAI_MODEL, DEFAULT_OPENAI_OUTPUT_CONFIG, OPENAI_SAMPLE_RATE,
   OpenAITextToSpeech, type OpenAIAudioSegment, type OpenAILimits,
@@ -216,7 +217,7 @@ test("terminal completion is required even after audio.done", async () => {
     const h = harness();
     const session = await h.open();
     const result = collect(session.speak("Hello."));
-    const rejection = assert.rejects(result, /OpenAI speech request failed/);
+    const rejection = assert.rejects(result, /Speech provider request failed/);
     await setImmediate();
     h.socket.begin();
     h.socket.audio();
@@ -251,7 +252,7 @@ test("malformed audio, identity, transcript and event limits fail closed", async
     const h = harness({ limits: entry.limits });
     const session = await h.open();
     const result = collect(session.speak("Hello."));
-    const rejection = assert.rejects(result, /OpenAI speech request failed/);
+    const rejection = assert.rejects(result, /Speech provider request failed/);
     await setImmediate();
     h.socket.begin();
     entry.emit(h.socket);
@@ -267,36 +268,39 @@ test("close and abort reject pending audio and block all later dispatch", async 
     const controller = new AbortController();
     const session = await h.open({}, controller.signal);
     const result = collect(session.speak("Hello. Next. Last."));
-    const rejection = assert.rejects(result, /OpenAI speech request failed/);
+    const rejection = assert.rejects(result, /Speech provider request failed/);
     await setImmediate();
     h.socket.begin();
     h.socket.audio();
     if (abort) controller.abort(); else await session.close();
     h.socket.done();
     await rejection;
-    await assert.rejects(collect(session.speak("Again.")), /OpenAI speech request failed/);
+    await assert.rejects(collect(session.speak("Again.")), /Speech provider request failed/);
     assert.equal(h.socket.sent.filter((event) => event.type === "response.create").length, 1);
     assert.deepEqual(h.socket.sent.at(-1), { type: "response.cancel", response_id: "response-1" });
     assert.equal(h.socket.closes, 1);
   }
 });
 
-test("early iterator return cancels speculative synthesis and prevents the third sentence", async (t) => {
-  const h = harness();
-  const session = await h.open();
-  t.after(() => session.close());
-  let requests = 0;
-  h.socket.onSend = (event) => {
-    if (event.type === "response.create" && ++requests === 1) h.socket.respond();
-  };
-  const stream = session.speak("Hello. Next. Last.");
-  assert.equal((await stream.next()).value!.sentence, "Hello.");
-  await setImmediate();
-  assert.equal(requests, 2);
-  await stream.return();
-  assert.equal(h.socket.closes, 1);
-  assert.equal(requests, 2);
-  await session.close();
+test("consumer demand gates remote sentences before iterator return or close", async (t) => {
+  for (const stop of ["return", "close"] as const) {
+    const h = harness();
+    const session = await h.open();
+    t.after(() => session.close());
+    let requests = 0;
+    h.socket.onSend = (event) => {
+      if (event.type === "response.create" && ++requests === 1) h.socket.respond();
+    };
+    const stream = session.speak("Hello. Next. Last.");
+    assert.equal((await stream.next()).value!.sentence, "Hello.");
+    await setImmediate();
+    assert.equal(requests, 1);
+    if (stop === "return") await stream.return(); else await session.close();
+    await setImmediate();
+    assert.equal(h.socket.closes, 1);
+    assert.equal(requests, 1);
+    await session.close();
+  }
 });
 
 test("closing while the text producer is stalled rejects the pull and suppresses late text", async () => {
@@ -316,7 +320,7 @@ test("closing while the text producer is stalled rejects the pull and suppresses
   const completed = await Promise.race([settled, setTimeout(25, false)]);
   // Release the fake producer even if this regression assertion fails.
   release({ done: false, value: "Late sentence." });
-  await assert.rejects(pending, /OpenAI speech request failed/);
+  await assert.rejects(pending, /Speech provider request failed/);
   assert.equal(completed, true);
   assert.equal(h.socket.sent.some((event) => event.type === "response.create"), false);
 });
@@ -326,7 +330,7 @@ test("iterator return during a pending response cancels without waiting for prov
   const session = await h.open();
   const stream = session.speak("Hello. Next.");
   const pending = stream.next();
-  const rejection = assert.rejects(pending, /OpenAI speech request failed/);
+  const rejection = assert.rejects(pending, /Speech provider request failed/);
   await setImmediate();
   h.socket.begin();
   assert.equal((await stream.return()).done, true);
@@ -335,14 +339,14 @@ test("iterator return during a pending response cancels without waiting for prov
   assert.equal(h.socket.sent.filter((event) => event.type === "response.create").length, 1);
 });
 
-test("selection is checked again before speculative sentences; raw policy errors stay private", async () => {
+test("selection is checked again before subsequent sentences; raw policy errors stay private", async () => {
   let allowed = true;
   let checks = 0;
   const h = harness({ beforeRequest: () => { checks++; if (!allowed) throw new Error(FAKE_KEY); } });
   const session = await h.open();
   const result = collect(session.speak("Hello. Next."));
   const rejection = assert.rejects(result, (error: Error) => {
-    assert.equal(error.message, "OpenAI speech request failed");
+    assert.equal(error.message, "Speech provider request failed.");
     assert.doesNotMatch(error.stack!, /fake-openai-test-key/);
     return true;
   });
@@ -366,7 +370,7 @@ test("async authorization is awaited and closing it prevents later dispatch", as
   } });
   const session = await h.open();
   const pending = collect(session.speak("Hello."));
-  const rejection = assert.rejects(pending, /OpenAI speech request failed/);
+  const rejection = assert.rejects(pending, /Speech provider request failed/);
   await setImmediate();
   assert.equal(checks, 2);
   assert.equal(h.socket.sent.some((event) => event.type === "response.create"), false);
@@ -383,7 +387,7 @@ test("transport and provider failures expose only safe static errors", async () 
     if (mode === "send") h.socket.onSend = () => { throw new Error(FAKE_KEY); };
     const result = collect(session.speak("Hello."));
     const rejection = assert.rejects(result, (error: Error) => {
-      assert.equal(error.message, "OpenAI speech request failed");
+      assert.equal(error.message, "Speech provider request failed.");
       assert.equal(error.cause, undefined);
       assert.doesNotMatch(error.stack!, /fake-openai-test-key/);
       return true;
@@ -399,12 +403,12 @@ test("transport and provider failures expose only safe static errors", async () 
 
 test("session and response waits time out without retry", async () => {
   const h = harness({ limits: { sessionTimeoutMs: 10 } });
-  await assert.rejects(h.tts.open(), /OpenAI speech request failed/);
+  await assert.rejects(h.tts.open(), /Speech provider request failed/);
   assert.equal(h.connections(), 1);
   assert.equal(h.socket.closes, 1);
   const r = harness({ limits: { responseTimeoutMs: 10 } });
   const session = await r.open();
-  await assert.rejects(collect(session.speak("Hello.")), /OpenAI speech request failed/);
+  await assert.rejects(collect(session.speak("Hello.")), /Speech provider request failed/);
   assert.equal(r.socket.sent.filter((event) => event.type === "response.create").length, 1);
   await session.close();
 });
@@ -412,11 +416,11 @@ test("session and response waits time out without retry", async () => {
 test("configuration and accepted format are validated before yielding", async () => {
   const h = harness();
   for (const config of [{ model: "tts-1" }, { voice: 1 }, { voice: "unknown" }, { speed: NaN }, { speed: 0.2 }, { speed: 1.6 }]) {
-    await assert.rejects(h.tts.open(config), /configuration is unsupported/);
+    await assert.rejects(h.tts.open(config), /Speech configuration is unsupported/);
   }
   assert.equal(h.connections(), 0);
   const opening = h.tts.open();
-  const rejection = assert.rejects(opening, /OpenAI speech request failed/);
+  const rejection = assert.rejects(opening, /Speech provider request failed/);
   h.socket.created();
   h.socket.updated({ audio: { output: { format: { type: "audio/pcm", rate: 16000 }, voice: "marin", speed: 1 } } });
   await rejection;
@@ -424,9 +428,12 @@ test("configuration and accepted format are validated before yielding", async ()
 });
 
 test("missing, failing or preaborted credential paths never create a socket", async () => {
-  for (const getter of [() => undefined, () => { throw new Error(FAKE_KEY); }]) {
+  for (const [getter, code] of [
+    [() => undefined, "PROVIDER_UNAVAILABLE"],
+    [() => { throw new Error(FAKE_KEY); }, "PROVIDER_FAILED"],
+  ] as const) {
     const h = harness({ apiKey: getter });
-    await assert.rejects(h.tts.open(), /OpenAI speech request failed/);
+    await assert.rejects(h.tts.open(), { code });
     assert.equal(h.connections(), 0);
   }
   const h = harness();
@@ -434,5 +441,41 @@ test("missing, failing or preaborted credential paths never create a socket", as
   controller.abort();
   await assert.rejects(h.tts.open({}, { signal: controller.signal }), /aborted/);
   assert.equal(h.keys(), 0);
+  assert.equal(h.connections(), 0);
+});
+
+test("trusted policy codes survive before connection and before each demanded sentence", async (t) => {
+  for (const asynchronous of [false, true]) {
+    let allowed = false;
+    let checks = 0;
+    const policy = () => {
+      checks++;
+      if (!allowed) throw new ProviderError("SELECTION_STALE");
+    };
+    const h = harness({ beforeRequest: asynchronous ? async () => policy() : policy });
+    // Exercise the abortable open path as well as the sentence wait path.
+    const controller = new AbortController();
+    await assert.rejects(h.tts.open({}, { signal: controller.signal }), { code: "SELECTION_STALE" });
+    assert.equal(h.keys(), 0);
+    assert.equal(h.connections(), 0);
+    allowed = true;
+    const session = await h.open();
+    t.after(() => session.close());
+    h.socket.onSend = (event) => { if (event.type === "response.create") h.socket.respond(); };
+    const stream = session.speak("First. Second.");
+    assert.equal((await stream.next()).value!.sentence, "First.");
+    await setImmediate();
+    assert.equal(checks, 3);
+    allowed = false;
+    await assert.rejects(stream.next(), { code: "SELECTION_STALE" });
+    assert.equal(checks, 4);
+    assert.equal(h.socket.sent.filter((event) => event.type === "response.create").length, 1);
+  }
+});
+
+test("unsupported configuration and absent credentials use shared safe codes", async () => {
+  const h = harness({ apiKey: () => undefined });
+  await assert.rejects(h.tts.open({ voice: "unknown" }), { code: "CONFIG_UNSUPPORTED" });
+  await assert.rejects(h.tts.open(), { code: "PROVIDER_UNAVAILABLE" });
   assert.equal(h.connections(), 0);
 });

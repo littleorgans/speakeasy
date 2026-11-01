@@ -1,4 +1,6 @@
-import type { SpeechOutputConfig, TimingObservation } from "@speakeasy/speech-io/providers";
+import {
+  ProviderError, safeProviderError, type SpeechOutputConfig, type TimingObservation,
+} from "@speakeasy/speech-io/providers";
 import { decodePcm16 } from "../pcm.ts";
 import type { AudioSegment, TextToSpeech, TTSConfig, TTSSession } from "./contract.ts";
 import {
@@ -84,8 +86,8 @@ function measured(ms: number, boundary: string): TimingObservation {
   if (!Number.isFinite(ms) || ms < 0) throw new Error();
   return { status: "measured", ms, clock: "server", boundary };
 }
-function unsupported(): Error { return new Error("OpenAI speech configuration is unsupported"); }
-function failed(): Error { return new Error("OpenAI speech request failed"); }
+function unsupported(): ProviderError { return new ProviderError("CONFIG_UNSUPPORTED"); }
+function failed(): ProviderError { return new ProviderError("PROVIDER_FAILED"); }
 
 function abortable<T>(pending: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (!signal) return pending;
@@ -95,9 +97,9 @@ function abortable<T>(pending: Promise<T>, signal?: AbortSignal): Promise<T> {
     void pending.then((value) => {
       signal.removeEventListener("abort", abort);
       resolve(value);
-    }, () => {
+    }, (error) => {
       signal.removeEventListener("abort", abort);
-      reject(failed());
+      reject(safeProviderError(error));
     });
     if (signal.aborted) {
       signal.removeEventListener("abort", abort);
@@ -138,7 +140,7 @@ export class OpenAITextToSpeech implements TextToSpeech {
       }
       if (options.signal?.aborted) throw failed();
       const key = (this.#options.apiKey ?? (() => process.env.OPENAI_API_KEY))();
-      if (!key) throw failed();
+      if (!key) throw new ProviderError("PROVIDER_UNAVAILABLE");
       const now = this.#options.now ?? (() => performance.now());
       const start = now();
       const socket = this.#options.createSocket(
@@ -148,9 +150,9 @@ export class OpenAITextToSpeech implements TextToSpeech {
       await synth.ready;
       synth.checkOpen();
       return new OpenAITTSSession(synth, this.#options.beforeRequest, applied.speed, now);
-    } catch {
+    } catch (error) {
       synth?.close();
-      throw failed();
+      throw safeProviderError(error);
     }
   }
 }
@@ -171,10 +173,24 @@ export class OpenAITTSSession implements TTSSession {
   }
 
   speak(text: AsyncIterable<string> | string): OpenAISpeechStream {
-    const stream = this.#speak(text);
+    let demand = 0;
+    let resume: (() => void) | undefined;
+    const stream = this.#speak(text, async () => {
+      // Hold shared pipeline prefetch until the consumer requests more audio.
+      if (demand === 0) {
+        await this.#synth.wait(new Promise<void>((resolve) => { resume = resolve; }));
+      }
+      this.#synth.checkOpen();
+      demand--;
+    });
     return {
       [Symbol.asyncIterator]() { return this; },
-      next: () => stream.next(),
+      next: () => {
+        demand++;
+        resume?.();
+        resume = undefined;
+        return stream.next();
+      },
       return: () => {
         this.#synth.close();
         return stream.return(undefined);
@@ -186,7 +202,9 @@ export class OpenAITTSSession implements TTSSession {
     };
   }
 
-  async *#speak(text: AsyncIterable<string> | string): AsyncGenerator<OpenAIAudioSegment> {
+  async *#speak(
+    text: AsyncIterable<string> | string, takeDemand: () => Promise<void>,
+  ): AsyncGenerator<OpenAIAudioSegment> {
     if (this.#speaking) throw new Error("OpenAI speech session is busy");
     this.#synth.checkOpen();
     this.#speaking = true;
@@ -196,6 +214,7 @@ export class OpenAITTSSession implements TTSSession {
     const guarded: SegmentSynth = {
       synth: async (request) => {
         try {
+          await takeDemand();
           this.#synth.checkOpen();
           if (this.#beforeRequest) await this.#synth.wait(Promise.resolve(this.#beforeRequest()));
           this.#synth.checkOpen();
@@ -203,9 +222,9 @@ export class OpenAITTSSession implements TTSSession {
           const result = await this.#synth.synth(request);
           observations.set(index, result.observation);
           return result;
-        } catch {
+        } catch (error) {
           this.#synth.close();
-          throw failed();
+          throw safeProviderError(error);
         }
       },
     };
@@ -218,10 +237,10 @@ export class OpenAITTSSession implements TTSSession {
         yield { ...segment, ...observation };
       }
       complete = true;
-    } catch {
-      throw failed();
+    } catch (error) {
+      throw safeProviderError(error);
     } finally {
-      // Returning early also cancels the pipeline's already prefetched sentence.
+      // Returning early cancels active work and held pipeline prefetch.
       if (!complete) this.#synth.close();
       observations.clear();
       this.#speaking = false;
