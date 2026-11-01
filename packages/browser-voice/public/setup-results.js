@@ -240,13 +240,13 @@ export class SetupResults {
     const decoder = new TextDecoder();
     let pending = "";
     try {
-      while (this.job === job) {
+      while (this.job === job && !job.terminal) {
         const { done, value } = await reader.read();
         if (this.job !== job) break;
         pending += decoder.decode(value, { stream: !done });
         if (pending.length > 1_000_000) throw new Error("Comparison response too large");
         let newline;
-        while ((newline = pending.indexOf("\n")) !== -1) {
+        while (!job.terminal && (newline = pending.indexOf("\n")) !== -1) {
           const line = pending.slice(0, newline);
           pending = pending.slice(newline + 1);
           if (line.trim()) this.accept(JSON.parse(line), job);
@@ -256,11 +256,14 @@ export class SetupResults {
           break;
         }
       }
-    } finally { reader.releaseLock(); }
+    } finally {
+      try { if (job.terminal || this.job !== job) await reader.cancel(); }
+      finally { reader.releaseLock(); }
+    }
   }
 
   accept(event, job) {
-    if (this.job !== job || event.requestId !== job.requestId) return;
+    if (this.job !== job || job.terminal || event.requestId !== job.requestId) return;
     if (event.type === "accepted") {
       if (job.comparisonId != null) return;
       job.comparisonId = event.comparisonId;
@@ -275,8 +278,9 @@ export class SetupResults {
       if (["complete", "error", "skipped", "cancelled"].includes(row.phase)) row.result = event.row;
     }
     if (event.type === "done") {
+      job.terminal = true;
       job.complete = this.rows.every((candidate) => candidate.result);
-      this.message = job.complete ? "Comparison finished" : "Comparison incomplete. Compare the take again.";
+      this.message = !job.complete ? "Comparison incomplete. Compare the take again." : event.status === "cancelled" ? "Comparison cancelled" : "Comparison finished";
     }
     this.renderRows();
     this.page.render();

@@ -185,6 +185,12 @@ test("each take drains its worklet tail, so the next take holds none of it", asy
     feed(context, processor, block, (block += 75), value);
     await settle();
     timers.shift()!();
+    // Saved audio must stay blocked until the new take's flush reply arrives.
+    reader.prompts[0].takes = ["previous.wav"];
+    reader.render();
+    assert.equal(reader.elements.play.disabled, true);
+    await reader.play();
+    assert.equal(reader.playback, null);
     await settle();
     takes.push(reader.take.samples);
   }
@@ -662,7 +668,7 @@ test("API candidates follow selectable metadata; selection never uploads, explic
   assert.match(h.reader.comparison.message, /not authorized/);
 });
 
-test("empty cleanup, partial failure and completed empty acoustic output retain their distinct meanings", async () => {
+for (const status of ["complete", "cancelled"]) test(`empty/partial output and ${status} comparison termination retain their meanings`, async () => {
   const stream = streamReply();
   const h = pageHarness({ respond: async () => stream.reply });
   enableComparison(h.reader, ["mlx-parakeet/v3-greedy", "mlx-cleanup/qwen-targeted"]);
@@ -671,12 +677,12 @@ test("empty cleanup, partial failure and completed empty acoustic output retain 
   acceptStream(stream, job.requestId);
   stream.send(rowEvent(job.requestId, "mlx-parakeet/v3-greedy", "complete", ""));
   stream.send(rowEvent(job.requestId, "mlx-cleanup/qwen-targeted", "complete", ""));
-  stream.send({ type: "done", requestId: job.requestId, comparisonId: "server-job", status: "complete", wallMs: 100 });
-  stream.end();
+  stream.send({ type: "done", requestId: job.requestId, comparisonId: "server-job", status, wallMs: 100 });
   await settle();
   assert.equal(h.reader.comparison.rows[0].view.text.textContent, "No speech detected");
   assert.equal(h.reader.comparison.rows[1].view.text.textContent, "Empty output");
-  assert.equal(h.reader.comparison.message, "Comparison finished");
+  assert.equal(h.reader.comparison.message, status === "cancelled" ? "Comparison cancelled" : "Comparison finished");
+  assert.equal(h.reader.comparison.job, null, "terminal event settles the job without waiting for EOF");
   const failed = rowEvent("next", "mlx-cleanup/qwen-targeted", "error", null);
   (failed.row as any).error = { code: "execution", message: "cleanup failed", rawText: "  partial\n" };
   const next = { requestId: "next", comparisonId: "server-job", controller: new AbortController() };

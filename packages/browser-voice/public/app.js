@@ -19,6 +19,7 @@ class SpeakEasyRoom {
     this.sessionPhase = "stopped";
     this.state = "idle";
     this.muted = false;
+    this.keyboardHold = false;
     this.activeSettings = null;
     this.level = 0;
     this.turnNumber = 0;
@@ -119,16 +120,19 @@ class SpeakEasyRoom {
         event.code === "Space" &&
         !event.repeat &&
         !this.elements.settingsDialog.open &&
-        !isTextEntry(event.target) &&
+        (!isNativeControl(event.target) || event.target === this.elements.main) &&
         this.usesHoldMode() &&
         this.sessionPhase === "ready"
       ) {
         event.preventDefault();
+        const held = this.hold.held;
         this.beginHold();
+        this.keyboardHold = !held && this.hold.held;
       }
     });
     window.addEventListener("keyup", (event) => {
-      if (event.code === "Space" && this.hold.held) {
+      if (event.code === "Space" && this.keyboardHold) {
+        this.keyboardHold = false;
         event.preventDefault();
         this.endHold();
       }
@@ -288,6 +292,7 @@ class SpeakEasyRoom {
   setSession(phase, label) {
     this.sessionPhase = phase;
     if (phase === "stopped") {
+      this.keyboardHold = false;
       this.hold.cancel();
       this.activeSettings = null;
       this.setState("idle");
@@ -676,9 +681,8 @@ class SpeakEasyRoom {
 }
 
 
-function isTextEntry(target) {
-  return target instanceof HTMLElement &&
-    (target.matches("input, textarea, select") || target.isContentEditable);
+function isNativeControl(target) {
+  return Boolean(target?.closest?.("input, select, textarea, button, a, summary, [contenteditable]:not([contenteditable=false]), [role=button]"));
 }
 
 new SpeakEasyRoom();

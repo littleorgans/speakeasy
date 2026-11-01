@@ -176,7 +176,7 @@ class PromptReaderPage {
 
   /** Play the unsaved take, else the selected saved take; never opens the mic. */
   async play() {
-    if (this.gate.capturing || this.saving) return;
+    if (this.gate.capturing || this.draining || this.saving) return;
     const saved = this.take ? null : this.savedTake();
     if (!this.take && !saved) return;
     this.stopPlayback();
@@ -490,7 +490,7 @@ class PromptReaderPage {
     elements.record.disabled = !prompt || this.saving;
     elements.save.disabled = !this.take || this.saving;
     const saved = this.take ? null : this.savedTake();
-    elements.play.disabled = this.gate.capturing || this.saving || (!this.take && !saved);
+    elements.play.disabled = this.gate.capturing || this.draining || this.saving || (!this.take && !saved);
     elements.playLabel.textContent = this.playback
       ? "Playing"
       : saved && saved.count > 1

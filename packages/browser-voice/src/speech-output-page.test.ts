@@ -143,6 +143,24 @@ test("Stop clears locally and isolates stale events, PCM and render metrics from
   h.controls.stop();
 });
 
+test("host clear silences playback while preserving the following trial failure", async () => {
+  const h = await outputHarness();
+  const { socket, requestId, port } = await h.start();
+  h.accepted(socket, requestId);
+  socket.event({ type: "playback", requestId, playbackId: 7, action: "clear" });
+  socket.event(packet(7));
+  port.onmessage?.({ data: { kind: "drained", playbackId: 7, audioEndMs: 12 } });
+  port.onmessage?.({ data: { kind: "first-render", playbackId: 7, audioTime: 4.25 } });
+  socket.event({ type: "sample-error", requestId, playbackId: 7, code: "TIMEOUT", message: "Speech trial timed out before playback completed." });
+  assert.match(h.controls.error, /timed out/);
+  assert.deepEqual(port.messages.map((message) => message.kind), ["start", "clear"]);
+  assert.equal(socket.sent.some((command) => command.type === "playback-drained"), false);
+  assert.equal(h.controls.status, "Voice unavailable");
+  assert.equal(h.controls.browserMs, null);
+  assert.equal(h.controls.job, null);
+  assert.equal(h.contexts[0].state, "closed");
+});
+
 test("browser TTFA uses the audio clock and Finished waits for server and browser drain", async () => {
   const h = await outputHarness();
   const { socket, requestId, port } = await h.start();

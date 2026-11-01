@@ -209,9 +209,10 @@ export class SpeechOutputControls {
         job.sampleRate = event.sampleRate;
         job.node.port.postMessage({ kind: "start", playbackId: event.playbackId, sampleRate: event.sampleRate, reportFirstRender: true });
       } else if (event.playbackId === job.playbackId) {
-        if (event.action === "end") job.ended = true;
+        if (event.action === "end" || event.action === "clear") job.ended = true;
         job.node.port.postMessage({ kind: event.action, playbackId: event.playbackId });
-        if (event.action === "clear") this.stop();
+        // The host clears audio before sending the terminal error/cancellation.
+        if (event.action === "clear") job.cleared = true;
       }
       this.render();
       return;
@@ -256,7 +257,7 @@ export class SpeechOutputControls {
   }
 
   rendered(job, message) {
-    if (this.job !== job || message.playbackId !== job.playbackId) return;
+    if (this.job !== job || job.cleared || message.playbackId !== job.playbackId) return;
     if (message.kind === "first-render" && this.browserMs == null && Number.isFinite(message.audioTime)) {
       const renderedAt = job.anchor.monotonic + (message.audioTime - job.anchor.audio) * 1_000;
       const elapsed = renderedAt - job.submittedAt;
@@ -298,7 +299,7 @@ export class SpeechOutputControls {
     this.job = null;
     if (!job) return;
     // Close local delivery before sending cancellation or awaiting the server.
-    if (job.playbackId != null) job.node?.port.postMessage({ kind: "clear", playbackId: job.playbackId });
+    if (job.playbackId != null && !job.cleared) job.node?.port.postMessage({ kind: "clear", playbackId: job.playbackId });
     if (job.socket?.readyState === WebSocket.OPEN) job.socket.send(JSON.stringify({ type: "cancel-sample", requestId: job.requestId }));
     this.dispose(job);
     this.status = "Stopped";
