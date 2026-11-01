@@ -35,5 +35,6 @@ export {
   type ResponderKind,
   type LlmProvider,
   type RuntimeConfig,
+  type RuntimeOptions,
   type TtsEngine,
 } from "./runtime.ts";
