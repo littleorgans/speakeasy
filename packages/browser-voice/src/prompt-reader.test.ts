@@ -408,7 +408,9 @@ test("worker list status and validation reasons reach the page API while audio s
 test("configured hotword path is absolute in the page API and child configuration", async () => {
   const { hotwordsPath } = readBrowserVoiceOptions(["--hotwords", "../speech/words.txt"], {});
   await withReader(async (host) => {
-    const listing = await (await fetch(`${host.url}/prompt-reader/prompts`)).json();
+    const listing = await (await fetch(`${host.url}/prompt-reader/prompts`)).json() as {
+      transcription: { hotwordsPath: string };
+    };
     assert.equal(listing.transcription.hotwordsPath, resolve("../speech/words.txt"));
     const answer = await post(host, "/prompt-reader/transcriptions", { body: takeBytes(320) });
     assert.equal(answer.status, 200);
