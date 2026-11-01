@@ -9,6 +9,7 @@ import {
   parseClientCommand,
   RESPONSE_ENGINES,
 } from "./protocol.ts";
+import { DEFAULT_LOCAL_OUTPUT, LOCAL_OUTPUT_REGISTRY } from "../../speech-io/src/tts/catalogue.ts";
 
 test("room engine options match the protocol engines", async () => {
   const html = await readFile(
@@ -102,4 +103,26 @@ test("encodeAudioPacket carries playback identity, rate, and samples", () => {
     [...new Float32Array(packet.buffer.slice(9))],
     [0.25, -0.5],
   );
+});
+
+test("optional room speechOutput uses the shared registry while old start remains compatible", () => {
+  const start = { type: "start", engine: "mercury-low", mode: "hold", pauseMs: 700, voice: "cedar" };
+  const parsed = parseClientCommand(JSON.stringify({ ...start, speechOutput: DEFAULT_LOCAL_OUTPUT }), LOCAL_OUTPUT_REGISTRY);
+  assert.ok(parsed.type === "start");
+  assert.deepEqual(parsed.speechOutput, DEFAULT_LOCAL_OUTPUT);
+  for (const speechOutput of [{ ...DEFAULT_LOCAL_OUTPUT, voice: "not-a-voice" },
+    { ...DEFAULT_LOCAL_OUTPUT, endpoint: "https://foreign.example" }]) {
+    assert.throws(() => parseClientCommand(JSON.stringify({ ...start, speechOutput }), LOCAL_OUTPUT_REGISTRY));
+  }
+});
+
+test("PCM decoder owns offset Buffer views and preserves finite out of range values and signed zero", () => {
+  const buffer = Buffer.alloc(17);
+  const data = new DataView(buffer.buffer, buffer.byteOffset + 1, 12);
+  [-0, 1.25, -2].forEach((sample, index) => data.setFloat32(index * 4, sample, true));
+  const result = decodeMicFrame(buffer.subarray(1, 13));
+  assert.equal(Object.is(result[0], -0), true);
+  assert.deepEqual([...result.slice(1)], [1.25, -2]);
+  buffer.fill(0);
+  assert.equal(result[1], 1.25);
 });

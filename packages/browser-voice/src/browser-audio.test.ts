@@ -59,3 +59,18 @@ test("interrupt resolves playback immediately and clears the client queue", asyn
     ["start", "clear"],
   );
 });
+
+test("socket shutdown settles drain immediately and drops late PCM", async () => {
+  const packets: Uint8Array[] = [];
+  const events: BrowserHostEvent[] = [];
+  const sink = new BrowserAudioSink({ playbackId: 1, sampleRate: 16_000,
+    sendEvent: (event) => events.push(event), sendAudio: (packet) => packets.push(packet) });
+  const pending = sink.end();
+  sink.close();
+  await pending;
+  await sink.interrupt();
+  sink.open();
+  sink.write(segment);
+  assert.equal(packets.length, 0);
+  assert.ok(!events.some((event) => event.type === "playback" && event.action === "start"));
+});

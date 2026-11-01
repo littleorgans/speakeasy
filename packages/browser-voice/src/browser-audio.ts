@@ -38,6 +38,7 @@ export class BrowserAudioSink implements AudioSink {
   #drained: Promise<number | undefined> | undefined;
   #timeout: NodeJS.Timeout | undefined;
   #isDrained = false;
+  #closed = false;
 
   constructor(options: {
     playbackId: number;
@@ -56,6 +57,7 @@ export class BrowserAudioSink implements AudioSink {
   }
 
   open(): void {
+    if (this.#closed) return;
     this.#sendEvent({
       type: "playback",
       action: "start",
@@ -65,6 +67,7 @@ export class BrowserAudioSink implements AudioSink {
   }
 
   write(segment: AudioSegment): void {
+    if (this.#closed) return;
     if (segment.sampleRate !== this.#sampleRate) {
       throw new Error(
         `playback sample rate changed from ${this.#sampleRate} to ${segment.sampleRate}`,
@@ -74,6 +77,7 @@ export class BrowserAudioSink implements AudioSink {
   }
 
   interrupt(): Promise<number | undefined> {
+    if (this.#closed || this.#isDrained) return Promise.resolve(undefined);
     const drained = this.#waitForDrain(INTERRUPTION_TIMEOUT_MS, 0);
     this.#sendEvent({
       type: "playback",
@@ -109,6 +113,12 @@ export class BrowserAudioSink implements AudioSink {
     }
     this.#resolveDrain?.(audioEndMs);
     this.#resolveDrain = undefined;
+  }
+
+  /** Socket shutdown releases any pending drain and ignores late audio. */
+  close(): void {
+    this.#closed = true;
+    this.drained();
   }
 
   #waitForDrain(
