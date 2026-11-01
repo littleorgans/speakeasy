@@ -4,7 +4,7 @@ import { endianness } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   MAX_HEADER_BYTES as MAX_WORKER_HEADER_BYTES, MAX_PCM_BYTES as MAX_WORKER_PCM_BYTES,
-  MAX_TEXT_BYTES as MAX_WORKER_TEXT_BYTES, IDLE_RELEASE_MS, SETUP_PROTOCOL_VERSION, sha256 as hash,
+  MAX_TEXT_BYTES as MAX_WORKER_TEXT_BYTES, SETUP_PROTOCOL_VERSION, sha256 as hash,
   type PcmIdentity, type SetupId, type SetupExecution, type SetupExecutionContext,
   type SetupExecutionResult, type SetupExecutor, type SetupLoadResult,
 } from "./setup-protocol.ts";
@@ -19,7 +19,7 @@ const PYTHON_SETUPS = new Set([
 ]);
 
 export type PythonWorkerResult = {
-  text: string; processingMs: number; rawText?: string; diagnostics?: Record<string, unknown>;
+  text: string; processingMs: number; decodeMs?: number | null; rawText?: string; diagnostics?: Record<string, unknown>;
   metadata: Record<string, unknown>; firstUse: boolean;
   startupLoadWallMs: number; workerWallMs: number;
 };
@@ -31,7 +31,6 @@ export type PythonWorkerOptions = {
   expectedIdentity?: Record<string, unknown>;
   loadTimeoutMs?: number;
   operationTimeoutMs?: number;
-  idleTimeoutMs?: number;
 };
 
 export class SetupWorkerError extends Error {
@@ -103,12 +102,10 @@ export class PythonSetupWorker {
   readonly #options: PythonWorkerOptions;
   readonly #loadTimeoutMs: number;
   readonly #operationTimeoutMs: number;
-  readonly #idleTimeoutMs: number;
   #session: Session | undefined;
   #nextId = 0;
   #busy = false;
   #closed = false;
-  #idleTimer: NodeJS.Timeout | undefined;
   #stderr = Buffer.alloc(0);
 
   constructor(options: PythonWorkerOptions) {
@@ -116,7 +113,6 @@ export class PythonSetupWorker {
     this.#options = options;
     this.#loadTimeoutMs = positiveOption(options.loadTimeoutMs, 120_000);
     this.#operationTimeoutMs = positiveOption(options.operationTimeoutMs, 120_000);
-    this.#idleTimeoutMs = positiveOption(options.idleTimeoutMs, IDLE_RELEASE_MS);
   }
 
   /** Bounded diagnostics, deliberately separate from protocol stdout. */
@@ -176,7 +172,6 @@ export class PythonSetupWorker {
 
   async close(): Promise<void> {
     this.#closed = true;
-    clearTimeout(this.#idleTimer);
     const session = this.#session;
     if (session) {
       this.#retire(session, new SetupWorkerError("worker closed"));
@@ -186,7 +181,6 @@ export class PythonSetupWorker {
 
   async release(): Promise<void> {
     if (this.#busy) throw new SetupWorkerError("worker is busy");
-    clearTimeout(this.#idleTimer);
     const session = this.#session;
     if (session) {
       this.#retire(session, new SetupWorkerError("worker released"));
@@ -203,7 +197,6 @@ export class PythonSetupWorker {
     if (this.#busy) throw new SetupWorkerError("worker is busy");
     if (signal?.aborted) throw new SetupWorkerError("worker cancelled");
     this.#busy = true;
-    clearTimeout(this.#idleTimer);
     const started = performance.now();
     let session: Session | undefined;
     const cancel = () => { if (session) this.#retire(session, new SetupWorkerError("worker cancelled")); };
@@ -237,6 +230,7 @@ export class PythonSetupWorker {
       const reply = await this.#request(session, operation, "result", fields, body, this.#operationTimeoutMs);
       const result = reply.result;
       if (!record(result) || typeof result.text !== "string" || !finiteTime(result.processingMs)
+        || (result.decodeMs !== undefined && result.decodeMs !== null && !finiteTime(result.decodeMs))
         || (result.rawText !== undefined && typeof result.rawText !== "string")
         || (result.diagnostics !== undefined && !record(result.diagnostics))) {
         throw new SetupWorkerError("invalid worker result");
@@ -245,6 +239,7 @@ export class PythonSetupWorker {
       const firstUse = !session.used;
       session.used = true;
       return { text: result.text, processingMs: result.processingMs,
+        ...(result.decodeMs !== undefined ? { decodeMs: result.decodeMs as number | null } : {}),
         ...(typeof result.rawText === "string" ? { rawText: result.rawText } : {}),
         ...(result.diagnostics !== undefined ? { diagnostics: result.diagnostics } : {}),
         metadata: session.metadata, firstUse, startupLoadWallMs: startupMs, workerWallMs: performance.now() - started };
@@ -258,10 +253,6 @@ export class PythonSetupWorker {
     } finally {
       signal?.removeEventListener("abort", cancel);
       this.#busy = false;
-      if (!this.#closed && this.#session && !this.#session.failure) {
-        this.#idleTimer = setTimeout(() => { void this.release(); }, this.#idleTimeoutMs);
-        this.#idleTimer.unref();
-      }
     }
   }
 
@@ -400,6 +391,7 @@ export class SetupWorkers implements SetupExecutor {
     if (request.setupId !== "sweep/score-2") {
       const result = await this.#worker(request.setupId).execute(request, context);
       return { text: result.text, processingMs: result.processingMs, workerWallMs: result.workerWallMs,
+        ...(result.decodeMs !== undefined ? { decodeMs: result.decodeMs } : {}),
         ...(result.rawText !== undefined ? { rawText: result.rawText } : {}),
         ...(result.diagnostics ? { diagnostics: result.diagnostics } : {}) };
     }

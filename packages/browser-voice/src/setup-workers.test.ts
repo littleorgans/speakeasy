@@ -60,7 +60,7 @@ class Fake:
         if mode == "stderr":
             os.write(2, b"x" * 50000)
         raw = samples.tobytes()
-        return {"text": hashlib.sha256(raw).hexdigest(), "processingMs": 3,
+        return {"text": hashlib.sha256(raw).hexdigest(), "processingMs": 3, "decodeMs": 1,
                 "diagnostics": {"hex": raw.hex(), "count": len(samples), "pid": os.getpid(), "calls": self.calls}}
     def cleanup(self, text):
         return {"text": text, "rawText": text, "processingMs": 0}
@@ -78,6 +78,7 @@ def write(target, header):
         if mode == "wrongVersion": header["version"] = 2
         if mode == "bodyReply": header["pcmBytes"] = 4
         if mode == "badResult": header["result"]["processingMs"] = -1
+        if mode == "badDecode": header["result"]["decodeMs"] = -1
         if mode == "badType": header["type"] = "ready"
         if mode == "oversize":
             target.write(struct.pack("<I", worker.MAX_HEADER_BYTES + 1))
@@ -156,6 +157,7 @@ test("real persistent process preserves offset PCM bytes, hash, signed zero and 
   assert.equal((first.diagnostics as { hex: string }).hex, expected.toString("hex"));
   assert.equal((first.diagnostics as { count: number }).count, 5);
   assert.equal(first.firstUse, true);
+  assert.equal(first.decodeMs, 1);
   assert.ok(first.startupLoadWallMs > 0);
   assert.ok(first.workerWallMs >= first.startupLoadWallMs);
   const second = await worker.transcribe(new Float32Array());
@@ -237,7 +239,7 @@ test("nonfinite samples and oversized takes fail before spawning", async (t) => 
 
 test("real process malformed replies retire their generation before rejection", async (t) => {
   const modes = ["wrongId", "wrongGeneration", "wrongSetup", "wrongOperation", "wrongVersion", "bodyReply",
-    "badResult", "badType", "oversize", "invalidUtf8", "badJson", "extraReply"];
+    "badResult", "badDecode", "badType", "oversize", "invalidUtf8", "badJson", "extraReply"];
   for (const mode of modes) {
     await t.test(mode, async (s) => {
       const marker = join(directory, `${mode}.pid`);
@@ -358,24 +360,6 @@ test("exit and closed input during send settle once and await actual exit", asyn
   }
 });
 
-test("idle release exits the child and a later explicit load starts a fresh generation", async (t) => {
-  const worker = makeWorker({ idleTimeoutMs: 25 });
-  t.after(() => worker.close());
-  const first = await worker.transcribe(new Float32Array());
-  const deadline = performance.now() + 3000;
-  while (true) {
-    try { process.kill(first.metadata.pid as number, 0); }
-    catch (error) {
-      assert.equal((error as NodeJS.ErrnoException).code, "ESRCH");
-      break;
-    }
-    assert.ok(performance.now() < deadline, "idle process must exit");
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  const loaded = await worker.load();
-  assert.equal(loaded.firstUse, true);
-});
-
 test("scheduler executor loads explicitly, verifies canonical identity, and preserves cleanup dependency text", async (t) => {
   const options = { pythonPath: PYTHON, workerPath: fixture, expectedIdentity: { revision: "pinned" } };
   const executor = new SetupWorkers({ python: {
@@ -394,6 +378,7 @@ test("scheduler executor loads explicitly, verifies canonical identity, and pres
   const result = await executor.execute(request, context);
   assert.equal(result.text, pcm.pcmSha256);
   assert.equal(result.processingMs, 3);
+  assert.equal(result.decodeMs, 1);
   assert.ok(result.workerWallMs! >= 0);
   const warm = await executor.load(request.setupId, context);
   assert.deepEqual(warm, { firstUse: false, startupMs: 0, loadMs: 0 });

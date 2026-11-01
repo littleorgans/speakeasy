@@ -150,6 +150,10 @@ def validate_result(result):
         raise ProtocolError("backend result requires finite processingMs")
     if "rawText" in result and not isinstance(result["rawText"], str):
         raise ProtocolError("backend rawText must be text")
+    decode_ms = result.get("decodeMs")
+    if decode_ms is not None and (type(decode_ms) not in (int, float)
+                                  or not math.isfinite(decode_ms) or decode_ms < 0):
+        raise ProtocolError("backend decodeMs must be finite")
 
 
 def handle_request(header, body, backend, setup_id, factory):

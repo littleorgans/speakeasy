@@ -189,6 +189,7 @@ class WorkerTests(unittest.TestCase):
                 return self.result
 
         for result in ({"text": "", "processingMs": math.nan}, {"text": "", "processingMs": True},
+                       {"text": "", "processingMs": 1, "decodeMs": -1},
                        {"text": None, "processingMs": 1}, {"text": "", "processingMs": 1, "rawText": 7},
                        {"text": "x" * worker.MAX_HEADER_BYTES, "processingMs": 1}):
             with self.subTest(keys=tuple(result)):
