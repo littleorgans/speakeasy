@@ -12,11 +12,14 @@ export type LocalSpeechOutputOptions = {
   createSynth?: (model: LocalOutputModelId) => Promise<LoadedTtsSynth>;
 };
 
+type SharedTtsSynth = LoadedTtsSynth & { quiesce(): Promise<void> };
+
 /** At most the two approved models. Voice changes share a graph and serialize native calls. */
 export class LocalSpeechOutputFactory {
-  readonly #models = new Map<LocalOutputModelId, Promise<LoadedTtsSynth>>();
+  readonly #models = new Map<LocalOutputModelId, Promise<SharedTtsSynth>>();
   readonly #options: LocalSpeechOutputOptions;
   #closed = false;
+  #closing?: Promise<void>;
 
   constructor(options: LocalSpeechOutputOptions = {}) {
     this.#options = options;
@@ -42,13 +45,32 @@ export class LocalSpeechOutputFactory {
     return new SherpaTextToSpeech(async () => synth).open({ model: model.id, voice: voice.speakerId, speed });
   }
 
-  /** Drops references; the native binding offers no explicit free or abort. */
-  async close(): Promise<void> {
-    this.#closed = true;
-    this.#models.clear();
+  /**
+   * After the operation and session close settle, await the selected graph's
+   * pending load and queued/running native calls before releasing a work lease.
+   * Does not load an unused graph. A failed load is already quiescent.
+   */
+  async quiesce(config: SpeechOutputConfig = DEFAULT_LOCAL_OUTPUT): Promise<void> {
+    const { model } = resolveLocalOutput(config);
+    const synth = await this.#models.get(model.id)?.catch(() => undefined);
+    await synth?.quiesce();
   }
 
-  #load(modelId: LocalOutputModelId): Promise<LoadedTtsSynth> {
+  /** Prevent new native work, then drain loads/calls before dropping references. */
+  async close(): Promise<void> {
+    if (!this.#closing) {
+      this.#closed = true;
+      this.#closing = (async () => {
+        const synths = await Promise.all([...this.#models.values()].map((pending) => pending.catch(() => undefined)));
+        await Promise.all(synths.map((synth) => synth?.quiesce()));
+        // The native binding offers no explicit free or abort.
+        this.#models.clear();
+      })();
+    }
+    await this.#closing;
+  }
+
+  #load(modelId: LocalOutputModelId): Promise<SharedTtsSynth> {
     let pending = this.#models.get(modelId);
     if (!pending) {
       pending = (async () => {
@@ -62,14 +84,16 @@ export class LocalSpeechOutputFactory {
           throw new Error("Loaded local model does not match its pinned bundle");
         }
         let tail = Promise.resolve();
-        const serialized: LoadedTtsSynth = {
+        const serialized: SharedTtsSynth = {
           numSpeakers: synth.numSpeakers,
           sampleRate: synth.sampleRate,
           synth: (request) => {
+            if (this.#closed) return Promise.reject(new Error("Local speech output factory is closed"));
             const result = tail.then(() => synth.synth(request));
             tail = result.then(() => {}, () => {});
             return result;
           },
+          quiesce: () => tail,
         };
         return serialized;
       })().catch((error: unknown) => {
