@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { setImmediate, setTimeout } from "node:timers/promises";
 import { test } from "node:test";
 import { ProviderError } from "@speakeasy/speech-io/providers";
+import { OPENAI_SPEED } from "@speakeasy/speech-io";
 import {
   DEFAULT_OPENAI_MODEL, DEFAULT_OPENAI_OUTPUT_CONFIG, OPENAI_SAMPLE_RATE,
   OpenAITextToSpeech, type OpenAIAudioSegment, type OpenAILimits,
@@ -415,10 +416,20 @@ test("session and response waits time out without retry", async () => {
 
 test("configuration and accepted format are validated before yielding", async () => {
   const h = harness();
-  for (const config of [{ model: "tts-1" }, { voice: 1 }, { voice: "unknown" }, { speed: NaN }, { speed: 0.2 }, { speed: 1.6 }]) {
+  for (const config of [
+    { model: "tts-1" }, { voice: 1 }, { voice: "unknown" }, { speed: NaN },
+    { speed: 0.2 }, { speed: 1.6 },
+    { speed: OPENAI_SPEED.min - 0.001 }, { speed: OPENAI_SPEED.max + 0.001 },
+  ]) {
     await assert.rejects(h.tts.open(config), /Speech configuration is unsupported/);
   }
   assert.equal(h.connections(), 0);
+  for (const speed of [OPENAI_SPEED.min, OPENAI_SPEED.max]) {
+    const boundary = harness();
+    const session = await boundary.open({ speed });
+    assert.equal(boundary.socket.sent[0]!.session.audio.output.speed, speed);
+    await session.close();
+  }
   const opening = h.tts.open();
   const rejection = assert.rejects(opening, /Speech provider request failed/);
   h.socket.created();

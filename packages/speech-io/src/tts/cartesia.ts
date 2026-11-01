@@ -36,6 +36,8 @@ export const CARTESIA_BASE_URL = "https://api.cartesia.ai";
 export const CARTESIA_VERSION = "2026-08-14";
 // Preserve existing conversation defaults; the browser factory chooses its model.
 export const DEFAULT_CARTESIA_MODEL = "sonic-3.5";
+export const CARTESIA_BROWSER_MODEL = "sonic-3.6-2026-08-27";
+export const CARTESIA_SPEED = Object.freeze({ min: 0.6, max: 1.5 });
 /** Cartesia raw pcm_f32le output rate. AudioSegment carries this downstream. */
 export const CARTESIA_SAMPLE_RATE = 44_100;
 
@@ -58,7 +60,7 @@ const LEGACY_VERSION = "2025-04-16";
 const SUPPORTED_MODELS = new Set([
   "sonic-3", "sonic-3-2026-01-12",
   "sonic-3.5", "sonic-3.5-2026-05-04",
-  "sonic-3.6", "sonic-3.6-2026-08-27",
+  "sonic-3.6", CARTESIA_BROWSER_MODEL,
 ]);
 
 /** Map a voice name to its id, pass a UUID through, reject anything else. */
@@ -110,7 +112,7 @@ export class CartesiaTextToSpeech implements TextToSpeech {
     const model = config.model ?? DEFAULT_CARTESIA_MODEL;
     const speed = config.speed ?? 1;
     if (!SUPPORTED_MODELS.has(model) || typeof speed !== "number" ||
-        !Number.isFinite(speed) || speed < 0.6 || speed > 1.5 ||
+        !Number.isFinite(speed) || speed < CARTESIA_SPEED.min || speed > CARTESIA_SPEED.max ||
         (config.voice !== undefined && typeof config.voice !== "string")) {
       throw new ProviderError("CONFIG_UNSUPPORTED");
     }

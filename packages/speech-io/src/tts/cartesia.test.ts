@@ -3,6 +3,9 @@ import { performance } from "node:perf_hooks";
 import { test } from "node:test";
 import { ProviderError } from "@speakeasy/speech-io/providers";
 import {
+  CARTESIA_BROWSER_MODEL, CARTESIA_SAMPLE_RATE, CARTESIA_SPEED,
+} from "@speakeasy/speech-io";
+import {
   CartesiaTextToSpeech,
   CARTESIA_VOICES,
   DEFAULT_CARTESIA_VOICE,
@@ -126,12 +129,17 @@ test("forwards the dated model and speed with the current voice payload", async 
       version = (init.headers as Record<string, string>)["cartesia-version"];
     }),
   });
-  const session = await tts.open({ model: "sonic-3.6-2026-08-27", speed: 1.25 });
-  await collect(session.speak("Hello."));
-  assert.equal(version, "2026-08-14");
-  assert.deepEqual(body.voice, { id: CARTESIA_VOICES.katie });
-  assert.deepEqual(body.generation_config, { speed: 1.25 });
-  assert.equal(body.model_id, "sonic-3.6-2026-08-27");
+  for (const speed of [CARTESIA_SPEED.min, 1.25, CARTESIA_SPEED.max]) {
+    const session = await tts.open({ model: CARTESIA_BROWSER_MODEL, speed });
+    const segments = await collect(session.speak("Hello."));
+    assert.equal(version, "2026-08-14");
+    assert.deepEqual(body.voice, { id: CARTESIA_VOICES.katie });
+    assert.deepEqual(body.generation_config, { speed });
+    assert.equal(body.model_id, "sonic-3.6-2026-08-27");
+    assert.equal((body.output_format as Record<string, unknown>).sample_rate, CARTESIA_SAMPLE_RATE);
+    assert.equal(segments[0]!.sampleRate, CARTESIA_SAMPLE_RATE);
+    await session.close();
+  }
 });
 
 test("rejects numeric voices, unsupported models and invalid speeds before dispatch", async () => {
@@ -143,6 +151,7 @@ test("rejects numeric voices, unsupported models and invalid speeds before dispa
   for (const config of [
     { voice: 0 }, { voice: "constructor" }, { model: "sonic-2" },
     { model: "" }, { speed: Number.NaN }, { speed: 0.5 }, { speed: 1.6 },
+    { speed: CARTESIA_SPEED.min - 0.001 }, { speed: CARTESIA_SPEED.max + 0.001 },
   ]) {
     await assert.rejects(() => tts.open(config));
   }

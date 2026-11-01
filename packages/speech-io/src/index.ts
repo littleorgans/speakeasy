@@ -56,6 +56,9 @@ export {
 export { SherpaTextToSpeech } from "./tts/sherpa-tts.ts";
 export {
   CartesiaTextToSpeech,
+  CARTESIA_BROWSER_MODEL,
+  CARTESIA_SAMPLE_RATE,
+  CARTESIA_SPEED,
   CARTESIA_VOICES,
   DEFAULT_CARTESIA_MODEL,
   DEFAULT_CARTESIA_VOICE,
@@ -69,6 +72,7 @@ export {
   DEFAULT_OPENAI_MODEL,
   DEFAULT_OPENAI_VOICE,
   OPENAI_SAMPLE_RATE,
+  OPENAI_SPEED,
   OPENAI_VOICES,
   type OpenAIOptions,
   type OpenAISessionOptions,
