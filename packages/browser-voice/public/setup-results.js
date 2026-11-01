@@ -79,7 +79,7 @@ export class SetupResults {
       const fact = document.createElement("small");
       fact.className = "preset-fact";
       const quantization = typeof setup.quantization === "string" ? setup.quantization : setup.quantization?.loaded;
-      fact.textContent = [setup.operation === "cleanup" ? "Completed take: Ultra transcription, then text cleanup" : "Transcribes the completed recording", setup.controls?.provider ?? setup.runtime?.device ?? setup.runtime?.loadDeviceRequest, quantization].filter(Boolean).join(" · ");
+      fact.textContent = [setup.operation === "cleanup" ? "Completed take: Ultra transcription, then text cleanup" : "Transcribes the completed recording", setup.controls?.provider === "cpu" ? "Sherpa Ultra on CPU" : setup.runtime?.device ?? setup.runtime?.loadDeviceRequest, quantization].filter(Boolean).join(" · ");
       const limits = document.createElement("small");
       limits.className = "preset-fact";
       const bytes = setup.fileBytes ?? setup.files?.reduce((total, file) => total + file.bytes, 0);

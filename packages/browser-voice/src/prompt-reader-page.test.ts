@@ -510,6 +510,7 @@ test("comparison defaults to only v3 in exact manifest order and keeps unavailab
   assert.match(reader.comparison.checks[0].status.textContent, /Needs setup: test runtime unavailable/);
   assert.equal(reader.comparison.checks[0].tags.textContent, "Recommended");
   assert.equal(reader.comparison.checks[2].tags.textContent, "Uses fixed vocabulary");
+  assert.match(reader.comparison.checks[3].fact.textContent, /Sherpa Ultra on CPU/);
   assert.equal(reader.comparison.checks.some((entry: any) => /Streams|Accuracy/.test(entry.tags.textContent)), false);
 });
 
