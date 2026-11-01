@@ -78,6 +78,8 @@ export type StreamingSherpaModel = ModelCommon &
 export type NemoTransducerModel = OfflineCommon &
   TransducerFiles & {
     family: "nemo-transducer";
+    /** Proven score layout for this export's text BPE vocabulary. */
+    hotwordTokenizer?: { firstScoredPieceId: number };
   };
 
 export type MoonshineModel = OfflineCommon & {
@@ -192,6 +194,7 @@ export const SHERPA_MODELS = {
   "en-parakeet-ultra-int8": {
     kind: "offline",
     family: "nemo-transducer",
+    hotwordTokenizer: { firstScoredPieceId: 274 },
     name: "parakeet-ultra-sherpa-onnx-int8",
     note: "Moondream Parakeet Ultra (Parakeet TDT 0.6B v3 fine tune), sherpa export, offline, int8, punctuation and case",
     files: [

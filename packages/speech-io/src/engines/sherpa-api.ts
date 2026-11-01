@@ -114,8 +114,13 @@ export type OfflineRecognizerConfig = {
     provider?: string;
     debug?: boolean | number;
     modelType?: string;
+    modelingUnit?: string;
+    bpeVocab?: string;
   };
   decodingMethod?: string;
+  maxActivePaths?: number;
+  hotwordsFile?: string;
+  hotwordsScore?: number;
 };
 
 export interface OnlineStream {
