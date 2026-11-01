@@ -64,6 +64,11 @@ class Fake:
                 "diagnostics": {"hex": raw.hex(), "count": len(samples), "pid": os.getpid(), "calls": self.calls}}
     def cleanup(self, text):
         return {"text": text, "rawText": text, "processingMs": 0}
+    def close(self):
+        path = self.options.get("closeMarker")
+        if path:
+            with open(path, "w") as target:
+                target.write("closed")
 def factory(setup, options):
     return Fake(options)
 def write(target, header):
@@ -191,7 +196,8 @@ test("production Python process reads split prefixes and coalesced requests then
     return Buffer.concat([prefix, header, body]);
   }
   const body = Buffer.from(new Float32Array([-0, 1.5]).buffer);
-  const stream = Buffer.concat([packet(1, "load", { options: {} }), packet(2, "transcribe", {
+  const closeMarker = join(directory, "protocol-close.txt");
+  const stream = Buffer.concat([packet(1, "load", { options: { closeMarker } }), packet(2, "transcribe", {
     sampleRate: 16000, channels: 1, sampleCount: 2, sha256: digest(body),
   }, body), packet(3, "close", {})]);
   for (let index = 0; index < 4; index++) {
@@ -200,6 +206,7 @@ test("production Python process reads split prefixes and coalesced requests then
   }
   child.stdin.end(stream.subarray(4));
   assert.equal(await completion, 0);
+  assert.equal(await readFile(closeMarker, "utf8"), "closed");
   let frames = Buffer.concat(output);
   const replies: { type: string; result?: { text: string; diagnostics: { hex: string } } }[] = [];
   while (frames.length) {
@@ -263,21 +270,26 @@ test("ready attestation is checked and missing ready has its own deadline", asyn
 });
 
 test("backend error preserves partial output and load failure ends its child", async (t) => {
-  const worker = makeWorker({ backendOptions: { mode: "error" } });
+  const closeMarker = join(directory, "error-close.txt");
+  const worker = makeWorker({ backendOptions: { mode: "error", closeMarker } });
   t.after(() => worker.close());
   await assert.rejects(worker.transcribe(new Float32Array()), (error: Error & { rawText?: string }) => {
     assert.equal(error.message, "backend failed");
     assert.equal(error.rawText, "partial\n");
     return true;
   });
-  const loading = makeWorker({ backendOptions: { mode: "loadError" } });
+  assert.equal(await readFile(closeMarker, "utf8"), "closed");
+  const loadCloseMarker = join(directory, "load-error-close.txt");
+  const loading = makeWorker({ backendOptions: { mode: "loadError", closeMarker: loadCloseMarker } });
   t.after(() => loading.close());
   await assert.rejects(loading.transcribe(new Float32Array()), /load failed/);
+  assert.equal(await readFile(loadCloseMarker, "utf8"), "closed");
 });
 
 test("active cancellation holds the slot until SIGTERM resistant process exits; only next request restarts", async (t) => {
   const marker = join(directory, "cancel.pid");
-  const backendOptions = { mode: "ignoreTerm", marker };
+  const closeMarker = join(directory, "forced-cancel-close.txt");
+  const backendOptions = { mode: "ignoreTerm", marker, closeMarker };
   const worker = makeWorker({ backendOptions });
   t.after(() => worker.close());
   const controller = new AbortController();
@@ -288,6 +300,7 @@ test("active cancellation holds the slot until SIGTERM resistant process exits; 
   await assert.rejects(worker.transcribe(new Float32Array()), /busy/);
   await rejected;
   assertExited(pid);
+  await assert.rejects(readFile(closeMarker), { code: "ENOENT" });
   // A later explicit request is the sole restart trigger.
   backendOptions.mode = "";
   const next = await worker.transcribe(new Float32Array([0.25]));

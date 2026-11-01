@@ -111,6 +111,8 @@ export class ChildTranscriber implements Transcriber {
     const lifecycle = this.#lifecycle;
     if (this.#mode === CPU_PRESET.mode) {
       validateCpuSamples(samples);
+      // Own this exact view before cold preparation or retirement can yield.
+      samples = samples.slice();
       await this.prepare();
     } else await this.#retiring;
     if (lifecycle !== this.#lifecycle) throw new TranscriptionError("transcriber closed", this.#label);

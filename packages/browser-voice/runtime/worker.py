@@ -186,36 +186,58 @@ def handle_request(header, body, backend, setup_id, factory):
 def serve(source, target, setup_id, generation, factory=backend_factory):
     backend = None
     last_id = 0
-    while True:
-        reply = None
-        try:
-            frame = read_frame(source)
-            if frame is None:
-                return 0
-            header, body = frame
-            reply = envelope(header, setup_id, generation)
-            if header["id"] <= last_id:
-                raise ProtocolError("request id must increase")
-            last_id = header["id"]
-            # This also captures Python library prints during lazy imports.
+
+    def create_backend(selected, options):
+        nonlocal backend
+        # Retain ownership even if load raises before handle_request returns.
+        backend = factory(selected, options)
+        return backend
+
+    def close_backend():
+        nonlocal backend
+        owned, backend = backend, None
+        close = getattr(owned, "close", None)
+        if close is not None:
             with contextlib.redirect_stdout(sys.stderr):
-                backend, outcome = handle_request(header, body, backend, setup_id, factory)
-            write_frame(target, {**reply, **outcome, "pcmBytes": 0})
-            if outcome["type"] == "closed":
-                return 0
-        except Exception as error:
-            if reply is not None:
-                failure = {**reply, "type": "error", "pcmBytes": 0,
-                           "error": str(error)[:2048] or type(error).__name__}
-                partial = getattr(error, "rawText", None)
-                if isinstance(partial, str) and len(partial.encode("utf-8")) <= MAX_TEXT_BYTES:
-                    failure["rawText"] = partial
-                try:
-                    write_frame(target, failure)
-                except Exception:
-                    pass
-            print("worker failed: " + type(error).__name__, file=sys.stderr)
-            return 1
+                close()
+
+    try:
+        while True:
+            reply = None
+            try:
+                frame = read_frame(source)
+                if frame is None:
+                    return 0
+                header, body = frame
+                reply = envelope(header, setup_id, generation)
+                if header["id"] <= last_id:
+                    raise ProtocolError("request id must increase")
+                last_id = header["id"]
+                # This also captures Python library prints during lazy imports.
+                with contextlib.redirect_stdout(sys.stderr):
+                    backend, outcome = handle_request(header, body, backend, setup_id, create_backend)
+                if outcome["type"] == "closed":
+                    close_backend()
+                write_frame(target, {**reply, **outcome, "pcmBytes": 0})
+                if outcome["type"] == "closed":
+                    return 0
+            except Exception as error:
+                # The parent may force retirement as soon as it reads an error.
+                close_backend()
+                if reply is not None:
+                    failure = {**reply, "type": "error", "pcmBytes": 0,
+                               "error": str(error)[:2048] or type(error).__name__}
+                    partial = getattr(error, "rawText", None)
+                    if isinstance(partial, str) and len(partial.encode("utf-8")) <= MAX_TEXT_BYTES:
+                        failure["rawText"] = partial
+                    try:
+                        write_frame(target, failure)
+                    except Exception:
+                        pass
+                print("worker failed: " + type(error).__name__, file=sys.stderr)
+                return 1
+    finally:
+        close_backend()
 
 
 def main():

@@ -98,6 +98,50 @@ class WorkerTests(unittest.TestCase):
                 self.assertEqual(backend.calls, [text])
                 self.assertEqual(replies[-1]["result"]["text"], text)
 
+    def test_backend_closes_once_before_normal_exit_or_error_reply(self):
+        for ending in ("close", "eof", "protocol-error", "backend-error", "load-error"):
+            with self.subTest(ending=ending):
+                events = []
+                terminal_snapshots = []
+
+                class OwnedBackend(Backend):
+                    def load(self):
+                        events.append("load")
+                        if ending == "load-error":
+                            raise RuntimeError("load failed after allocation")
+                        return super().load()
+
+                    def transcribe(self, samples):
+                        raise RuntimeError("decode failed")
+
+                    def close(self):
+                        events.append("close")
+                        print("close diagnostic")
+
+                class Target(io.BytesIO):
+                    def write(self, data):
+                        header = json.loads(data[4:])
+                        if header["type"] in ("closed", "error"):
+                            terminal_snapshots.append(list(events))
+                        return super().write(data)
+
+                backend = OwnedBackend()
+                tail = {"close": frame("close", 2), "eof": b"",
+                        "protocol-error": b"\x01", "load-error": b"",
+                        "backend-error": frame("transcribe", 2, **{
+                            key: value for key, value in identity(b"").items() if key != "pcmBytes"
+                        })}[ending]
+                with contextlib.redirect_stdout(io.StringIO()) as stdout, \
+                        contextlib.redirect_stderr(io.StringIO()) as stderr:
+                    code = worker.serve(io.BytesIO(frame("load", options={}) + tail), Target(),
+                                        SETUP, GENERATION, lambda *_: backend)
+                self.assertEqual(code, 0 if ending in ("close", "eof") else 1)
+                self.assertEqual(events, ["load", "close"])
+                self.assertEqual(terminal_snapshots, [] if ending in ("eof", "protocol-error")
+                                 else [["load", "close"]])
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertIn("close diagnostic", stderr.getvalue())
+
     def test_malformed_frames_never_load(self):
         malformed = [b"\x01", struct.pack("<I", 0), struct.pack("<I", worker.MAX_HEADER_BYTES + 1),
                      struct.pack("<I", 1) + b"\xff", struct.pack("<I", 1) + b"{",

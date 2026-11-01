@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter, once } from "node:events";
 import { readFileSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { loadHotwords } from "@speakeasy/speech-io";
@@ -11,6 +11,8 @@ import { bindingWith, seededModelRoot } from "../../speech-io/src/engines/test-s
 import { fixedCpuSnapshot, instrumentCpuBinding, preflightCpuModel, TakeTranscription, validateCpuRuntime } from "./take-transcription.ts";
 import { readBrowserVoiceOptions } from "./server-options.ts";
 import { ChildTranscriber, CPU_PRESET, TRANSCRIBE_MODEL_ID, TranscriptionError, type TranscriptionMode } from "./transcriber.ts";
+import { SetupComparison } from "./setup-comparison.ts";
+import { SetupWorkers } from "./setup-workers.ts";
 
 async function setup(decode?: () => Promise<void>, hotwordsPath?: string, mode?: TranscriptionMode) {
   const modelRoot = await seededModelRoot(TRANSCRIBE_MODEL_ID);
@@ -299,17 +301,18 @@ const ready = {
   type: "ready", version: 1, preset: CPU_PRESET, load: { loadMs: 7, modelConstructionMs: 3 },
   assets: Object.fromEntries(SHERPA_MODELS[TRANSCRIBE_MODEL_ID].files.map((file) => [file.name, file.sha256])),
 };
-const healthyWorker = `
+function healthyWorker(options: { text?: string; beforeReply?: string } = {}): string { return `
   process.send(ready);
   let firstUse = true;
   process.on("message", ({ id, samples }) => {
-    process.send({ id, text: String(process.pid) + ":" + samples.length + ":" + samples[1], decodeMs: 2,
+    ${options.beforeReply ?? ""}
+    process.send({ id, text: ${options.text ?? 'String(process.pid) + ":" + samples.length + ":" + samples[1]'}, decodeMs: 2,
       hotwords: { path: "sweep/score-2", count: 3, revision: ready.preset.hotwordsSha256 },
       comparison: { ...ready.load, processingMs: 1, workerWallMs: 4, firstUse } });
     firstUse = false;
   });
-`;
-async function fakeChild(t: TestContext, body = healthyWorker, options: {
+`; }
+async function fakeChild(t: TestContext, body = healthyWorker(), options: {
   mode?: TranscriptionMode; timeoutMs?: number; startupTimeoutMs?: number;
 } = {}) {
   const root = await mkdtemp("/tmp/speak-easy-cpu-ipc-");
@@ -319,7 +322,7 @@ async function fakeChild(t: TestContext, body = healthyWorker, options: {
   await write(body);
   const child = new ChildTranscriber({ mode: CPU_PRESET.mode, workerPath, startupTimeoutMs: 2_000, ...options });
   t.after(async () => { await child.closeAndWait(); await rm(root, { recursive: true, force: true }); });
-  return { child, write, workerPath };
+  return { child, write, workerPath, root };
 }
 
 test("advanced IPC preserves offset PCM, separates fixed instances, and keeps warm first use metadata", async (t) => {
@@ -341,6 +344,57 @@ test("advanced IPC preserves offset PCM, separates fixed instances, and keeps wa
   assert.notEqual(recovered.text.split(":")[0], first.text.split(":")[0]);
 });
 
+test("fixed CPU owns exact PCM before awaiting cold preparation", async (t) => {
+  const h = await fakeChild(t, healthyWorker({
+    text: 'Buffer.from(samples.buffer, samples.byteOffset, samples.byteLength).toString("hex")',
+  }));
+  const backing = new Float32Array([99, -0, 1.5, -2, 88]);
+  const samples = backing.subarray(1, 4);
+  const expected = Buffer.from(new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength)).toString("hex");
+  const pending = h.child.transcribe(samples);
+  backing.fill(7);
+  assert.equal((await pending).text, expected);
+});
+
+test("scheduler CPU cancellation awaits actual exit before queued exact PCM reaches a fresh child", async (t) => {
+  const h = await fakeChild(t, healthyWorker({
+    text: 'process.pid + ":" + Buffer.from(samples.buffer, samples.byteOffset, samples.byteLength).toString("hex")',
+    beforeReply: `
+      if (samples[0] === 0.25) {
+        process.getBuiltinModule("fs").writeFileSync(new URL("./active.json", import.meta.url), JSON.stringify({ pid: process.pid }));
+        return;
+      }
+    `,
+  }));
+  const executor = new SetupWorkers({ cpu: h.child });
+  const scheduler = new SetupComparison({ executor });
+  t.after(() => scheduler.close());
+  const first = scheduler.compare({ samples: new Float32Array([0.25]), setupIds: ["sweep/score-2"] });
+  const samples = new Float32Array([-0, 1.5, -2]);
+  const expected = Buffer.from(samples.buffer).toString("hex");
+  const queued = scheduler.compare({ samples, setupIds: ["sweep/score-2"] });
+  samples.fill(7);
+  let activePid = 0;
+  const deadline = performance.now() + 3_000;
+  while (!activePid && performance.now() < deadline) {
+    try { activePid = JSON.parse(await readFile(join(h.root, "active.json"), "utf8")).pid; }
+    catch { await new Promise((resolve) => setTimeout(resolve, 5)); }
+  }
+  assert.ok(activePid > 0, "the first CPU child reached its blocked operation");
+  first.cancel();
+  const cancelled = await first.done;
+  assert.equal(cancelled.status, "cancelled");
+  assert.equal(cancelled.rows[0].status, "cancelled");
+  assert.throws(() => process.kill(activePid, 0), { code: "ESRCH" });
+  const completed = await queued.done;
+  assert.equal(completed.rows[0].status, "complete");
+  const [pid, hex] = completed.rows[0].text!.split(":");
+  assert.notEqual(Number(pid), activePid);
+  assert.equal(hex, expected);
+  await scheduler.close();
+  assert.throws(() => process.kill(Number(pid), 0), { code: "ESRCH" });
+});
+
 test("legacy custom worker replies and the configured argv hotword path retain their interface", async (t) => {
   const { workerPath } = await fakeChild(t, `
     process.on("message", ({ id }) => process.send({ id, text: process.argv[2], decodeMs: 0,
@@ -357,12 +411,12 @@ test("legacy custom worker replies and the configured argv hotword path retain t
 test("bad ready, missing ready, and malformed replies retire the child before explicit recovery", async (t) => {
   const h = await fakeChild(t, `ready.preset.hotwordsScore = 9; process.send(ready);`);
   await assert.rejects(h.child.prepare(), /preset mismatch/);
-  await h.write(healthyWorker);
+  await h.write(healthyWorker());
   assert.match((await h.child.transcribe(new Float32Array([0.25]))).text, /:1:/);
   await h.child.closeAndWait();
   await h.write(`process.send(ready); process.on("message", ({ id }) => process.send({ id, text: "oops", decodeMs: -1 }));`);
   await assert.rejects(h.child.transcribe(new Float32Array(1)), /Invalid CPU transcript/);
-  await h.write(healthyWorker);
+  await h.write(healthyWorker());
   await h.child.transcribe(new Float32Array(1));
   const missing = await fakeChild(t, "", { startupTimeoutMs: 75 });
   await assert.rejects(missing.child.prepare(), /ready timed out/);
@@ -374,7 +428,7 @@ test("processing timeout settles concurrent requests once and a later explicit r
   const second = h.child.transcribe(new Float32Array(1));
   const outcomes = await Promise.allSettled([first, second]);
   assert.ok(outcomes.every((result) => result.status === "rejected" && /timed out/.test(String(result.reason))));
-  await h.write(healthyWorker);
+  await h.write(healthyWorker());
   const next = await h.child.transcribe(new Float32Array(1));
   assert.equal(next.comparison?.firstUse, true);
 });
@@ -389,7 +443,7 @@ test("close during startup and before spawn cannot start an obsolete decode", as
   const rejected = assert.rejects(startup, /closed/);
   await h.child.closeAndWait();
   await rejected;
-  await h.write(healthyWorker);
+  await h.write(healthyWorker());
   await h.child.transcribe(new Float32Array(1));
 });
 
