@@ -262,6 +262,23 @@ test("cancelling during body read cancels its stream and ignores unsafe abort re
   assert.equal(cancelled, true);
 });
 
+test("cancellation during response handoff cancels the body before a reader is acquired", async () => {
+  const pending = deferred<Response>();
+  const parent = new AbortController();
+  let cancelledBodies = 0;
+  const body = new ReadableStream<Uint8Array>({ cancel() { cancelledBodies += 1; } });
+  const adapter = new CartesiaBatchTranscriber({
+    getKey: () => FAKE_KEY, fetch: () => pending.promise,
+  });
+  const result = adapter.transcribe(pcm, { signal: parent.signal });
+  pending.resolve(new Response(body));
+  queueMicrotask(() => parent.abort(new Error(FAKE_KEY)));
+  await assert.rejects(result, (error: Error) =>
+    error.name === "AbortError" && !error.message.includes(FAKE_KEY));
+  assert.equal(cancelledBodies, 1);
+  assert.equal(body.locked, false);
+});
+
 test("timeout aborts a non cooperative fetch and safely consumes a late rejection", async () => {
   const pending = deferred<Response>();
   const observed: { signal?: AbortSignal | null } = {};

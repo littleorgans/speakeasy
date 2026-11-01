@@ -172,19 +172,20 @@ function encodeCompletedTake(samples: Float32Array): Uint8Array<ArrayBuffer> {
 }
 
 /** Settle promptly even when a fake transport ignores the request's signal. */
-function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = () => reject(signal.reason);
-    if (signal.aborted) reject(signal.reason);
+async function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+  let onAbort!: () => void;
+  const stopped = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(signal.reason);
+    if (signal.aborted) onAbort();
     else signal.addEventListener("abort", onAbort, { once: true });
-    pending.then((value) => {
-      signal.removeEventListener("abort", onAbort);
-      resolve(value);
-    }, (error: unknown) => {
-      signal.removeEventListener("abort", onAbort);
-      reject(error);
-    });
   });
+  try {
+    // Arbitrate both promises together so an already delivered response reaches
+    // the body reader's cleanup even if abort arrives before this await resumes.
+    return await Promise.race([stopped, pending]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
 }
 
 async function readBoundedBody(response: Response, signal: AbortSignal): Promise<Uint8Array[]> {
