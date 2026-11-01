@@ -13,6 +13,7 @@ import {
   type RuntimeConfig,
 } from "@speakeasy/convo-engine";
 import { WebSocket, WebSocketServer } from "ws";
+import { HOTWORDS_FILENAME } from "@speakeasy/speech-io";
 import {
   PROMPT_MAX_TAKE_BYTES,
   PROMPT_SAMPLE_RATE,
@@ -21,7 +22,7 @@ import {
   type PromptReaderConfig,
 } from "./prompt-reader.ts";
 import { BrowserConversationSession, type RuntimeFactory } from "./session.ts";
-import { ChildTranscriber, type Transcriber } from "./transcriber.ts";
+import { ChildTranscriber, TRANSCRIBE_MODEL_ID, TranscriptionError, type Transcriber } from "./transcriber.ts";
 
 const PUBLIC_ROOT = fileURLToPath(new URL("../public/", import.meta.url));
 const STATIC_FILES = new Map([
@@ -60,7 +61,7 @@ export async function startBrowserVoiceServer(options: {
   createRuntime?: RuntimeFactory;
   /** Serve the prompt reader's API, saving takes to an outside folder. */
   promptReader?: PromptReaderConfig;
-  /** Display only take transcription; defaults to the Canary child process. */
+  /** Display only take transcription; defaults to the Parakeet Ultra child. */
   transcriber?: Transcriber;
 } = {}): Promise<BrowserVoiceServer> {
   const promptReader = options.promptReader
@@ -153,7 +154,8 @@ async function servePromptReader(
         error: "prompt reader not configured: start with --prompts <file> --out <dir>",
       });
     } else if (url.pathname === "/prompt-reader/prompts" && request.method === "GET") {
-      sendJson(response, 200, await reader.listing());
+      sendJson(response, 200, { ...(await reader.listing()),
+        transcription: { model: TRANSCRIBE_MODEL_ID, hotwordsPath: resolve(HOTWORDS_FILENAME) } });
     } else if (url.pathname === "/prompt-reader/recordings" && request.method === "POST") {
       await saveTake(request, response, reader, url.searchParams);
     } else if (url.pathname === "/prompt-reader/transcriptions" && request.method === "POST" && transcriber) {
@@ -216,6 +218,8 @@ async function transcribeTake(
   } catch (error) {
     sendJson(response, 503, {
       error: `transcription unavailable: ${error instanceof Error ? error.message : String(error)}`,
+      model: error instanceof TranscriptionError ? error.model : TRANSCRIBE_MODEL_ID,
+      ...(error instanceof TranscriptionError && error.hotwords ? { hotwords: error.hotwords } : {}),
     });
   }
 }

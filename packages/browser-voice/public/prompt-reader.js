@@ -22,7 +22,7 @@ const SAMPLE_RATE = 16_000;
 const MIN_TAKE_MS = 300;
 const CLIP_LEVEL = 0.99;
 /** A transcript later than this shows as unavailable. */
-const TRANSCRIBE_TIMEOUT_MS = 15_000;
+const TRANSCRIBE_TIMEOUT_MS = 35_000;
 
 class PromptReaderPage {
   constructor() {
@@ -34,6 +34,9 @@ class PromptReaderPage {
       heard: document.getElementById("heard"),
       heardText: document.getElementById("heard-text"),
       heardNote: document.getElementById("heard-note"),
+      heardHotwords: document.getElementById("heard-hotwords"),
+      heardError: document.getElementById("heard-error"),
+      hotwordsPath: document.getElementById("hotwords-path"),
       level: document.getElementById("level"),
       status: document.getElementById("status"),
       output: document.getElementById("output"),
@@ -86,6 +89,8 @@ class PromptReaderPage {
       return;
     }
     this.prompts = body.prompts;
+    this.transcriptionConfig = body.transcription;
+    this.elements.hotwordsPath.textContent = body.transcription.hotwordsPath;
     this.elements.output.textContent = body.outputDir;
     const firstOpen = this.prompts.findIndex((prompt) => !prompt.recorded);
     this.index = firstOpen === -1 ? this.prompts.length : firstOpen;
@@ -321,7 +326,8 @@ class PromptReaderPage {
       return;
     }
     const peak = samples.reduce((max, sample) => Math.max(max, Math.abs(sample)), 0);
-    this.take = { samples, device: this.device, preRollMs: this.preRollMs, transcript: { state: "pending" } };
+    this.take = { samples, device: this.device, preRollMs: this.preRollMs,
+      transcript: { state: "pending", model: this.transcriptionConfig?.model } };
     void this.transcribe(this.take);
     const warnings = [
       peak >= CLIP_LEVEL ? "it clipped" : "",
@@ -337,10 +343,10 @@ class PromptReaderPage {
   async transcribe(take) {
     const settle = (transcript) => {
       if (take.transcript.state !== "pending") return;
-      take.transcript = transcript;
+      take.transcript = { model: take.transcript.model, ...transcript };
       if (this.take === take) this.render();
     };
-    const timer = window.setTimeout(() => settle({ state: "failed" }), TRANSCRIBE_TIMEOUT_MS);
+    const timer = window.setTimeout(() => settle({ state: "failed", error: "Transcription timed out. The take can still be saved." }), TRANSCRIBE_TIMEOUT_MS);
     try {
       const response = await fetch("/prompt-reader/transcriptions", {
         method: "POST",
@@ -348,11 +354,12 @@ class PromptReaderPage {
         body: take.samples.buffer,
       });
       const body = await response.json();
+      const metadata = { model: String(body.model ?? take.transcript.model ?? ""), hotwords: body.hotwords };
       settle(response.ok && typeof body.text === "string"
-        ? { state: "done", text: body.text, model: String(body.model ?? ""), decodeMs: Number(body.decodeMs) || 0 }
-        : { state: "failed" });
-    } catch {
-      settle({ state: "failed" });
+        ? { state: "done", ...metadata, text: body.text, decodeMs: Number(body.decodeMs) || 0 }
+        : { state: "failed", ...metadata, error: body.error ?? `Transcription failed (${response.status})` });
+    } catch (error) {
+      settle({ state: "failed", error: error instanceof Error ? error.message : String(error) });
     } finally {
       window.clearTimeout(timer);
     }
@@ -461,13 +468,23 @@ class PromptReaderPage {
   }
 
   renderTranscript(prompt) {
-    const { heard, heardText, heardNote } = this.elements;
+    const { heard, heardText, heardNote, heardHotwords, heardError } = this.elements;
     const transcript = this.take?.transcript;
     heard.hidden = !transcript || !prompt;
     if (heard.hidden) return;
+    const list = transcript.hotwords;
+    heardHotwords.textContent = transcript.state === "pending" ? "List snapshot pending" : "List snapshot unavailable";
+    if (list) {
+      const entries = `${list.count} ${list.count === 1 ? "entry" : "entries"}`;
+      const summary = list.count
+        ? `${entries}${transcript.state === "done" ? " applied" : "; transcription failed"}`
+        : "No list · greedy";
+      heardHotwords.textContent = `${summary} · snapshot ${list.revision.slice(0, 12)} · ${list.path}`;
+    }
+    heardError.textContent = transcript.error ?? "";
     if (transcript.state !== "done") {
       heardText.replaceChildren();
-      heardNote.textContent = transcript.state === "pending" ? "Transcribing" : "Transcript unavailable";
+      heardNote.textContent = [transcript.model, transcript.state === "pending" ? "Transcribing" : "Transcript unavailable"].filter(Boolean).join(" · ");
       return;
     }
     heardText.replaceChildren(

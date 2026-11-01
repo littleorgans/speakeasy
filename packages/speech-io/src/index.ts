@@ -37,6 +37,7 @@ export type {
 // Concrete STT engines + the rewrite decorator.
 export { SherpaEngine } from "./engines/sherpa.ts";
 export { SherpaOfflineEngine } from "./engines/sherpa-offline.ts";
+export { loadHotwords, HOTWORDS_FILENAME, type HotwordFileSnapshot } from "./engines/hotwords.ts";
 export {
   createLocalSherpaEngine,
   loadSherpaBinding,

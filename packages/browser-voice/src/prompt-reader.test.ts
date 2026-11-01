@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { readCorpusEntries, readWavFrames } from "@speakeasy/speech-io";
 import { startBrowserVoiceServer, type BrowserVoiceServer } from "./host.ts";
 import { PROMPT_MAX_TAKE_BYTES, type PromptListing } from "./prompt-reader.ts";
-import { ChildTranscriber, type Transcriber } from "./transcriber.ts";
+import { ChildTranscriber, TRANSCRIBE_MODEL_ID, type Transcriber } from "./transcriber.ts";
 
 const PROMPTS = {
   set: "T",
@@ -362,4 +362,43 @@ test("a crashing transcriber child leaves the host serving and is forked again",
     const saved = await post(host, "/prompt-reader/recordings?promptId=p001", { body: takeBytes(320) });
     assert.equal(saved.status, 201);
   }, { transcriber: worker });
+});
+
+test("worker list status and validation reasons reach the page API while audio still saves", async () => {
+  const hotwords = { path: "/owner/hotwords.txt", count: 2, revision: "abc123" };
+  await withReader(async (host, outputDir) => {
+    const listing = await (await fetch(`${host.url}/prompt-reader/prompts`)).json() as {
+      transcription: { model: string; hotwordsPath: string };
+    };
+    assert.equal(listing.transcription.model, "en-parakeet-ultra-int8");
+    assert.equal(listing.transcription.hotwordsPath, join(process.cwd(), "hotwords.txt"));
+    const rejected = await post(host, "/prompt-reader/transcriptions", { body: takeBytes(320, 1) });
+    assert.equal(rejected.status, 503);
+    assert.equal(rejected.body.model, TRANSCRIBE_MODEL_ID);
+    assert.deepEqual(rejected.body.hotwords, hotwords);
+    assert.match(String(rejected.body.error), /hotword "☃": unencodable UTF8 coverage/);
+    const saved = await post(host, "/prompt-reader/recordings?promptId=p001", { body: takeBytes(320, 1) });
+    assert.equal(saved.status, 201);
+    const [entry] = await readCorpusEntries(outputDir);
+    assert.equal(entry!.sidecar.schema, 2);
+    assert.equal(entry!.sidecar.expected, PROMPTS.items[1]!.text);
+    assert.equal(entry!.sidecar.hypothesis, "");
+    assert.ok((await readWavFrames(entry!.wavPath)).samples.every((sample) => sample === 1));
+    const next = await post(host, "/prompt-reader/transcriptions", { body: takeBytes(640) });
+    assert.equal(next.status, 200);
+    assert.equal(next.body.model, TRANSCRIBE_MODEL_ID);
+    assert.deepEqual(next.body.hotwords, hotwords);
+  }, { transcriber: async (root) => {
+    const workerPath = join(root, "list-worker.mjs");
+    await writeFile(workerPath, `
+      process.on("message", ({ id, samples }) => {
+        const hotwords = ${JSON.stringify(hotwords)};
+        process.send(samples[0] === 1
+          ? { id, error: 'hotword "☃": unencodable UTF8 coverage', hotwords }
+          : { id, text: "read this", decodeMs: 3, hotwords });
+      });
+      process.on("disconnect", () => process.exit(0));
+    `);
+    return new ChildTranscriber({ workerPath });
+  } });
 });

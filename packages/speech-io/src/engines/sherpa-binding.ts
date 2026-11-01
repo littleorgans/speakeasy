@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import { join } from "node:path";
-import { loadHotwords } from "./hotwords.ts";
+import { loadHotwords, type Hotwords } from "./hotwords.ts";
 import {
   gatesSilence,
   type SilenceGate,
@@ -35,13 +35,14 @@ export function loadSherpaBinding(): SherpaBinding {
 export async function createLocalSherpaEngine(
   model: SherpaModelId = DEFAULT_SHERPA_MODEL,
   gate: SilenceGateMode = "model",
+  options?: { hotwords: Hotwords | undefined },
 ): Promise<AnySherpaEngine> {
   const descriptor = resolveSherpaModel(model);
   return createSherpaEngine({
     model,
     modelRoot: SHERPA_ROOT,
     binding: loadSherpaBinding(),
-    hotwords: await loadHotwords(),
+    hotwords: options ? options.hotwords : await loadHotwords(),
     silenceGate:
       descriptor.kind === "offline"
         ? await localSilenceGate(descriptor.silenceGate, gate)
