@@ -1,6 +1,7 @@
 import { CAPTURE_AUDIO_CONSTRAINTS } from "/capture-constraints.js";
 import { HoldReleaseGate } from "/hold-release.js";
 import { concat, PreRollRing } from "/pre-roll.js";
+import { SetupResults, diffWords } from "/setup-results.js";
 
 /**
  * Prompt reader: walks a prompt set in id order and records one take per
@@ -74,6 +75,8 @@ class PromptReaderPage {
     this.playback = null;
     /** Saved take offset from the latest; 0 plays the newest. */
     this.takeOffset = 0;
+    this.comparison = new SetupResults(this);
+    this.keyboardHold = false;
     this.gate = new HoldReleaseGate({
       onCommit: () => this.finishTake(),
       onChange: () => this.render(),
@@ -96,13 +99,21 @@ class PromptReaderPage {
     this.index = firstOpen === -1 ? this.prompts.length : firstOpen;
     this.setStatus("Hold Space while you read the prompt aloud, then release.");
     this.render();
+    void this.comparison.load();
   }
 
   bind() {
+    this.comparison.bind();
     window.addEventListener("keydown", (event) => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (nativeControl(event.target) && !(event.target === this.elements.record && isSpace(event))) return;
       if (isSpace(event)) {
         event.preventDefault();
-        if (!event.repeat) void this.press();
+        if (!event.repeat && !this.keyboardHold) {
+          const held = this.gate.held;
+          void this.press();
+          this.keyboardHold = !held && this.gate.held;
+        }
       } else if (event.key === "Enter" && !event.repeat) {
         event.preventDefault();
         void this.save();
@@ -117,7 +128,8 @@ class PromptReaderPage {
       }
     });
     window.addEventListener("keyup", (event) => {
-      if (isSpace(event)) {
+      if (isSpace(event) && this.keyboardHold) {
+        this.keyboardHold = false;
         event.preventDefault();
         this.gate.release();
       }
@@ -153,8 +165,9 @@ class PromptReaderPage {
   }
 
   stepTake() {
-    if (this.take || this.gate.capturing || (this.current()?.takes?.length ?? 0) < 2) return;
+    if (this.take || this.gate.capturing || this.draining || (this.current()?.takes?.length ?? 0) < 2) return;
     this.stopPlayback();
+    this.comparison.invalidate();
     this.takeOffset += 1;
     const saved = this.savedTake();
     this.setStatus(`Take ${saved.number} of ${saved.count} selected. P plays it.`);
@@ -210,6 +223,8 @@ class PromptReaderPage {
   async press() {
     if (this.saving || this.draining || !this.current() || !this.gate.press()) return;
     this.stopPlayback();
+    this.comparison.invalidate();
+    this.cancelTranscription();
     const generation = this.micGeneration;
     // The ring holds only frames after the last take's flush reply, so the
     // pre roll is the one part of a take that may predate its press.
@@ -313,6 +328,7 @@ class PromptReaderPage {
     this.draining = Boolean(this.capture);
     this.endCapture();
     if (!this.draining) this.completeTake();
+    else this.render();
   }
 
   completeTake() {
@@ -326,9 +342,8 @@ class PromptReaderPage {
       return;
     }
     const peak = samples.reduce((max, sample) => Math.max(max, Math.abs(sample)), 0);
-    this.take = { samples, device: this.device, preRollMs: this.preRollMs,
-      transcript: { state: "pending", model: this.transcriptionConfig?.model } };
-    void this.transcribe(this.take);
+    this.take = { samples, device: this.device, preRollMs: this.preRollMs };
+    this.comparison.completeTake(this.take);
     const warnings = [
       peak >= CLIP_LEVEL ? "it clipped" : "",
       this.current()?.recorded ? "this prompt already has a take; saving adds another" : "",
@@ -341,17 +356,22 @@ class PromptReaderPage {
 
   /** Display only; the result lands on its own take, so a later take ignores it. */
   async transcribe(take) {
+    this.cancelTranscription();
+    const controller = new AbortController();
+    this.transcription = controller;
     const settle = (transcript) => {
       if (take.transcript.state !== "pending") return;
       take.transcript = { model: take.transcript.model, ...transcript };
       if (this.take === take) this.render();
     };
     const timer = window.setTimeout(() => settle({ state: "failed", error: "Transcription timed out. The take can still be saved." }), TRANSCRIBE_TIMEOUT_MS);
+    controller.signal.addEventListener("abort", () => window.clearTimeout(timer), { once: true });
     try {
       const response = await fetch("/prompt-reader/transcriptions", {
         method: "POST",
         headers: { "content-type": "application/octet-stream" },
         body: take.samples.buffer,
+        signal: controller.signal,
       });
       const body = await response.json();
       const metadata = { model: String(body.model ?? take.transcript.model ?? ""), hotwords: body.hotwords };
@@ -365,8 +385,16 @@ class PromptReaderPage {
     }
   }
 
+  cancelTranscription() {
+    this.transcription?.abort();
+    this.transcription = null;
+  }
+
   /** Cancels any take and stops the mic. */
   cancelTake(message) {
+    this.keyboardHold = false;
+    this.comparison.invalidate();
+    this.cancelTranscription();
     this.stopMic();
     if (!this.gate.capturing && !this.take && !this.draining) return;
     this.gate.cancel();
@@ -399,6 +427,9 @@ class PromptReaderPage {
       if (!response.ok) throw new Error(body.error ?? `save failed (${response.status})`);
       prompt.recorded = true;
       prompt.takes = [...(prompt.takes ?? []), body.audio];
+      this.comparison.invalidate();
+      this.cancelTranscription();
+      this.takeOffset = 0;
       this.take = null;
       this.index += 1;
       this.setStatus(`Saved ${prompt.id} as ${body.audio}.`);
@@ -411,10 +442,12 @@ class PromptReaderPage {
   }
 
   move(step) {
-    if (this.gate.capturing || this.saving) return;
+    if (this.gate.capturing || this.draining || this.saving) return;
     const next = Math.min(Math.max(this.index + step, 0), this.prompts.length);
     if (next === this.index) return;
     this.stopPlayback();
+    this.comparison.invalidate();
+    this.cancelTranscription();
     this.takeOffset = 0;
     this.index = next;
     this.take = null;
@@ -453,6 +486,7 @@ class PromptReaderPage {
       elements.text.textContent = "End of the prompt set. Score the folder with pnpm bench --corpus <dir>.";
     }
     this.renderTranscript(prompt);
+    this.comparison.render();
     elements.record.disabled = !prompt || this.saving;
     elements.save.disabled = !this.take || this.saving;
     const saved = this.take ? null : this.savedTake();
@@ -470,7 +504,7 @@ class PromptReaderPage {
   renderTranscript(prompt) {
     const { heard, heardText, heardNote, heardHotwords, heardError } = this.elements;
     const transcript = this.take?.transcript;
-    heard.hidden = !transcript || !prompt;
+    heard.hidden = !transcript || !prompt || this.comparison.mode !== "current-list" || this.comparison.provider() !== "local";
     if (heard.hidden) return;
     const list = transcript.hotwords;
     heardHotwords.textContent = transcript.state === "pending" ? "List snapshot pending" : "List snapshot unavailable";
@@ -501,44 +535,12 @@ class PromptReaderPage {
   }
 }
 
-/** Case and punctuation insensitive word key; empty for pure punctuation. */
-function wordKey(word) {
-  return word.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
-}
-
-/**
- * The heard words in order, each marked when it is outside the longest
- * common word sequence shared with the prompt.
- */
-function diffWords(expected, heard) {
-  const want = expected.split(/\s+/).map(wordKey).filter(Boolean);
-  const words = heard.split(/\s+/).filter(Boolean);
-  const keys = words.map(wordKey);
-  const lengths = Array.from({ length: keys.length + 1 }, () => new Array(want.length + 1).fill(0));
-  for (let i = keys.length - 1; i >= 0; i--) {
-    for (let j = want.length - 1; j >= 0; j--) {
-      lengths[i][j] = keys[i] && keys[i] === want[j]
-        ? lengths[i + 1][j + 1] + 1
-        : Math.max(lengths[i + 1][j], lengths[i][j + 1]);
-    }
-  }
-  const differs = keys.map((key) => key !== "");
-  for (let i = 0, j = 0; i < keys.length && j < want.length; ) {
-    if (keys[i] && keys[i] === want[j]) {
-      differs[i] = false;
-      i++;
-      j++;
-    } else if (lengths[i + 1][j] >= lengths[i][j + 1]) {
-      i++;
-    } else {
-      j++;
-    }
-  }
-  return words.map((word, index) => ({ word, differs: differs[index] }));
-}
-
 function isSpace(event) {
   return event.code === "Space" || event.key === " ";
+}
+
+function nativeControl(target) {
+  return Boolean(target?.closest?.("input, select, textarea, button, a, summary, [contenteditable]:not([contenteditable=false]), [role=button]"));
 }
 
 function describeMicError(error) {

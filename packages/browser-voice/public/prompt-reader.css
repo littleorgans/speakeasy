@@ -78,7 +78,8 @@ code,
   display: none;
 }
 
-.heard-text .differs {
+.heard-text .differs,
+.setup-transcript .differs {
   color: var(--accent);
   text-decoration: underline dotted;
   text-underline-offset: 0.2em;
@@ -88,6 +89,7 @@ code,
   margin: 0.25rem 0 0;
   font-size: 0.85rem;
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .heard-error {
@@ -154,3 +156,39 @@ kbd {
   color: var(--muted);
   margin-left: 0.4rem;
 }
+
+.speech-input {
+  margin: 1.5rem 0;
+  border-top: 1px solid var(--line);
+  padding-top: 1rem;
+}
+
+.speech-input h2,
+.setup-result h3 { font-size: 1rem; margin: 0 0 0.75rem; }
+.speech-input fieldset { margin: 0; padding: 0.75rem 0; border: 0; }
+.speech-input legend,
+.input-field { color: var(--muted); font-size: 0.85rem; }
+.speech-input select { font: inherit; color: var(--ink); background: #1c1d19; border: 1px solid var(--line); padding: 0.5rem; max-width: 100%; }
+.input-field { display: block; margin-bottom: 0.5rem; }
+.input-presets { display: grid; gap: 0.75rem; margin-top: 0.75rem; }
+.preset-choice { display: flex; gap: 0.75rem; align-items: baseline; border: 1px solid var(--line); border-radius: 0.5rem; padding: 0.9rem 1rem; cursor: pointer; }
+.preset-choice:has(input:checked) { border-color: var(--accent); background: #1c1d19; }
+.preset-choice:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 3px; }
+.preset-choice > span { min-width: 0; }
+.preset-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; }
+.preset-title strong { font-size: 1rem; font-weight: 600; }
+.preset-tags,
+.preset-fact,
+.preset-readiness { font-size: 0.85rem; line-height: 1.45; color: var(--muted); overflow-wrap: anywhere; }
+.preset-fact,
+.preset-readiness { display: block; margin-top: 0.35rem; }
+.preset-readiness { color: var(--ink); }
+.setup-results { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 1.5rem; margin-top: 1rem; }
+.setup-result { min-width: 0; border-top: 1px solid var(--line); padding-top: 0.75rem; }
+.setup-transcript { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
+.setup-result details { color: var(--muted); font-size: 0.85rem; overflow-wrap: anywhere; }
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+[hidden] { display: none !important; }
