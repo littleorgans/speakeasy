@@ -6,7 +6,7 @@ import type { Hotwords } from "./sherpa-api.ts";
 export type { Hotwords } from "./sherpa-api.ts";
 
 /**
- * Optional contextual-biasing hotwords for the SherpaEngine (experimental).
+ * Optional contextual biasing hotwords for local sherpa callers (experimental).
  *
  * If a `hotwords.txt` sits in the project root, its terms bias the decode
  * toward those phrases. One term/phrase per line; blank lines and `#` comments
@@ -15,8 +15,9 @@ export type { Hotwords } from "./sherpa-api.ts";
  * Caveats (see MODEL-SWEEP.md hotwords section):
  *   - sherpa applies hotwords ONLY under modified_beam_search, so enabling
  *     them switches the decoder off greedy_search.
- *   - BPE models tokenize each hotword via the SentencePiece bpe model; a
- *     model shipped without one (e.g. kroko) cannot tokenize hotwords.
+ *   - BPE bias needs matching tokenizer data. Offline Ultra reconstructs its
+ *     proven vocabulary and validates every phrase; unproven offline models
+ *     reject lists. Streaming models without BPE data (e.g. kroko) cannot bias.
  */
 
 /** Default contextual bias weight; higher = stronger pull toward hotwords. */

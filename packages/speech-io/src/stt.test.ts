@@ -40,6 +40,7 @@ test("stt closure holds the engines and contract only", () => {
   assert.deepEqual(files, [
     "contract.ts",
     "engines/assets.ts",
+    "engines/offline-hotwords.ts",
     "engines/offline-session.ts",
     "engines/result.ts",
     "engines/sherpa-api.ts",

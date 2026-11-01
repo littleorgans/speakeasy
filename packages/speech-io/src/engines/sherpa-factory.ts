@@ -9,8 +9,5 @@ export function createSherpaEngine(options: SherpaEngineOptions): AnySherpaEngin
   if (resolveSherpaModel(options.model).kind === "streaming") {
     return new SherpaEngine(options);
   }
-  if (options.hotwords) {
-    console.warn(`[sherpa] hotwords ignored: ${options.model} is an offline model`);
-  }
   return new SherpaOfflineEngine(options);
 }

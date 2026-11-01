@@ -63,8 +63,9 @@ export type SherpaEngineOptions = {
   modelRoot: string;
   binding: SherpaBinding;
   /**
-   * Streaming models only: contextual biasing, which switches decoding to
-   * modified_beam_search. Absent means greedy search.
+   * Contextual biasing for streaming models and proven offline tokenizers
+   * (Parakeet Ultra). A list selects modified_beam_search; absent means greedy.
+   * Offline models reject lists when their tokenizer has not been proven.
    */
   hotwords?: Hotwords;
   /** Offline models only: the silence gate every session runs before decode. */
