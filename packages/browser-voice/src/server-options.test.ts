@@ -71,6 +71,9 @@ test("runtime locations are explicit server configuration with portable absent d
     libraryPath: "/runtime/libspeech.dylib", loadTimeoutMs: 120000, operationTimeoutMs: 90000 } },
   cpu: { modelRoot: "/models/sherpa" } };
   assert.deepEqual(parseSetupRuntimeLocations(config), config);
+  const hex = { python: { "hex/unified": { pythonPath: "/runtime/python", modelPath: "/models/hex.gguf", runnerPath: "/runtime/hex-worker" } } };
+  assert.deepEqual(parseSetupRuntimeLocations(hex), hex, "Hex takes its native worker path");
+  assert.throws(() => parseSetupRuntimeLocations({ python: { "mlx-parakeet/v3-greedy": hex.python["hex/unified"] } }));
   for (const invalid of [{ python: { "qwen/context": { ...config.python["qwen/context"], libraryPath: "relative" } } },
     { python: { "sweep/score-2": config.python["qwen/context"] } },
     { python: { "qwen/context": { ...config.python["qwen/context"], apiKey: "fake" } } },

@@ -24,7 +24,7 @@ export class RoadTestPage {
     this.elements = Object.fromEntries([
       "status", "input-model", "input-card", "output-model", "output-voice", "output-card", "hold", "stop", "level",
       "transcript", "transcript-mode", "input-timings", "output-timings", "interrupt-timings", "replay-take",
-      "replay-voice", "echo", "talk-over", "history", "history-section",
+      "replay-voice", "echo", "talk-over", "history", "history-section", "level-track",
     ].map((id) => [id, document.getElementById(id)]));
     this.setups = [];
     this.voices = [];
@@ -53,7 +53,7 @@ export class RoadTestPage {
       fill(this.elements["output-model"], this.voices.map((model) => ({ value: model.id, label: model.label,
         disabled: model.readiness?.state !== "ready" })), voices.default?.model);
       this.fillVoices();
-      this.status("Ready. Hold Space or the button and speak.");
+      this.status("Ready");
     } catch (error) {
       this.status(`Models unavailable: ${error.message}`);
     }
@@ -110,6 +110,7 @@ export class RoadTestPage {
     this.mic ??= new MicCapture({ context: this.context, onFrame: (frame) => this.frame(frame) });
     this.readback ??= new VoiceReadback({ context: this.context, onChange: () => this.render() });
     await Promise.all([this.mic.start(this.elements.echo.checked), this.readback.prepare()]);
+    this.elements["level-track"].hidden = false;
   }
 
   async reopenMic() {
@@ -363,9 +364,9 @@ export class RoadTestPage {
     const output = run?.output;
     const latency = run?.outputLatency ?? outputLatency(this.context);
     describe(this.elements["output-timings"], [
+      ["Release to voice", formatDuration(releaseToVoice(run))],
       ["Text to first audio", formatDuration(output?.firstAudioMs)],
       ["Text to end", formatDuration(output?.totalMs) ?? (output?.outcome === "stopped" ? "stopped" : null)],
-      ["Release to voice", formatDuration(releaseToVoice(run))],
       ["Output latency", formatDuration(latency?.outputMs)],
       ["Base latency", formatDuration(latency?.baseMs)],
     ]);
