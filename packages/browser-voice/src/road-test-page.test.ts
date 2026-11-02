@@ -191,7 +191,10 @@ test("mic capture leads a take with pre roll and ends it at the worklet's flush 
 });
 
 /** The page with real gate and text helpers; the mic and voice are scripted fakes. */
-function pageHarness() {
+function pageHarness(rows: unknown[] = [
+  { type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status: "processing", text: null, timings: {} } },
+  { type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status: "complete", text: "Clear the screen.", timings: { firstUse: false, processingMs: 90 } } },
+]) {
   // The real gate schedules its release tail on the window timers.
   (globalThis as any).window ??= { setTimeout, clearTimeout };
   const elements = new Map<string, any>();
@@ -215,8 +218,6 @@ function pageHarness() {
   const setups = { setups: [{ id: "mlx-parakeet/v3-greedy", label: "Parakeet v3 MLX", card: { runtime: "mlx", transcript: "final" }, readiness: { ready: true, sizeBytes: 1 } }] };
   const voices = { revision: "rev", default: { model: "piper-kristin-medium" }, models: [{ id: "piper-kristin-medium", label: "Piper Kristin medium",
     provider: { kind: "local" }, defaultVoice: "kristin", defaultSpeed: 1, voices: [{ id: "kristin", label: "Kristin" }], readiness: { state: "ready" } }] };
-  const rows = [{ type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status: "processing", text: null, timings: {} } },
-    { type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status: "complete", text: "Clear the screen.", timings: { firstUse: false, processingMs: 90 } } }];
   const fetch = async (url: string) => {
     posted.push(url);
     if (url === "/prompt-reader/setups") return { ok: true, json: async () => setups };
@@ -253,4 +254,19 @@ test("the page loop: hold, release, final text, then the chosen voice reads it b
   assert.ok(timings.includes("Text to first audio: 120 ms"), timings.join(" | "));
   assert.ok(timings.includes("Text to end: 900 ms"));
   assert.equal(page.phase, "idle");
+});
+
+test("model start sums every load phase, so a cleanup row counts its own model after Ultra", async () => {
+  const row = (status: string, extra = {}) => ({ type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status, text: null, timings: {}, ...extra } });
+  const { page } = pageHarness([row("loading"), row("processing"), row("loading"), row("processing"),
+    row("complete", { text: "Clear the screen.", timings: { firstUse: true, processingMs: 90 } })]);
+  await page.start();
+  let now = 0;
+  const clock = performance.now;
+  const times = [0, 100, 300, 1_300, 1_400, 1_500];
+  performance.now = () => times[Math.min(now++, times.length - 1)]!;
+  try {
+    const result = await page.transcribe({ setup: page.setups[0] }, new Float32Array(16), 0, () => {});
+    assert.equal(result.loadMs, 100 + 1_000);
+  } finally { performance.now = clock; }
 });
