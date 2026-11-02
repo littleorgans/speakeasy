@@ -191,15 +191,17 @@ export class RoadTestPage {
         return { ...result, error: `Transcription failed: ${body.error ?? response.status}` };
       }
       let loadingAt = null;
-      let processingAt = null;
+      let startMs = 0;
       await readEvents(response, (event) => {
         if (event.type !== "row" || event.row.setupId !== run.setup.id) return;
         const row = event.row;
+        // A cleanup row loads Ultra, then its own model: every load phase counts.
         if (row.status === "loading") {
-          loadingAt ??= performance.now();
+          loadingAt = performance.now();
           this.status(`Loading ${run.setup.label}`);
         } else if (row.status === "processing") {
-          processingAt ??= performance.now();
+          if (loadingAt != null) startMs += performance.now() - loadingAt;
+          loadingAt = null;
           this.status(`Transcribing with ${run.setup.label}`);
         }
         if (typeof row.text === "string" && row.text.trim() && result.firstWordsMs == null) {
@@ -210,7 +212,7 @@ export class RoadTestPage {
           result.text = row.text ?? "";
           result.finalMs = performance.now() - from;
           // Observed here: the host's load figure leaves out worker process startup.
-          result.loadMs = row.timings.firstUse && loadingAt != null && processingAt != null ? processingAt - loadingAt : null;
+          result.loadMs = row.timings.firstUse ? startMs : null;
           result.processingMs = row.timings.processingMs;
           onText(result.text);
         } else if (["error", "cancelled", "skipped"].includes(row.status)) {
