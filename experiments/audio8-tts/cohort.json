@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "note": "Agent to owner lines. Same texts for every engine. The reference text is only spoken to make Audio8 cloning references.",
+  "texts": [
+    { "id": "status", "kind": "one line status", "text": "The deploy finished and the site is live again." },
+    { "id": "question", "kind": "question", "text": "Should I merge the pull request now, or wait for Sam to review it?" },
+    { "id": "code", "kind": "number and code", "text": "PR 418 merged at 14:05; main is green at commit 7f3a9c2 with 184 ms median latency." },
+    { "id": "warning", "kind": "one line warning", "text": "Heads up: the build server disk is ninety percent full." },
+    { "id": "summary", "kind": "two sentence summary", "text": "I fixed the flaky login test and pushed the change to your branch. Nothing else on the branch has changed." },
+    { "id": "schedule", "kind": "time and name", "text": "Your call with Priya moved to 3:30 pm, so you have about twenty minutes." },
+    { "id": "paragraph", "kind": "longer paragraph", "text": "I finished the voice comparison you asked for. There are three engines, and each one read the same seven lines. The clips are in the shared folder, one row per line, so you can play them side by side. When you have listened, tell me which voice you would like as the default, and I will switch it over and run the checks again." }
+  ],
+  "reference": {
+    "id": "reference",
+    "text": "Good morning. I went through the overnight reports and nothing needs your attention. The weather looks clear, so the outdoor rehearsal can go ahead this afternoon."
+  }
+}
