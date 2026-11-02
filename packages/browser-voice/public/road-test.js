@@ -280,7 +280,7 @@ export class RoadTestPage {
     if (!take) return;
     run.cutInTake = take.samples;
     const result = await this.transcribe(run, take.samples, endedAt, () => {});
-    run.interrupt.text = result.error ? result.error : result.text;
+    run.interrupt.text = result.error || result.text || "Nothing heard";
     this.phase = "idle";
     this.status("Done. Hold Space for the next take.");
     this.render();

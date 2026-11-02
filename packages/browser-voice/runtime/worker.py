@@ -20,6 +20,7 @@ BACKENDS = {
     "mlx-parakeet/ultra-greedy": "parakeet",
     "mlx-cleanup/qwen-targeted": "cleanup",
     "qwen/context": "qwen_asr",
+    "hex/unified": "hex_unified",
 }
 
 

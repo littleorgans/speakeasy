@@ -178,6 +178,40 @@
       "maxSamples": 960000
     },
     {
+      "id": "hex/unified",
+      "label": "Hex Parakeet Unified",
+      "card": {
+        "runtime": "transcribe.cpp 7045d1c, Metal GPU, Hex stream pipeline",
+        "transcript": "final"
+      },
+      "model": "parakeet-unified-en-0.6b",
+      "revision": "826bdbc44c8806630a45c08ed8cef35a36817a17",
+      "file": "parakeet-unified-en-0.6b-Q8_0.gguf",
+      "fileBytes": 731357568,
+      "sha256": "4b50b6dd862bf6e346929aaf4f5eaacec003bfa3f56462d6c874b41ef2f38795",
+      "runtime": {
+        "transcribe.cpp": "7045d1c0fe7cee37747b2792977421d435e75fca",
+        "hex": "826bdbc44c8806630a45c08ed8cef35a36817a17",
+        "worker": "runtime/hex/worker.rs built by runtime/hex/build.py",
+        "device": "Metal"
+      },
+      "quantization": "Q8_0 GGUF",
+      "controls": {
+        "language": "en",
+        "threads": 1,
+        "feedSamples": 2560,
+        "pauseCap": "Hex PauseCap and SpeechFrames, unchanged",
+        "trailingSamples": 6400,
+        "timestamps": "segment",
+        "session": "fresh per take",
+        "gate": "off",
+        "rewrite": "off",
+        "hotwords": null
+      },
+      "operation": "transcribe",
+      "maxSamples": 1920000
+    },
+    {
       "id": "mlx-cleanup/qwen-targeted",
       "label": "Ultra plus Qwen cleanup",
       "card": {

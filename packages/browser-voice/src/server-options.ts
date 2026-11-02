@@ -11,10 +11,14 @@ import { ChildTranscriber } from "./transcriber.ts";
 import type { SetupReadiness } from "./setup-routes.ts";
 
 type PythonSetupId = Exclude<SetupId, "sweep/score-2">;
+/** The one native location a Python setup needs beyond its model. */
+const EXTRA_LOCATIONS: Partial<Record<PythonSetupId, "libraryPath" | "runnerPath">> = {
+  "qwen/context": "libraryPath", "hex/unified": "runnerPath",
+};
 const DEFAULT_SETUP_TIMEOUT_MS = 120_000;
 export type SetupRuntimeLocations = {
   python?: Partial<Record<PythonSetupId, { pythonPath: string; modelPath: string; libraryPath?: string;
-    loadTimeoutMs?: number; operationTimeoutMs?: number }>>;
+    runnerPath?: string; loadTimeoutMs?: number; operationTimeoutMs?: number }>>;
   cpu?: { modelRoot: string };
 };
 
@@ -64,10 +68,10 @@ export function parseSetupRuntimeLocations(value: unknown): SetupRuntimeLocation
     result.python = {};
     for (const [id, config] of Object.entries(value.python)) {
       if (!isSetupId(id) || id === "sweep/score-2" || !isRecord(config)) throw new Error("unknown Python setup");
-      exactFields(config, ["pythonPath", "modelPath", ...(id === "qwen/context" ? ["libraryPath"] : []),
-        "loadTimeoutMs", "operationTimeoutMs"]);
+      const extra = EXTRA_LOCATIONS[id];
+      exactFields(config, ["pythonPath", "modelPath", ...(extra ? [extra] : []), "loadTimeoutMs", "operationTimeoutMs"]);
       const parsed = { pythonPath: absoluteLocation(config.pythonPath), modelPath: absoluteLocation(config.modelPath),
-        ...(id === "qwen/context" ? { libraryPath: absoluteLocation(config.libraryPath) } : {}) };
+        ...(extra ? { [extra]: absoluteLocation(config[extra]) } : {}) };
       for (const key of ["loadTimeoutMs", "operationTimeoutMs"] as const) {
         if (config[key] !== undefined && (!Number.isSafeInteger(config[key]) || Number(config[key]) < 1)) {
           throw new Error("worker deadlines must be positive integer milliseconds");
@@ -103,7 +107,8 @@ export async function createSetupRuntime(file?: string) {
   const python: SetupWorkersOptions["python"] = {};
   for (const [id, config] of Object.entries(locations.python ?? {})) {
     python[id as PythonSetupId] = { pythonPath: config.pythonPath,
-      backendOptions: { modelPath: config.modelPath, ...(config.libraryPath ? { libraryPath: config.libraryPath } : {}) },
+      backendOptions: { modelPath: config.modelPath, ...(config.libraryPath ? { libraryPath: config.libraryPath } : {}),
+        ...(config.runnerPath ? { runnerPath: config.runnerPath } : {}) },
       expectedIdentity: { setupId: id }, loadTimeoutMs: config.loadTimeoutMs ?? DEFAULT_SETUP_TIMEOUT_MS,
       operationTimeoutMs: config.operationTimeoutMs ?? DEFAULT_SETUP_TIMEOUT_MS };
   }
@@ -133,6 +138,9 @@ async function inspectSetupReadiness(locations: SetupRuntimeLocations, modelRoot
         const model = await stat(config.modelPath);
         if (setup.id === "qwen/context") {
           if (!model.isFile() || !config.libraryPath || !(await stat(config.libraryPath)).isFile()) throw new Error();
+        } else if (setup.id === "hex/unified") {
+          if (!model.isFile() || !config.runnerPath) throw new Error();
+          await access(config.runnerPath, constants.X_OK);
         } else {
           if (!model.isDirectory()) throw new Error();
           for (const name of ["config.json", "model.safetensors"]) {

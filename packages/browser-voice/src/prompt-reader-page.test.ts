@@ -346,7 +346,7 @@ test("a tap on a warm mic stays too short despite its pre roll", async () => {
 test("comparison defaults to only v3 in exact manifest order and keeps unavailable identity visible", () => {
   const { reader } = pageHarness();
   enableComparison(reader);
-  assert.equal(reader.comparison.checks.length, 5);
+  assert.equal(reader.comparison.checks.length, comparisonCatalog().setups.length);
   assert.deepEqual(reader.comparison.checks.map((entry: any) => entry.setup.id), comparisonCatalog().setups.map((setup: any) => setup.id));
   assert.deepEqual(reader.comparison.checks.filter((entry: any) => entry.input.checked).map((entry: any) => entry.setup.id), ["mlx-parakeet/v3-greedy"]);
   assert.match(reader.comparison.checks[0].status.textContent, /Needs setup: test runtime unavailable/);
