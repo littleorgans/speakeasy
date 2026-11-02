@@ -53,7 +53,8 @@ export class RoadTestPage {
       fill(this.elements["output-model"], this.voices.map((model) => ({ value: model.id, label: model.label,
         disabled: model.readiness?.state !== "ready" })), voices.default?.model);
       this.fillVoices();
-      this.status("Ready");
+      const ready = this.setups.some((setup) => setup.readiness?.ready);
+      this.status(ready ? "Ready" : `No speech in model is ready: ${this.setups[0]?.readiness?.reason ?? "none configured"}`);
     } catch (error) {
       this.status(`Models unavailable: ${error.message}`);
     }

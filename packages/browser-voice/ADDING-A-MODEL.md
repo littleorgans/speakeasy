@@ -12,16 +12,33 @@ From the repo root:
 pnpm road-test
 ```
 
-It serves `http://127.0.0.1:4870/`. The host finds models through two
-server side locations, set in the gitignored `.env` or passed as flags after
-`pnpm road-test --`:
+It serves `http://127.0.0.1:4870/` with no further setup:
 
-- `SPEAKEASY_SETUP_RUNTIME` (`--setup-runtime`): a JSON file with each speech
-  in setup's absolute interpreter, model and native paths, plus `cpu.modelRoot`.
-- `SPEAKEASY_OUTPUT_ROOT` (`--output-root`): the directory holding the voice
-  payloads, usually the repo's `models/tts`.
+- Voices load from `models/tts` under the repo root.
+- Speech in setups read their paths from `models/road-test-runtime.json`
+  (gitignored, one per machine). If it is missing, the page still opens; the
+  console names the file and each setup that needs it shows
+  "needs setup: setup runtime file missing". The sherpa CPU setup needs no
+  entry: it reads `models/sherpa`.
 
-A model whose files are missing stays listed with "needs setup".
+Flags after `pnpm road-test --` or environment values override either default:
+`--setup-runtime` / `SPEAKEASY_SETUP_RUNTIME` and `--output-root` /
+`SPEAKEASY_OUTPUT_ROOT`.
+
+### The setup runtime file
+
+JSON with absolute server paths only; `road-test-runtime.example.json` in this
+package shows every entry. Omit a setup to leave it unavailable.
+
+- `python.<setup id>`: `pythonPath` (the interpreter that runs
+  `runtime/worker.py`) and `modelPath` (file or snapshot directory), plus
+  `libraryPath` for `qwen/context` or `runnerPath` for `hex/unified`.
+  Optional `loadTimeoutMs` and `operationTimeoutMs`, positive integers,
+  default 120000.
+- `cpu.modelRoot`: the directory holding `parakeet-ultra-sherpa-onnx-int8`;
+  defaults to `models/sherpa`.
+
+Unknown setups or fields are refused at startup.
 
 ## Speech in
 
@@ -40,7 +57,8 @@ A model whose files are missing stays listed with "needs setup".
    example.
 5. Teach `src/server-options.ts` its files: a native path beyond the model goes
    in `EXTRA_LOCATIONS`, and `inspectSetupReadiness` checks the files exist.
-6. Add its paths to your setup runtime JSON, restart, and try it in the page.
+6. Add its paths to `models/road-test-runtime.json` and to
+   `road-test-runtime.example.json`, restart, and try it in the page.
 
 ## Speech out
 

@@ -10,7 +10,7 @@ import { getLocalOutputCatalogue } from "../../speech-io/src/tts/catalogue.ts";
 
 loadLocalEnv();
 const options = readBrowserVoiceOptions(process.argv.slice(2), process.env);
-const setup = await createSetupRuntime(options.setupRuntimeFile);
+const setup = await createSetupRuntime(options.setupRuntimeFile, { optional: options.setupRuntimeDefault });
 const credentials = createProviderCredentials();
 const localOutput = new LocalSpeechOutputFactory({ root: options.outputRoot });
 const { output, providers, speechOutput } = createProviderRuntime({ credentials,
@@ -27,6 +27,10 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => { void host.close().catch(() => { process.exitCode = 1; }); });
 }
 console.log(`speak-easy browser voice: ${host.url}`);
+if (setup.missingFile) {
+  console.log(`Setup runtime file missing: ${setup.missingFile}. Speech in models that need it show "needs setup"; ` +
+    "see packages/browser-voice/ADDING-A-MODEL.md for its shape.");
+}
 console.log(options.home === "road-test"
   ? "Open the URL, allow microphone access, then hold Space to road test speech in and out."
   : "Open the URL, allow microphone access, then start a room.");

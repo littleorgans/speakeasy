@@ -16,6 +16,9 @@ const EXTRA_LOCATIONS: Partial<Record<PythonSetupId, "libraryPath" | "runnerPath
   "qwen/context": "libraryPath", "hex/unified": "runnerPath",
 };
 const DEFAULT_SETUP_TIMEOUT_MS = 120_000;
+/** Gitignored, machine specific; read when no flag or environment value names another. */
+export const DEFAULT_SETUP_RUNTIME = "models/road-test-runtime.json";
+export const DEFAULT_OUTPUT_ROOT = "models/tts";
 export type SetupRuntimeLocations = {
   python?: Partial<Record<PythonSetupId, { pythonPath: string; modelPath: string; libraryPath?: string;
     runnerPath?: string; loadTimeoutMs?: number; operationTimeoutMs?: number }>>;
@@ -26,7 +29,7 @@ export function readBrowserVoiceOptions(
   argv: string[],
   env: NodeJS.ProcessEnv,
 ): { port: number; runtimeConfig: RuntimeConfig; promptReader?: PromptReaderConfig; hotwordsPath?: string;
-  setupRuntimeFile?: string; outputRoot?: string; home: "room" | "road-test" } {
+  setupRuntimeFile: string; setupRuntimeDefault: boolean; outputRoot: string; home: "room" | "road-test" } {
   const portFlag = argv.indexOf("--port");
   const port = portFlag === -1 ? 4317 : Number(argv[portFlag + 1]);
   if (!Number.isInteger(port) || port < 0 || port > 65_535) {
@@ -37,14 +40,16 @@ export function readBrowserVoiceOptions(
   const hotwordsPath = readFlag(argv, "--hotwords");
   const setupRuntimeFile = readFlag(argv, "--setup-runtime") ?? env.SPEAKEASY_SETUP_RUNTIME;
   const outputRoot = readFlag(argv, "--output-root") ?? env.SPEAKEASY_OUTPUT_ROOT;
+  // Defaults resolve from the repo root, where every command runs.
   if ((promptsPath === undefined) !== (outputDir === undefined)) {
     throw new Error("--prompts <file> and --out <dir> go together");
   }
   return {
     port,
     home: argv.includes("--road-test") ? "road-test" : "room",
-    ...(setupRuntimeFile === undefined ? {} : { setupRuntimeFile }),
-    ...(outputRoot === undefined ? {} : { outputRoot: absoluteLocation(outputRoot) }),
+    setupRuntimeFile: setupRuntimeFile ?? resolve(DEFAULT_SETUP_RUNTIME),
+    setupRuntimeDefault: setupRuntimeFile === undefined,
+    outputRoot: outputRoot === undefined ? resolve(DEFAULT_OUTPUT_ROOT) : absoluteLocation(outputRoot),
     ...(hotwordsPath !== undefined ? { hotwordsPath } : {}),
     ...(promptsPath !== undefined && outputDir !== undefined
       ? { promptReader: { promptsPath, outputDir } }
@@ -97,12 +102,24 @@ function absoluteLocation(value: unknown): string {
   return value;
 }
 
-/** File checks only. Weight identity and runtime attestation remain in each worker. */
-export async function createSetupRuntime(file?: string) {
+/**
+ * File checks only. Weight identity and runtime attestation remain in each worker.
+ * An optional file may be absent: the host still serves, and each setup that
+ * needs it reports the missing path as its readiness reason.
+ */
+export async function createSetupRuntime(file?: string, { optional = false } = {}) {
   let locations: SetupRuntimeLocations = {};
+  let missingFile: string | undefined;
   if (file !== undefined) {
-    if ((await stat(file)).size > 16_384) throw new Error("setup runtime configuration exceeds limit");
-    locations = parseSetupRuntimeLocations(JSON.parse(await readFile(file, "utf8")));
+    const info = await stat(file).catch((error: NodeJS.ErrnoException) => {
+      if (optional && error.code === "ENOENT") return undefined;
+      throw error;
+    });
+    if (!info) missingFile = resolve(file);
+    else {
+      if (info.size > 16_384) throw new Error("setup runtime configuration exceeds limit");
+      locations = parseSetupRuntimeLocations(JSON.parse(await readFile(file, "utf8")));
+    }
   }
   const python: SetupWorkersOptions["python"] = {};
   for (const [id, config] of Object.entries(locations.python ?? {})) {
@@ -115,11 +132,12 @@ export async function createSetupRuntime(file?: string) {
   const modelRoot = locations.cpu?.modelRoot ?? resolve("models/sherpa");
   const executor = new SetupWorkers({ python, cpu: new ChildTranscriber({ mode: "sweep/score-2", modelRoot,
     startupTimeoutMs: DEFAULT_SETUP_TIMEOUT_MS, timeoutMs: DEFAULT_SETUP_TIMEOUT_MS }) });
-  const setupReadiness = await inspectSetupReadiness(locations, modelRoot);
-  return { executor, readiness: () => setupReadiness };
+  const setupReadiness = await inspectSetupReadiness(locations, modelRoot, missingFile);
+  return { executor, readiness: () => setupReadiness, missingFile };
 }
 
-async function inspectSetupReadiness(locations: SetupRuntimeLocations, modelRoot: string): Promise<SetupReadiness[]> {
+async function inspectSetupReadiness(locations: SetupRuntimeLocations, modelRoot: string,
+  missingFile?: string): Promise<SetupReadiness[]> {
   const readiness: SetupReadiness[] = [];
   for (const setup of SETUPS) {
     const config = setup.id === "sweep/score-2" ? undefined : locations.python?.[setup.id];
@@ -150,7 +168,10 @@ async function inspectSetupReadiness(locations: SetupRuntimeLocations, modelRoot
         sizeBytes = await modelBytes(config.modelPath);
       }
       readiness.push({ setupId: setup.id, ready: true, sizeBytes });
-    } catch { readiness.push({ setupId: setup.id, ready: false, reason: "runtime or model files need setup" }); }
+    } catch {
+      readiness.push({ setupId: setup.id, ready: false, reason: !config && missingFile && setup.id !== "sweep/score-2"
+        ? `setup runtime file missing: ${missingFile}` : "runtime or model files need setup" });
+    }
     readiness.at(-1)!.deadlines = { loadMs: config?.loadTimeoutMs ?? DEFAULT_SETUP_TIMEOUT_MS,
       operationMs: config?.operationTimeoutMs ?? DEFAULT_SETUP_TIMEOUT_MS };
   }
