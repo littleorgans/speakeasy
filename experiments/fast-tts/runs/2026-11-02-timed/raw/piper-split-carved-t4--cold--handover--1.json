@@ -1,0 +1,211 @@
+{
+ "schema": "fast-tts.result.v1",
+ "engine": {
+  "id": "piper-split-carved-t4",
+  "label": "Piper Kristin medium split decoder · planSegments · 4 threads",
+  "runtime": "libpiper 1.8.0 (piper1-gpl 10880972), onnxruntime 1.22.0",
+  "provider": "cpu",
+  "model": "piper-kristin-medium",
+  "modelRevision": "rhasspy/piper-voices@e7229f7d split; sha256:f9a5c375c70d",
+  "voice": "kristin",
+  "sampleRate": 22050,
+  "threads": 4,
+  "streaming": "libpiper split voice: one encoder pass per part, then overlapping decoder chunks, so audio is incremental within a sentence; full mode drains the same chunks into one",
+  "chunkPolicy": "planSegments: first part is the first clause or 4 words of sentence 1, then whole sentences; chunks are libpiper's decoder chunks (first 32 latent frames, 372 ms, 12 context frames each side, later 24 to 256 frames sized from decoder speed), untrimmed, no added gaps",
+  "cancellation": "between decoder chunks in the worker (no stop request yet; a host stops by not sending the next part, the current part runs to completion)"
+ },
+ "environment": {
+  "machine": "Apple M2 Max",
+  "arch": "arm64",
+  "cpuCount": 12,
+  "memoryGiB": 96,
+  "os": "macOS 27.0.1",
+  "versions": {
+   "node": "25.9.0",
+   "libpiper": "1.8.0",
+   "piper1-gpl": "10880972db9e0aca101fed350eadf8f49deefe9f",
+   "onnxruntime": "1.22.0"
+  },
+  "harnessCommit": "f0465da1b8f0"
+ },
+ "process": {
+  "temperature": "cold",
+  "timed": true,
+  "repeats": 1,
+  "startedAt": "2026-11-02T23:19:18.037Z",
+  "clock": "performance.now (monotonic)",
+  "playback": null,
+  "loadMs": 445.258,
+  "warmupMs": null,
+  "loadDetail": {
+   "note": "loadMs is the Piper Plus frontend (CMU dict parse) plus worker spawn and piper_create (encoder and decoder sessions)"
+  }
+ },
+ "runs": [
+  {
+   "textId": "handover",
+   "mode": "stream",
+   "temperature": "cold",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 28.636,
+     "audioMs": 371.519,
+     "text": "Here is where things"
+    },
+    {
+     "index": 1,
+     "readyMs": 55.101,
+     "audioMs": 1056.508,
+     "text": "Here is where things"
+    },
+    {
+     "index": 2,
+     "readyMs": 82.859,
+     "audioMs": 371.519,
+     "text": "stand on the release."
+    },
+    {
+     "index": 3,
+     "readyMs": 110.489,
+     "audioMs": 1126.168,
+     "text": "stand on the release."
+    },
+    {
+     "index": 4,
+     "readyMs": 168.528,
+     "audioMs": 371.519,
+     "text": "The migration ran overnight and finished without errors, so the new tables are live in staging."
+    },
+    {
+     "index": 5,
+     "readyMs": 239.447,
+     "audioMs": 2972.154,
+     "text": "The migration ran overnight and finished without errors, so the new tables are live in staging."
+    },
+    {
+     "index": 6,
+     "readyMs": 291.508,
+     "audioMs": 2403.265,
+     "text": "The migration ran overnight and finished without errors, so the new tables are live in staging."
+    },
+    {
+     "index": 7,
+     "readyMs": 351.052,
+     "audioMs": 371.519,
+     "text": "I checked the dashboards this morning, and response times are back under two hundred milliseconds."
+    },
+    {
+     "index": 8,
+     "readyMs": 418.1,
+     "audioMs": 2972.154,
+     "text": "I checked the dashboards this morning, and response times are back under two hundred milliseconds."
+    },
+    {
+     "index": 9,
+     "readyMs": 475.328,
+     "audioMs": 2670.295,
+     "text": "I checked the dashboards this morning, and response times are back under two hundred milliseconds."
+    },
+    {
+     "index": 10,
+     "readyMs": 504.61,
+     "audioMs": 371.519,
+     "text": "Two small issues remain."
+    },
+    {
+     "index": 11,
+     "readyMs": 533.571,
+     "audioMs": 1265.488,
+     "text": "Two small issues remain."
+    },
+    {
+     "index": 12,
+     "readyMs": 600.433,
+     "audioMs": 371.519,
+     "text": "The export button still times out on very large projects, and one of the email templates shows the old logo."
+    },
+    {
+     "index": 13,
+     "readyMs": 667.406,
+     "audioMs": 2972.154,
+     "text": "The export button still times out on very large projects, and one of the email templates shows the old logo."
+    },
+    {
+     "index": 14,
+     "readyMs": 740.253,
+     "audioMs": 2972.154,
+     "text": "The export button still times out on very large projects, and one of the email templates shows the old logo."
+    },
+    {
+     "index": 15,
+     "readyMs": 747.865,
+     "audioMs": 255.42,
+     "text": "The export button still times out on very large projects, and one of the email templates shows the old logo."
+    },
+    {
+     "index": 16,
+     "readyMs": 805.924,
+     "audioMs": 371.519,
+     "text": "I have opened tickets for both and assigned them to Maya, who expects to close them by Thursday."
+    },
+    {
+     "index": 17,
+     "readyMs": 873.888,
+     "audioMs": 2972.154,
+     "text": "I have opened tickets for both and assigned them to Maya, who expects to close them by Thursday."
+    },
+    {
+     "index": 18,
+     "readyMs": 914.178,
+     "audioMs": 1845.986,
+     "text": "I have opened tickets for both and assigned them to Maya, who expects to close them by Thursday."
+    },
+    {
+     "index": 19,
+     "readyMs": 978.565,
+     "audioMs": 371.519,
+     "text": "If you are happy with that plan, I will schedule the production rollout for Friday morning, before the team meeting."
+    },
+    {
+     "index": 20,
+     "readyMs": 1046.014,
+     "audioMs": 2972.154,
+     "text": "If you are happy with that plan, I will schedule the production rollout for Friday morning, before the team meeting."
+    },
+    {
+     "index": 21,
+     "readyMs": 1110.891,
+     "audioMs": 2972.154,
+     "text": "If you are happy with that plan, I will schedule the production rollout for Friday morning, before the team meeting."
+    },
+    {
+     "index": 22,
+     "readyMs": 1117.028,
+     "audioMs": 139.32,
+     "text": "If you are happy with that plan, I will schedule the production rollout for Friday morning, before the team meeting."
+    },
+    {
+     "index": 23,
+     "readyMs": 1171.752,
+     "audioMs": 371.519,
+     "text": "Let me know if you would rather wait until next week, and I will move everything back."
+    },
+    {
+     "index": 24,
+     "readyMs": 1237.35,
+     "audioMs": 2972.154,
+     "text": "Let me know if you would rather wait until next week, and I will move everything back."
+    },
+    {
+     "index": 25,
+     "readyMs": 1257.039,
+     "audioMs": 801.088,
+     "text": "Let me know if you would rather wait until next week, and I will move everything back."
+    }
+   ]
+  }
+ ]
+}

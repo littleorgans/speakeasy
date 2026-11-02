@@ -1,0 +1,702 @@
+{
+ "schema": "fast-tts.result.v1",
+ "engine": {
+  "id": "pocket-18m-bill",
+  "label": "Pocket TTS 18M \u00b7 bill_boerst",
+  "runtime": "pocket-tts 4.0.1 kyutai-labs/pocket-tts@91a9e96433bfe23375eea719b03f0081466f8e20 (torch 2.15.0)",
+  "provider": "cpu",
+  "model": "kyutai/pocket-tts-without-voice-cloning/languages/english_18m_2026-10",
+  "modelRevision": "a7056f505a4a8ca72d8b5fb1440071d6f1a35739",
+  "voice": "bill_boerst",
+  "sampleRate": 24000,
+  "threads": 1,
+  "streaming": "native incremental: generate_audio_stream, 12.5 Hz latents decoded by Mimi as queued",
+  "chunkPolicy": "upstream: text split at sentences into chunks of at most 50 tokens; each yield is one Mimi decode of every queued 80 ms frame (1920 samples each), so the first chunk is one frame",
+  "cancellation": "stop event before every latent frame (80 ms of audio) and every text chunk; queued frames still decode"
+ },
+ "environment": {
+  "machine": "Apple M2 Max",
+  "arch": "arm64",
+  "cpuCount": 12,
+  "memoryGiB": 96,
+  "os": "macOS 27.0.1",
+  "versions": {
+   "python": "3.12.5",
+   "pocket-tts": "4.0.1",
+   "torch": "2.15.0",
+   "sentencepiece": "0.2.2",
+   "numpy": "2.5.4"
+  },
+  "harnessCommit": "f0465da1b8f0"
+ },
+ "process": {
+  "temperature": "cold",
+  "timed": true,
+  "repeats": 1,
+  "startedAt": "2026-11-02T22:54:18+00:00",
+  "clock": "time.perf_counter_ns (monotonic)",
+  "playback": null,
+  "loadMs": 1883.422,
+  "warmupMs": null,
+  "loadDetail": {
+   "importMs": 1768.484,
+   "modelLoadMs": 114.528,
+   "voiceStateMs": 0.403,
+   "torchThreads": 1,
+   "note": "loadMs is torch and pocket_tts import, load_model on the local config, and the bill_boerst voice state from its safetensors"
+  }
+ },
+ "runs": [
+  {
+   "textId": "handover",
+   "mode": "stream",
+   "temperature": "cold",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 27.659,
+     "audioMs": 80.0,
+     "text": null
+    },
+    {
+     "index": 1,
+     "readyMs": 37.301,
+     "audioMs": 80.0,
+     "text": null
+    },
+    {
+     "index": 2,
+     "readyMs": 49.461,
+     "audioMs": 160.0,
+     "text": null
+    },
+    {
+     "index": 3,
+     "readyMs": 60.664,
+     "audioMs": 160.0,
+     "text": null
+    },
+    {
+     "index": 4,
+     "readyMs": 74.063,
+     "audioMs": 160.0,
+     "text": null
+    },
+    {
+     "index": 5,
+     "readyMs": 86.65,
+     "audioMs": 160.0,
+     "text": null
+    },
+    {
+     "index": 6,
+     "readyMs": 103.437,
+     "audioMs": 240.0,
+     "text": null
+    },
+    {
+     "index": 7,
+     "readyMs": 119.366,
+     "audioMs": 240.0,
+     "text": null
+    },
+    {
+     "index": 8,
+     "readyMs": 139.41,
+     "audioMs": 320.0,
+     "text": null
+    },
+    {
+     "index": 9,
+     "readyMs": 160.03,
+     "audioMs": 320.0,
+     "text": null
+    },
+    {
+     "index": 10,
+     "readyMs": 185.282,
+     "audioMs": 400.0,
+     "text": null
+    },
+    {
+     "index": 11,
+     "readyMs": 213.622,
+     "audioMs": 480.0,
+     "text": null
+    },
+    {
+     "index": 12,
+     "readyMs": 241.0,
+     "audioMs": 480.0,
+     "text": null
+    },
+    {
+     "index": 13,
+     "readyMs": 272.035,
+     "audioMs": 560.0,
+     "text": null
+    },
+    {
+     "index": 14,
+     "readyMs": 303.39,
+     "audioMs": 560.0,
+     "text": null
+    },
+    {
+     "index": 15,
+     "readyMs": 338.805,
+     "audioMs": 640.0,
+     "text": null
+    },
+    {
+     "index": 16,
+     "readyMs": 378.833,
+     "audioMs": 720.0,
+     "text": null
+    },
+    {
+     "index": 17,
+     "readyMs": 425.858,
+     "audioMs": 880.0,
+     "text": null
+    },
+    {
+     "index": 18,
+     "readyMs": 466.69,
+     "audioMs": 880.0,
+     "text": null
+    },
+    {
+     "index": 19,
+     "readyMs": 491.103,
+     "audioMs": 80.0,
+     "text": null
+    },
+    {
+     "index": 20,
+     "readyMs": 500.386,
+     "audioMs": 80.0,
+     "text": null
+    },
+    {
+     "index": 21,
+     "readyMs": 511.317,
+     "audioMs": 160.0,
+     "text": null
+    },
+    {
+     "index": 22,
+     "readyMs": 523.069,
+     "audioMs": 160.0,
+     "text": null
+    },
+    {
+     "index": 23,
+     "readyMs": 535.252,
+     "audioMs": 160.0,
+     "text": null
+    },
+    {
+     "index": 24,
+     "readyMs": 547.966,
+     "audioMs": 160.0,
+     "text": null
+    },
+    {
+     "index": 25,
+     "readyMs": 563.515,
+     "audioMs": 240.0,
+     "text": null
+    },
+    {
+     "index": 26,
+     "readyMs": 579.074,
+     "audioMs": 240.0,
+     "text": null
+    },
+    {
+     "index": 27,
+     "readyMs": 599.715,
+     "audioMs": 320.0,
+     "text": null
+    },
+    {
+     "index": 28,
+     "readyMs": 619.709,
+     "audioMs": 320.0,
+     "text": null
+    },
+    {
+     "index": 29,
+     "readyMs": 641.088,
+     "audioMs": 320.0,
+     "text": null
+    },
+    {
+     "index": 30,
+     "readyMs": 665.898,
+     "audioMs": 400.0,
+     "text": null
+    },
+    {
+     "index": 31,
+     "readyMs": 693.48,
+     "audioMs": 480.0,
+     "text": null
+    },
+    {
+     "index": 32,
+     "readyMs": 724.465,
+     "audioMs": 560.0,
+     "text": null
+    },
+    {
+     "index": 33,
+     "readyMs": 755.13,
+     "audioMs": 560.0,
+     "text": null
+    },
+    {
+     "index": 34,
+     "readyMs": 792.336,
+     "audioMs": 640.0,
+     "text": null
+    },
+    {
+     "index": 35,
+     "readyMs": 834.185,
+     "audioMs": 720.0,
+     "text": null
+    },
+    {
+     "index": 36,
+     "readyMs": 875.563,
+     "audioMs": 800.0,
+     "text": null
+    },
+    {
+     "index": 37,
+     "readyMs": 906.858,
+     "audioMs": 640.0,
+     "text": null
+    },
+    {
+     "index": 38,
+     "readyMs": 931.315,
+     "audioMs": 80.0,
+     "text": null
+    },
+    {
+     "index": 39,
+     "readyMs": 940.106,
+     "audioMs": 80.0,
+     "text": null
+    },
+    {
+     "index": 40,
+     "readyMs": 951.932,
+     "audioMs": 160.0,
+     "text": null
+    },
+    {
+     "index": 41,
+     "readyMs": 963.68,
+     "audioMs": 160.0,
+     "text": null
+    },
+    {
+     "index": 42,
+     "readyMs": 976.576,
+     "audioMs": 160.0,
+     "text": null
+    },
+    {
+     "index": 43,
+     "readyMs": 992.488,
+     "audioMs": 240.0,
+     "text": null
+    },
+    {
+     "index": 44,
+     "readyMs": 1009.255,
+     "audioMs": 240.0,
+     "text": null
+    },
+    {
+     "index": 45,
+     "readyMs": 1028.418,
+     "audioMs": 320.0,
+     "text": null
+    },
+    {
+     "index": 46,
+     "readyMs": 1048.128,
+     "audioMs": 320.0,
+     "text": null
+    },
+    {
+     "index": 47,
+     "readyMs": 1068.343,
+     "audioMs": 320.0,
+     "text": null
+    },
+    {
+     "index": 48,
+     "readyMs": 1092.554,
+     "audioMs": 400.0,
+     "text": null
+    },
+    {
+     "index": 49,
+     "readyMs": 1117.686,
+     "audioMs": 400.0,
+     "text": null
+    },
+    {
+     "index": 50,
+     "readyMs": 1145.417,
+     "audioMs": 480.0,
+     "text": null
+    },
+    {
+     "index": 51,
+     "readyMs": 1177.62,
+     "audioMs": 560.0,
+     "text": null
+    },
+    {
+     "index": 52,
+     "readyMs": 1208.353,
+     "audioMs": 560.0,
+     "text": null
+    },
+    {
+     "index": 53,
+     "readyMs": 1242.036,
+     "audioMs": 640.0,
+     "text": null
+    },
+    {
+     "index": 54,
+     "readyMs": 1279.852,
+     "audioMs": 720.0,
+     "text": null
+    },
+    {
+     "index": 55,
+     "readyMs": 1304.262,
+     "audioMs": 560.0,
+     "text": null
+    },
+    {
+     "index": 56,
+     "readyMs": 1327.933,
+     "audioMs": 80.0,
+     "text": null
+    },
+    {
+     "index": 57,
+     "readyMs": 1337.419,
+     "audioMs": 80.0,
+     "text": null
+    },
+    {
+     "index": 58,
+     "readyMs": 1348.798,
+     "audioMs": 160.0,
+     "text": null
+    },
+    {
+     "index": 59,
+     "readyMs": 1360.529,
+     "audioMs": 160.0,
+     "text": null
+    },
+    {
+     "index": 60,
+     "readyMs": 1372.893,
+     "audioMs": 160.0,
+     "text": null
+    },
+    {
+     "index": 61,
+     "readyMs": 1388.433,
+     "audioMs": 240.0,
+     "text": null
+    },
+    {
+     "index": 62,
+     "readyMs": 1403.736,
+     "audioMs": 240.0,
+     "text": null
+    },
+    {
+     "index": 63,
+     "readyMs": 1419.894,
+     "audioMs": 240.0,
+     "text": null
+    },
+    {
+     "index": 64,
+     "readyMs": 1439.57,
+     "audioMs": 320.0,
+     "text": null
+    },
+    {
+     "index": 65,
+     "readyMs": 1460.057,
+     "audioMs": 320.0,
+     "text": null
+    },
+    {
+     "index": 66,
+     "readyMs": 1484.698,
+     "audioMs": 400.0,
+     "text": null
+    },
+    {
+     "index": 67,
+     "readyMs": 1512.985,
+     "audioMs": 480.0,
+     "text": null
+    },
+    {
+     "index": 68,
+     "readyMs": 1538.344,
+     "audioMs": 480.0,
+     "text": null
+    },
+    {
+     "index": 69,
+     "readyMs": 1563.58,
+     "audioMs": 480.0,
+     "text": null
+    },
+    {
+     "index": 70,
+     "readyMs": 1591.115,
+     "audioMs": 480.0,
+     "text": null
+    },
+    {
+     "index": 71,
+     "readyMs": 1623.629,
+     "audioMs": 560.0,
+     "text": null
+    },
+    {
+     "index": 72,
+     "readyMs": 1645.832,
+     "audioMs": 480.0,
+     "text": null
+    },
+    {
+     "index": 73,
+     "readyMs": 1669.789,
+     "audioMs": 80.0,
+     "text": null
+    },
+    {
+     "index": 74,
+     "readyMs": 1678.715,
+     "audioMs": 80.0,
+     "text": null
+    },
+    {
+     "index": 75,
+     "readyMs": 1689.596,
+     "audioMs": 160.0,
+     "text": null
+    },
+    {
+     "index": 76,
+     "readyMs": 1701.688,
+     "audioMs": 160.0,
+     "text": null
+    },
+    {
+     "index": 77,
+     "readyMs": 1714.117,
+     "audioMs": 160.0,
+     "text": null
+    },
+    {
+     "index": 78,
+     "readyMs": 1729.347,
+     "audioMs": 240.0,
+     "text": null
+    },
+    {
+     "index": 79,
+     "readyMs": 1745.325,
+     "audioMs": 240.0,
+     "text": null
+    },
+    {
+     "index": 80,
+     "readyMs": 1762.117,
+     "audioMs": 240.0,
+     "text": null
+    },
+    {
+     "index": 81,
+     "readyMs": 1782.91,
+     "audioMs": 320.0,
+     "text": null
+    },
+    {
+     "index": 82,
+     "readyMs": 1804.522,
+     "audioMs": 320.0,
+     "text": null
+    },
+    {
+     "index": 83,
+     "readyMs": 1828.374,
+     "audioMs": 400.0,
+     "text": null
+    },
+    {
+     "index": 84,
+     "readyMs": 1853.204,
+     "audioMs": 400.0,
+     "text": null
+    },
+    {
+     "index": 85,
+     "readyMs": 1878.956,
+     "audioMs": 480.0,
+     "text": null
+    },
+    {
+     "index": 86,
+     "readyMs": 1905.268,
+     "audioMs": 480.0,
+     "text": null
+    },
+    {
+     "index": 87,
+     "readyMs": 1932.567,
+     "audioMs": 480.0,
+     "text": null
+    },
+    {
+     "index": 88,
+     "readyMs": 1963.561,
+     "audioMs": 560.0,
+     "text": null
+    },
+    {
+     "index": 89,
+     "readyMs": 1998.28,
+     "audioMs": 640.0,
+     "text": null
+    },
+    {
+     "index": 90,
+     "readyMs": 2016.834,
+     "audioMs": 400.0,
+     "text": null
+    },
+    {
+     "index": 91,
+     "readyMs": 2039.633,
+     "audioMs": 80.0,
+     "text": null
+    },
+    {
+     "index": 92,
+     "readyMs": 2049.054,
+     "audioMs": 80.0,
+     "text": null
+    },
+    {
+     "index": 93,
+     "readyMs": 2060.912,
+     "audioMs": 160.0,
+     "text": null
+    },
+    {
+     "index": 94,
+     "readyMs": 2073.483,
+     "audioMs": 160.0,
+     "text": null
+    },
+    {
+     "index": 95,
+     "readyMs": 2085.55,
+     "audioMs": 160.0,
+     "text": null
+    },
+    {
+     "index": 96,
+     "readyMs": 2101.95,
+     "audioMs": 240.0,
+     "text": null
+    },
+    {
+     "index": 97,
+     "readyMs": 2117.44,
+     "audioMs": 240.0,
+     "text": null
+    },
+    {
+     "index": 98,
+     "readyMs": 2136.114,
+     "audioMs": 320.0,
+     "text": null
+    },
+    {
+     "index": 99,
+     "readyMs": 2155.834,
+     "audioMs": 320.0,
+     "text": null
+    },
+    {
+     "index": 100,
+     "readyMs": 2176.146,
+     "audioMs": 320.0,
+     "text": null
+    },
+    {
+     "index": 101,
+     "readyMs": 2196.617,
+     "audioMs": 320.0,
+     "text": null
+    },
+    {
+     "index": 102,
+     "readyMs": 2220.894,
+     "audioMs": 400.0,
+     "text": null
+    },
+    {
+     "index": 103,
+     "readyMs": 2243.566,
+     "audioMs": 400.0,
+     "text": null
+    },
+    {
+     "index": 104,
+     "readyMs": 2267.546,
+     "audioMs": 400.0,
+     "text": null
+    },
+    {
+     "index": 105,
+     "readyMs": 2291.76,
+     "audioMs": 400.0,
+     "text": null
+    },
+    {
+     "index": 106,
+     "readyMs": 2308.782,
+     "audioMs": 400.0,
+     "text": null
+    }
+   ]
+  }
+ ]
+}

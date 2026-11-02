@@ -1,6 +1,6 @@
 """Write the owner listening page: same cohort texts across engines, side by side.
 
-Usage: python3 -I experiments/fast-tts/build_listen.py <assets/fast-tts> --summary <summary.json> --template <owner-pages template.html>
+Usage: python3 -I experiments/fast-tts/build_listen.py <assets/fast-tts> --summary <summary.json> --template <owner-pages template.html> [--slot-log <slot.log>]
 Clips sit in <assets/fast-tts>/clips as <textId>--<engineId>.wav (stream) or
 <textId>--<engineId>--full.wav. Each clip shows warm median first audio and RTF
 from the summary. The page reuses the owner pages template's stylesheet and
@@ -31,7 +31,24 @@ STYLE = """
 .clip b { font-size: 14px; }
 .clip audio { width: 100%; height: 32px; }
 .say { max-width: var(--measure); color: var(--ink); }
+td.num, th.num { white-space: nowrap; }
+td:not(.num) { overflow-wrap: anywhere; min-width: 20ch; }
+tbody th { min-width: 16ch; }
 """
+
+
+def slot_status(log: Path) -> str:
+    """The timed status line from a slot log's `## start|sample|end <UTC> load { 1m 5m 15m }` lines."""
+    marks = re.findall(r"^## (start|sample|end) (\S+) load \{ ([\d.]+)", log.read_text(), re.M)
+    start = next(at for kind, at, _ in marks if kind == "start")
+    end = next((at for kind, at, _ in marks if kind == "end"), None)
+    during = sorted(float(load) for kind, _, load in marks if kind == "sample")
+    before = next(float(load) for kind, _, load in marks if kind == "start")
+    window = f"{start[:10]}, {start[11:16]} to {end[11:16]} UTC" if end else f"from {start[:16].replace('T', ' ')} UTC"
+    load = (f"1 minute load average {before:.1f} before the pass; during it (pass included) median "
+            f"{during[len(during) // 2]:.1f}, range {during[0]:.1f} to {during[-1]:.1f} over {len(during)} samples"
+            if during else f"1 minute load average {before:.1f} before the pass")
+    return f"Timed, quiet slot, {window}. {load}."
 
 
 def esc(value) -> str:
@@ -112,14 +129,19 @@ def main() -> None:
     parser.add_argument("root", type=Path, help="assets/fast-tts directory; listen.html is written here")
     parser.add_argument("--summary", type=Path, required=True)
     parser.add_argument("--template", type=Path, required=True)
+    parser.add_argument("--slot-log", type=Path, help="timed pass slot log: window and load for the status line")
     args = parser.parse_args()
     clips = args.root / "clips"
     summary = json.loads(args.summary.read_text())
     style, renderer = template_parts(args.template)
     cols = columns(summary, clips)
     env = summary["engines"][0]["environment"] if summary["engines"] else {}
-    status = ("Timed on a quiet machine slot." if summary["timed"]
-              else "Untimed smoke run: numbers are indicative only, not cited results.")
+    if not summary["timed"]:
+        status = "Untimed smoke run: numbers are indicative only, not cited results."
+    elif args.slot_log:
+        status = slot_status(args.slot_log)
+    else:
+        status = "Timed, quiet slot."
 
     sections = []
     for length, title, note in LENGTHS:

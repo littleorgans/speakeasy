@@ -1,0 +1,85 @@
+{
+ "schema": "fast-tts.result.v1",
+ "engine": {
+  "id": "piper-split-t4",
+  "label": "Piper Kristin medium split decoder · sentences · 4 threads",
+  "runtime": "libpiper 1.8.0 (piper1-gpl 10880972), onnxruntime 1.22.0",
+  "provider": "cpu",
+  "model": "piper-kristin-medium",
+  "modelRevision": "rhasspy/piper-voices@e7229f7d split; sha256:f9a5c375c70d",
+  "voice": "kristin",
+  "sampleRate": 22050,
+  "threads": 4,
+  "streaming": "libpiper split voice: one encoder pass per part, then overlapping decoder chunks, so audio is incremental within a sentence; full mode drains the same chunks into one",
+  "chunkPolicy": "splitSentences: whole sentences, no carved first chunk; chunks are libpiper's decoder chunks (first 32 latent frames, 372 ms, 12 context frames each side, later 24 to 256 frames sized from decoder speed), untrimmed, no added gaps",
+  "cancellation": "between decoder chunks in the worker (no stop request yet; a host stops by not sending the next part, the current part runs to completion)"
+ },
+ "environment": {
+  "machine": "Apple M2 Max",
+  "arch": "arm64",
+  "cpuCount": 12,
+  "memoryGiB": 96,
+  "os": "macOS 27.0.1",
+  "versions": {
+   "node": "25.9.0",
+   "libpiper": "1.8.0",
+   "piper1-gpl": "10880972db9e0aca101fed350eadf8f49deefe9f",
+   "onnxruntime": "1.22.0"
+  },
+  "harnessCommit": "f0465da1b8f0"
+ },
+ "process": {
+  "temperature": "cold",
+  "timed": true,
+  "repeats": 1,
+  "startedAt": "2026-11-02T23:18:16.559Z",
+  "clock": "performance.now (monotonic)",
+  "playback": null,
+  "loadMs": 409.985,
+  "warmupMs": null,
+  "loadDetail": {
+   "note": "loadMs is the Piper Plus frontend (CMU dict parse) plus worker spawn and piper_create (encoder and decoder sessions)"
+  }
+ },
+ "runs": [
+  {
+   "textId": "summary",
+   "mode": "stream",
+   "temperature": "cold",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 55.902,
+     "audioMs": 371.519,
+     "text": "I fixed the flaky login test and pushed the change to your branch."
+    },
+    {
+     "index": 1,
+     "readyMs": 126.539,
+     "audioMs": 2972.154,
+     "text": "I fixed the flaky login test and pushed the change to your branch."
+    },
+    {
+     "index": 2,
+     "readyMs": 151.43,
+     "audioMs": 1056.508,
+     "text": "I fixed the flaky login test and pushed the change to your branch."
+    },
+    {
+     "index": 3,
+     "readyMs": 186.457,
+     "audioMs": 371.519,
+     "text": "Nothing else on the branch has changed."
+    },
+    {
+     "index": 4,
+     "readyMs": 226.866,
+     "audioMs": 1834.376,
+     "text": "Nothing else on the branch has changed."
+    }
+   ]
+  }
+ ]
+}

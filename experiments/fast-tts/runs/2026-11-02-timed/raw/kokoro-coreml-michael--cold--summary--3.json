@@ -1,0 +1,71 @@
+{
+ "schema": "fast-tts.result.v1",
+ "engine": {
+  "id": "kokoro-coreml-michael",
+  "label": "Kokoro v1.0 Core ML (FluidAudio legacy) · am_michael",
+  "runtime": "FluidAudio e396cf78 KokoroAneManager legacy",
+  "provider": "coreml: FluidAudio legacy per stage compute policies",
+  "model": "kokoro-v1.0",
+  "modelRevision": "FluidInference/kokoro-82m-coreml@2568276a60ff6e7f312afce3dc9e3f07521cb48d (ANE)",
+  "voice": "am_michael",
+  "sampleRate": 24000,
+  "streaming": "resident Swift worker, one synthesizeDetailed call per segment, framed PCM over stdio: segment waveforms, not incremental within a segment; full mode is one synthesizeDetailed call",
+  "chunkPolicy": "planSegments: first chunk is the first clause or 4 words of sentence 1, then whole sentences, all submitted at once; trimSilence trims each chunk and appends a 150 ms gap",
+  "cancellation": "between segments in the worker (no stop request yet); an active Core ML chain runs to completion"
+ },
+ "environment": {
+  "machine": "Apple M2 Max",
+  "arch": "arm64",
+  "cpuCount": 12,
+  "memoryGiB": 96,
+  "os": "macOS 27.0.1",
+  "versions": {
+   "node": "25.9.0",
+   "FluidAudio": "e396cf780c4abf8e395087467c0585d3b0d17f68",
+   "swift": "6.4 (Command Line Tools)"
+  },
+  "harnessCommit": "f0465da1b8f0"
+ },
+ "process": {
+  "temperature": "cold",
+  "timed": true,
+  "repeats": 1,
+  "startedAt": "2026-11-02T22:57:26.961Z",
+  "clock": "performance.now (monotonic)",
+  "playback": null,
+  "loadMs": 193.495,
+  "warmupMs": null,
+  "loadDetail": {
+   "note": "loadMs is worker spawn plus KokoroAneManager.initialize (Core ML loads of compiled models, G2P assets, voice pack)"
+  }
+ },
+ "runs": [
+  {
+   "textId": "summary",
+   "mode": "stream",
+   "temperature": "cold",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 887.892,
+     "audioMs": 1333.167,
+     "text": "I fixed the flaky"
+    },
+    {
+     "index": 1,
+     "readyMs": 1049.209,
+     "audioMs": 2861.708,
+     "text": "login test and pushed the change to your branch."
+    },
+    {
+     "index": 2,
+     "readyMs": 1176.733,
+     "audioMs": 2168.875,
+     "text": "Nothing else on the branch has changed."
+    }
+   ]
+  }
+ ]
+}

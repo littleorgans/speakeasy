@@ -1,0 +1,107 @@
+{
+ "schema": "fast-tts.result.v1",
+ "engine": {
+  "id": "kokoro-coreml-heart",
+  "label": "Kokoro v1.0 Core ML (FluidAudio legacy) · af_heart",
+  "runtime": "FluidAudio e396cf78 KokoroAneManager legacy",
+  "provider": "coreml: FluidAudio legacy per stage compute policies",
+  "model": "kokoro-v1.0",
+  "modelRevision": "FluidInference/kokoro-82m-coreml@2568276a60ff6e7f312afce3dc9e3f07521cb48d (ANE)",
+  "voice": "af_heart",
+  "sampleRate": 24000,
+  "streaming": "resident Swift worker, one synthesizeDetailed call per segment, framed PCM over stdio: segment waveforms, not incremental within a segment; full mode is one synthesizeDetailed call",
+  "chunkPolicy": "planSegments: first chunk is the first clause or 4 words of sentence 1, then whole sentences, all submitted at once; trimSilence trims each chunk and appends a 150 ms gap",
+  "cancellation": "between segments in the worker (no stop request yet); an active Core ML chain runs to completion"
+ },
+ "environment": {
+  "machine": "Apple M2 Max",
+  "arch": "arm64",
+  "cpuCount": 12,
+  "memoryGiB": 96,
+  "os": "macOS 27.0.1",
+  "versions": {
+   "node": "25.9.0",
+   "FluidAudio": "e396cf780c4abf8e395087467c0585d3b0d17f68",
+   "swift": "6.4 (Command Line Tools)"
+  },
+  "harnessCommit": "f0465da1b8f0"
+ },
+ "process": {
+  "temperature": "cold",
+  "timed": true,
+  "repeats": 1,
+  "startedAt": "2026-11-02T22:56:07.633Z",
+  "clock": "performance.now (monotonic)",
+  "playback": null,
+  "loadMs": 199.309,
+  "warmupMs": null,
+  "loadDetail": {
+   "note": "loadMs is worker spawn plus KokoroAneManager.initialize (Core ML loads of compiled models, G2P assets, voice pack)"
+  }
+ },
+ "runs": [
+  {
+   "textId": "handover",
+   "mode": "stream",
+   "temperature": "cold",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 863.7,
+     "audioMs": 1077.208,
+     "text": "Here is where things"
+    },
+    {
+     "index": 1,
+     "readyMs": 953.71,
+     "audioMs": 1166.583,
+     "text": "stand on the release."
+    },
+    {
+     "index": 2,
+     "readyMs": 1212.443,
+     "audioMs": 5527.667,
+     "text": "The migration ran overnight and finished without errors, so the new tables are live in staging."
+    },
+    {
+     "index": 3,
+     "readyMs": 1448.087,
+     "audioMs": 5295.25,
+     "text": "I checked the dashboards this morning, and response times are back under two hundred milliseconds."
+    },
+    {
+     "index": 4,
+     "readyMs": 1543.536,
+     "audioMs": 1423.375,
+     "text": "Two small issues remain."
+    },
+    {
+     "index": 5,
+     "readyMs": 1821.904,
+     "audioMs": 6448.667,
+     "text": "The export button still times out on very large projects, and one of the email templates shows the old logo."
+    },
+    {
+     "index": 6,
+     "readyMs": 2072.667,
+     "audioMs": 5347.792,
+     "text": "I have opened tickets for both and assigned them to Maya, who expects to close them by Thursday."
+    },
+    {
+     "index": 7,
+     "readyMs": 2330.205,
+     "audioMs": 6231.208,
+     "text": "If you are happy with that plan, I will schedule the production rollout for Friday morning, before the team meeting."
+    },
+    {
+     "index": 8,
+     "readyMs": 2535.411,
+     "audioMs": 4470.958,
+     "text": "Let me know if you would rather wait until next week, and I will move everything back."
+    }
+   ]
+  }
+ ]
+}

@@ -47,10 +47,12 @@ One engine by hand: `node experiments/fast-tts/render-baselines.ts --root $MODEL
 ```bash
 OUT=$TMPDIR/ftts-timed CLIPS=$ASSETS/clips experiments/fast-tts/run-timed.sh
 python3 -I experiments/fast-tts/summarize.py $ASSETS/results.json $TMPDIR/ftts-timed/*.json
-python3 -I experiments/fast-tts/build_listen.py $ASSETS --summary $ASSETS/results.json --template $TEMPLATE
+python3 -I experiments/fast-tts/build_listen.py $ASSETS --summary $ASSETS/results.json --template $TEMPLATE --slot-log <runs dir>/slot.log
 ```
 
-Defaults: `RUNS=5`, engines `piper-kristin piper-kristin-t4 kokoro-heart kokoro-heart-t4 kokoro-michael kokoro-mlx-heart kokoro-mlx-michael pocket-18m-bill kokoro-coreml-heart kokoro-coreml-michael supertonic3-f1 supertonic3-m1 supertonic3-f1-t4 piper-split-t4 piper-split-carved-t4`, modes `stream full`, cold texts `status summary handover` (one per length class). Engines without `-t4` use speak-easy's product default thread count (`DEFAULT_NUM_THREADS` in `synth.ts`, 2); `-t4` engines use 4 threads, and each label names its count. Estimate, from smoke RTFs and about 145 s of cohort audio per pass: about 45 minutes, up to an hour if the machine is busy. Kokoro dominates: each 2 thread Kokoro engine takes about 12 minutes for both modes. With the ten candidate engines, the full pass is an estimated 80 minutes, up to 100 if the machine is busy: the `RUNS=1` smoke of all fifteen engines with one cold text took 11.4 minutes, and `RUNS=5` with three cold texts multiplies the warm synthesis by five and the cold processes by fifteen.
+Record the slot alongside: a slot log with `## start|sample|end <UTC> load { 1m 5m 15m }` lines (load and top processes before, every 60 s during, after), which `build_listen.py --slot-log` turns into the page's status line. Each pass is kept in `runs/<UTC date>-timed/`: `raw/` result files, `slot.log` (postgres process titles scrubbed) and the `summarize.py` table. Not `results/`: the repo ignores that name at any depth.
+
+Defaults: `RUNS=5`, engines `piper-kristin piper-kristin-t4 kokoro-heart kokoro-heart-t4 kokoro-michael kokoro-mlx-heart kokoro-mlx-michael pocket-18m-bill kokoro-coreml-heart kokoro-coreml-michael supertonic3-f1 supertonic3-m1 supertonic3-f1-t4 piper-split-t4 piper-split-carved-t4`, modes `stream full`, cold texts `status summary handover` (one per length class). Engines without `-t4` use speak-easy's product default thread count (`DEFAULT_NUM_THREADS` in `synth.ts`, 2); `-t4` engines use 4 threads, and each label names its count. The 2026-11-02 pass of all fifteen engines took 61 minutes on a quiet M2 Max: baselines 30 (each 2 thread Kokoro engine about 11), candidates 30 (the three Supertonic engines about 19).
 
 ## Baseline first audio versus voice-out g2p-F10
 

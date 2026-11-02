@@ -1,0 +1,68 @@
+{
+ "schema": "fast-tts.result.v1",
+ "engine": {
+  "id": "supertonic3-m1",
+  "label": "Supertonic 3 · M1 · 8 steps · 2 threads",
+  "runtime": "onnxruntime-node 1.31.1",
+  "provider": "cpu",
+  "model": "supertonic-3",
+  "modelRevision": "Supertone/supertonic-3@3cadd1ee6394adea1bd021217a0e650ede09a323",
+  "voice": "M1",
+  "sampleRate": 44100,
+  "steps": 8,
+  "speed": 1.05,
+  "threads": 2,
+  "streaming": "one _infer call per segment (8 flow steps, then the vocoder): segment waveforms, not incremental within a segment; full mode is one upstream TextToSpeech.call",
+  "chunkPolicy": "planSegments: first chunk is the first clause or 4 words of sentence 1, then whole sentences; each waveform cut to its predicted duration, then trimSilence trims it and appends a 150 ms gap",
+  "cancellation": "between segments; an active _infer runs its eight steps and the vocoder to completion"
+ },
+ "environment": {
+  "machine": "Apple M2 Max",
+  "arch": "arm64",
+  "cpuCount": 12,
+  "memoryGiB": 96,
+  "os": "macOS 27.0.1",
+  "versions": {
+   "node": "25.9.0",
+   "onnxruntime-node": "1.31.1",
+   "supertonic-helper": "1e9799e964ea4c0dad7cde993b65c3c813a7b373"
+  },
+  "harnessCommit": "f0465da1b8f0"
+ },
+ "process": {
+  "temperature": "cold",
+  "timed": true,
+  "repeats": 1,
+  "startedAt": "2026-11-02T23:05:37.263Z",
+  "clock": "performance.now (monotonic)",
+  "playback": null,
+  "loadMs": 382.531,
+  "warmupMs": null,
+  "loadDetail": {
+   "note": "loadMs is four InferenceSession.create calls (intra op threads set, inter op 1) plus unicode indexer and voice style load"
+  }
+ },
+ "runs": [
+  {
+   "textId": "status",
+   "mode": "stream",
+   "temperature": "cold",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 507.43,
+     "audioMs": 1234.649,
+     "text": "The deploy finished and"
+    },
+    {
+     "index": 1,
+     "readyMs": 1005.838,
+     "audioMs": 1138.073,
+     "text": "the site is live again."
+    }
+   ]
+  }
+ ]
+}

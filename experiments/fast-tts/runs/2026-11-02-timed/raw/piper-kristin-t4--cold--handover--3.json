@@ -1,0 +1,108 @@
+{
+ "schema": "fast-tts.result.v1",
+ "engine": {
+  "id": "piper-kristin-t4",
+  "label": "Piper Kristin medium · 4 threads",
+  "runtime": "sherpa-onnx-node 2.0.1",
+  "provider": "cpu",
+  "model": "piper-kristin-medium",
+  "modelRevision": "sha256:f9a5c375c70d",
+  "voice": "kristin",
+  "sampleRate": 22050,
+  "threads": 4,
+  "streaming": "speak-easy sentence pipeline (SherpaTextToSpeech.speak, depth 1): segment waveforms, not incremental within a segment; full mode is one generateAsync call",
+  "chunkPolicy": "planSegments: first chunk is the first clause or 4 words of sentence 1, then whole sentences; trimSilence trims each chunk and appends a 150 ms gap",
+  "cancellation": "between segments (the host returns the generator); a depth 1 lookahead synth already started runs to completion"
+ },
+ "environment": {
+  "machine": "Apple M2 Max",
+  "arch": "arm64",
+  "cpuCount": 12,
+  "memoryGiB": 96,
+  "os": "macOS 27.0.1",
+  "versions": {
+   "node": "25.9.0",
+   "sherpa-onnx-node": "2.0.1"
+  },
+  "harnessCommit": "f0465da1b8f0"
+ },
+ "process": {
+  "temperature": "cold",
+  "timed": true,
+  "repeats": 1,
+  "startedAt": "2026-11-02T22:21:09.732Z",
+  "clock": "performance.now (monotonic)",
+  "playback": null,
+  "loadMs": 652.633,
+  "warmupMs": null,
+  "loadDetail": {
+   "nativeLoadMs": 523.252,
+   "note": "loadMs is TtsSynth.create (digest verify, native load, frontend) plus session open"
+  }
+ },
+ "runs": [
+  {
+   "textId": "handover",
+   "mode": "stream",
+   "temperature": "cold",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 45.65,
+     "audioMs": 1337.415,
+     "text": "Here is where things"
+    },
+    {
+     "index": 1,
+     "readyMs": 95.103,
+     "audioMs": 1549.433,
+     "text": "stand on the release."
+    },
+    {
+     "index": 2,
+     "readyMs": 259.04,
+     "audioMs": 5456.281,
+     "text": "The migration ran overnight and finished without errors, so the new tables are live in staging."
+    },
+    {
+     "index": 3,
+     "readyMs": 418.556,
+     "audioMs": 5261.451,
+     "text": "I checked the dashboards this morning, and response times are back under two hundred milliseconds."
+    },
+    {
+     "index": 4,
+     "readyMs": 476.971,
+     "audioMs": 1893.469,
+     "text": "Two small issues remain."
+    },
+    {
+     "index": 5,
+     "readyMs": 659.04,
+     "audioMs": 6330.975,
+     "text": "The export button still times out on very large projects, and one of the email templates shows the old logo."
+    },
+    {
+     "index": 6,
+     "readyMs": 805.874,
+     "audioMs": 4854.785,
+     "text": "I have opened tickets for both and assigned them to Maya, who expects to close them by Thursday."
+    },
+    {
+     "index": 7,
+     "readyMs": 982.47,
+     "audioMs": 6032.744,
+     "text": "If you are happy with that plan, I will schedule the production rollout for Friday morning, before the team meeting."
+    },
+    {
+     "index": 8,
+     "readyMs": 1113.818,
+     "audioMs": 4297.143,
+     "text": "Let me know if you would rather wait until next week, and I will move everything back."
+    }
+   ]
+  }
+ ]
+}

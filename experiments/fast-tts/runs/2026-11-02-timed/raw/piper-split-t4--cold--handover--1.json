@@ -1,0 +1,193 @@
+{
+ "schema": "fast-tts.result.v1",
+ "engine": {
+  "id": "piper-split-t4",
+  "label": "Piper Kristin medium split decoder · sentences · 4 threads",
+  "runtime": "libpiper 1.8.0 (piper1-gpl 10880972), onnxruntime 1.22.0",
+  "provider": "cpu",
+  "model": "piper-kristin-medium",
+  "modelRevision": "rhasspy/piper-voices@e7229f7d split; sha256:f9a5c375c70d",
+  "voice": "kristin",
+  "sampleRate": 22050,
+  "threads": 4,
+  "streaming": "libpiper split voice: one encoder pass per part, then overlapping decoder chunks, so audio is incremental within a sentence; full mode drains the same chunks into one",
+  "chunkPolicy": "splitSentences: whole sentences, no carved first chunk; chunks are libpiper's decoder chunks (first 32 latent frames, 372 ms, 12 context frames each side, later 24 to 256 frames sized from decoder speed), untrimmed, no added gaps",
+  "cancellation": "between decoder chunks in the worker (no stop request yet; a host stops by not sending the next part, the current part runs to completion)"
+ },
+ "environment": {
+  "machine": "Apple M2 Max",
+  "arch": "arm64",
+  "cpuCount": 12,
+  "memoryGiB": 96,
+  "os": "macOS 27.0.1",
+  "versions": {
+   "node": "25.9.0",
+   "libpiper": "1.8.0",
+   "piper1-gpl": "10880972db9e0aca101fed350eadf8f49deefe9f",
+   "onnxruntime": "1.22.0"
+  },
+  "harnessCommit": "f0465da1b8f0"
+ },
+ "process": {
+  "temperature": "cold",
+  "timed": true,
+  "repeats": 1,
+  "startedAt": "2026-11-02T23:18:21.337Z",
+  "clock": "performance.now (monotonic)",
+  "playback": null,
+  "loadMs": 407.551,
+  "warmupMs": null,
+  "loadDetail": {
+   "note": "loadMs is the Piper Plus frontend (CMU dict parse) plus worker spawn and piper_create (encoder and decoder sessions)"
+  }
+ },
+ "runs": [
+  {
+   "textId": "handover",
+   "mode": "stream",
+   "temperature": "cold",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 39.304,
+     "audioMs": 371.519,
+     "text": "Here is where things stand on the release."
+    },
+    {
+     "index": 1,
+     "readyMs": 87.354,
+     "audioMs": 2066.576,
+     "text": "Here is where things stand on the release."
+    },
+    {
+     "index": 2,
+     "readyMs": 147.883,
+     "audioMs": 371.519,
+     "text": "The migration ran overnight and finished without errors, so the new tables are live in staging."
+    },
+    {
+     "index": 3,
+     "readyMs": 215.736,
+     "audioMs": 2972.154,
+     "text": "The migration ran overnight and finished without errors, so the new tables are live in staging."
+    },
+    {
+     "index": 4,
+     "readyMs": 271.472,
+     "audioMs": 2612.245,
+     "text": "The migration ran overnight and finished without errors, so the new tables are live in staging."
+    },
+    {
+     "index": 5,
+     "readyMs": 329.146,
+     "audioMs": 371.519,
+     "text": "I checked the dashboards this morning, and response times are back under two hundred milliseconds."
+    },
+    {
+     "index": 6,
+     "readyMs": 394.531,
+     "audioMs": 2972.154,
+     "text": "I checked the dashboards this morning, and response times are back under two hundred milliseconds."
+    },
+    {
+     "index": 7,
+     "readyMs": 461.108,
+     "audioMs": 2356.825,
+     "text": "I checked the dashboards this morning, and response times are back under two hundred milliseconds."
+    },
+    {
+     "index": 8,
+     "readyMs": 491.502,
+     "audioMs": 371.519,
+     "text": "Two small issues remain."
+    },
+    {
+     "index": 9,
+     "readyMs": 524.415,
+     "audioMs": 1474.467,
+     "text": "Two small issues remain."
+    },
+    {
+     "index": 10,
+     "readyMs": 590.279,
+     "audioMs": 371.519,
+     "text": "The export button still times out on very large projects, and one of the email templates shows the old logo."
+    },
+    {
+     "index": 11,
+     "readyMs": 655.448,
+     "audioMs": 2972.154,
+     "text": "The export button still times out on very large projects, and one of the email templates shows the old logo."
+    },
+    {
+     "index": 12,
+     "readyMs": 720.87,
+     "audioMs": 2972.154,
+     "text": "The export button still times out on very large projects, and one of the email templates shows the old logo."
+    },
+    {
+     "index": 13,
+     "readyMs": 728.715,
+     "audioMs": 232.2,
+     "text": "The export button still times out on very large projects, and one of the email templates shows the old logo."
+    },
+    {
+     "index": 14,
+     "readyMs": 786.046,
+     "audioMs": 371.519,
+     "text": "I have opened tickets for both and assigned them to Maya, who expects to close them by Thursday."
+    },
+    {
+     "index": 15,
+     "readyMs": 851.236,
+     "audioMs": 2972.154,
+     "text": "I have opened tickets for both and assigned them to Maya, who expects to close them by Thursday."
+    },
+    {
+     "index": 16,
+     "readyMs": 892.064,
+     "audioMs": 1892.426,
+     "text": "I have opened tickets for both and assigned them to Maya, who expects to close them by Thursday."
+    },
+    {
+     "index": 17,
+     "readyMs": 955.595,
+     "audioMs": 371.519,
+     "text": "If you are happy with that plan, I will schedule the production rollout for Friday morning, before the team meeting."
+    },
+    {
+     "index": 18,
+     "readyMs": 1020.158,
+     "audioMs": 2972.154,
+     "text": "If you are happy with that plan, I will schedule the production rollout for Friday morning, before the team meeting."
+    },
+    {
+     "index": 19,
+     "readyMs": 1082.745,
+     "audioMs": 2948.934,
+     "text": "If you are happy with that plan, I will schedule the production rollout for Friday morning, before the team meeting."
+    },
+    {
+     "index": 20,
+     "readyMs": 1136.074,
+     "audioMs": 371.519,
+     "text": "Let me know if you would rather wait until next week, and I will move everything back."
+    },
+    {
+     "index": 21,
+     "readyMs": 1201.466,
+     "audioMs": 2972.154,
+     "text": "Let me know if you would rather wait until next week, and I will move everything back."
+    },
+    {
+     "index": 22,
+     "readyMs": 1229.079,
+     "audioMs": 1195.828,
+     "text": "Let me know if you would rather wait until next week, and I will move everything back."
+    }
+   ]
+  }
+ ]
+}
