@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { planSegments, trimSilence } from "../../../../packages/speech-io/src/tts/stream.ts";
-import { collect, concat, fail, NativeWorker, runCandidate, WARMUP_TEXT, type Adapter } from "../driver.ts";
+import { collect, concat, fail, NativeWorker, runCandidate, WARMUP_TEXT, type Adapter } from "../../driver.ts";
 
 /**
  * fast-tts candidate: Kokoro v1.0 on native Core ML through FluidAudio's

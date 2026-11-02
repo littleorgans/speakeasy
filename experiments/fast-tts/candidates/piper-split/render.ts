@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { createTtsFrontend } from "../../../../packages/speech-io/src/tts/frontend.ts";
 import { LOCAL_TTS_MODELS } from "../../../../packages/speech-io/src/tts/models.ts";
 import { planSegments, splitSentences } from "../../../../packages/speech-io/src/tts/stream.ts";
-import { collect, concat, fail, NativeWorker, runCandidate, WARMUP_TEXT, type Adapter } from "../driver.ts";
+import { collect, concat, fail, NativeWorker, runCandidate, WARMUP_TEXT, type Adapter } from "../../driver.ts";
 
 /**
  * fast-tts candidate: Piper Kristin medium split into encoder and decoder, run

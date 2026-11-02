@@ -6,11 +6,12 @@ import { performance } from "node:perf_hooks";
 import { parseArgs } from "node:util";
 
 /**
- * Shared driver for the TypeScript fast-tts candidates (kokoro-coreml,
- * supertonic3, piper-split): the CLI flags of render-baselines.ts, cold and warm
- * process shapes, the result JSON of CONTRACT.md, clips, and a client for native
- * workers that stream framed PCM over stdio. Each candidate supplies only an
- * `Adapter`; summarize.py validates and derives the metrics.
+ * Shared driver for the TypeScript fast-tts engines, the twin of
+ * fasttts.run_engine: render-baselines.ts and the candidates kokoro-coreml,
+ * supertonic3 and piper-split. It owns the CLI flags, cold and warm process
+ * shapes, the result JSON of CONTRACT.md, clips, and a client for native workers
+ * that stream framed PCM over stdio. Each engine supplies only an `Adapter`;
+ * summarize.py validates and derives the metrics. Loads no native addon itself.
  */
 
 export type Mode = "stream" | "full";
@@ -30,25 +31,29 @@ export type Adapter = {
   engine: EngineMeta;
   versions: Record<string, string>;
   loadDetail?: Record<string, unknown>;
-  warmup(): Promise<void>;
+  /** One discarded synthesis; a returned number is recorded as warmupMs, else the driver times the call. */
+  warmup(): Promise<number | void>;
   stream(text: string): AsyncIterable<AudioChunk>;
   full(text: string): Promise<Float32Array>;
   close(): Promise<void>;
+  /** Clip writer; defaults to the driver's `writeWav`. */
+  writeClip?(path: string, samples: Float32Array, sampleRate: number): Promise<void>;
 };
 
 export type Args = { engine: string; root: string; mode: Mode; temperature: "cold" | "warm" };
 
 const HERE = import.meta.dirname;
-const COHORT = join(HERE, "..", "cohort.json");
+const COHORT = join(HERE, "cohort.json");
 export const WARMUP_TEXT = "Warm up.";
 
 /**
- * Parse the render-baselines.ts flags, load the engine (timed as `loadMs`), warm
- * up when warm, run the texts and write one result file. `open` gets the engine id
- * after it is checked against `engineIds`.
+ * Parse the flags, load the engine (timed as `loadMs`), warm up when warm, run the
+ * texts and write one result file. `open` gets the engine id after it is checked
+ * against `engineIds`; `verify`, when given, runs first, off the clock (integrity checks).
  */
-export async function runCandidate(engineIds: readonly string[], open: (args: Args) => Promise<Adapter>): Promise<void> {
-  const usage = "usage: node <candidate>/render.ts --engine <id> --temperature cold|warm --json <file> "
+export async function runCandidate(engineIds: readonly string[], open: (args: Args) => Promise<Adapter>,
+  verify?: (args: Args) => Promise<void>): Promise<void> {
+  const usage = "usage: node <engine script>.ts --engine <id> --temperature cold|warm --json <file> "
     + `[--root <models/tts>] [--mode stream|full] [--repeats N] [--text <id>]... [--clips <dir>] [--timed]\n  engines: ${engineIds.join(", ")}`;
   const { values } = parseArgs({
     options: {
@@ -70,14 +75,16 @@ export async function runCandidate(engineIds: readonly string[], open: (args: Ar
   // Only the first request in a fresh process is cold, so a cold process runs one text.
   if (temperature === "cold" && texts.length !== 1) throw new Error("cold takes exactly one --text");
 
+  const args: Args = { engine, root: values.root, mode, temperature };
+  await verify?.(args);
   const loadStart = performance.now();
-  const adapter = await open({ engine, root: values.root, mode, temperature });
+  const adapter = await open(args);
   const loadMs = performance.now() - loadStart;
   let warmupMs: number | null = null;
   if (temperature === "warm") {
     const start = performance.now();
-    await adapter.warmup();
-    warmupMs = performance.now() - start;
+    const own = await adapter.warmup();
+    warmupMs = typeof own === "number" ? own : performance.now() - start;
   }
 
   const rate = adapter.engine.sampleRate;
@@ -100,7 +107,7 @@ export async function runCandidate(engineIds: readonly string[], open: (args: Ar
       runs.push({ textId: item.id, mode, temperature, repeat, playbackStartMs: null, chunks });
       if (repeat === 0 && values.clips) {
         const suffix = mode === "full" ? "--full" : "";
-        await writeWav(join(values.clips, `${item.id}--${engine}${suffix}.wav`), concat(pieces), rate);
+        await (adapter.writeClip ?? writeWav)(join(values.clips, `${item.id}--${engine}${suffix}.wav`), concat(pieces), rate);
       }
     }
   }

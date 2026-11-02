@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { planSegments, trimSilence } from "../../../../packages/speech-io/src/tts/stream.ts";
-import { fail, runCandidate, WARMUP_TEXT, type Adapter } from "../driver.ts";
+import { fail, runCandidate, WARMUP_TEXT, type Adapter } from "../../driver.ts";
 
 /**
  * fast-tts candidate: Supertonic 3 ONNX through the upstream Node example's

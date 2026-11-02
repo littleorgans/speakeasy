@@ -1,6 +1,6 @@
 # fast-tts measurement contract
 
-Every engine in this experiment, baseline or candidate, on any runtime, follows this contract so its numbers merge with `summarize.py` and appear on the listening page. `fasttts.py` implements it for Python; `render-baselines.ts` is the TypeScript reference.
+Every engine in this experiment, baseline or candidate, on any runtime, follows this contract so its numbers merge with `summarize.py` and appear on the listening page. `fasttts.py` implements it for Python and `driver.ts` for TypeScript; `render-baselines.ts` is the TypeScript reference engine.
 
 ## Cohort
 
@@ -106,6 +106,6 @@ The first warm repeat of each text is saved as mono WAV at the engine's native r
 
 ## Plugging in a candidate
 
-1. Write one script per engine (Python: implement `fasttts.Engine` and call `fasttts.run_engine`, which owns the flags, the cold and warm loops and the clips; other languages: emit the same JSON). State `streaming`, `chunkPolicy` and `cancellation`.
+1. Write one script per engine (Python: implement `fasttts.Engine` and call `fasttts.run_engine`, which owns the flags, the cold and warm loops and the clips; TypeScript: supply an `Adapter` to `driver.ts` `runCandidate`, the same for TypeScript; other languages: emit the same JSON). State `streaming`, `chunkPolicy` and `cancellation`.
 2. Smoke it untimed, run `summarize.py` on its files and check the page with `build_listen.py`.
 3. Add its fresh process blocks to `run-timed.sh` and wait for a quiet slot for the timed pass.
