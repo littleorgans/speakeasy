@@ -153,10 +153,20 @@ def render(args) -> None:
     warmup_ms = (time.perf_counter() - start) * 1000
 
     results = []
+
+    def save() -> None:
+        """Rewritten after every pass, so an interrupted run keeps every finished pass."""
+        args.json.write_text(json.dumps({
+            "schema": 1, "engine": args.label, "modelDir": args.model_dir.name, "threads": args.threads,
+            "sampleRate": rate, "seed": args.seed, "chunkFrames": args.chunk_frames, "runsPerText": args.runs,
+            "coldLoadMs": cold_load_ms, "warmupMs": warmup_ms, "results": results,
+        }, indent=2) + "\n")
+
     for voice in args.voice:
         for mode in args.mode:
             for item in texts:
                 passes = []
+                results.append({"voice": voice, "mode": mode, "id": item["id"], "runs": passes})
                 for run in range(args.runs):
                     audio, timing = run_once(runtime, probe, mode, item["text"], voice, args.seed, args.chunk_frames)
                     audio_ms = audio.size / rate * 1000
@@ -164,18 +174,11 @@ def render(args) -> None:
                     if run == 0:
                         name = f"{item['id']}--{args.label}-{voice}{'-stream' if mode == 'stream' else ''}.wav"
                         sf.write(str(args.out / name), audio, rate)
-                results.append({
-                    "voice": voice, "mode": mode, "id": item["id"], "runs": passes,
-                    "medianTtfaMs": statistics.median(p["ttfaMs"] for p in passes),
-                    "medianRtf": statistics.median(p["rtf"] for p in passes),
-                })
+                    results[-1].update(medianTtfaMs=statistics.median(p["ttfaMs"] for p in passes),
+                                       medianRtf=statistics.median(p["rtf"] for p in passes))
+                    save()
                 print(f"{args.label} {voice} {mode} {item['id']}: "
-                      f"ttfa {results[-1]['medianTtfaMs']:.0f} ms, rtf {results[-1]['medianRtf']:.2f}")
-    args.json.write_text(json.dumps({
-        "schema": 1, "engine": args.label, "modelDir": args.model_dir.name, "threads": args.threads,
-        "sampleRate": rate, "seed": args.seed, "chunkFrames": args.chunk_frames, "runsPerText": args.runs,
-        "coldLoadMs": cold_load_ms, "warmupMs": warmup_ms, "results": results,
-    }, indent=2) + "\n")
+                      f"ttfa {results[-1]['medianTtfaMs']:.0f} ms, rtf {results[-1]['medianRtf']:.2f}", flush=True)
 
 
 if __name__ == "__main__":
