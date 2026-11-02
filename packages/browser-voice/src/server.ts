@@ -27,7 +27,9 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => { void host.close().catch(() => { process.exitCode = 1; }); });
 }
 console.log(`speak-easy browser voice: ${host.url}`);
-console.log("Open the URL, allow microphone access, then start a room.");
+console.log(options.home === "road-test"
+  ? "Open the URL, allow microphone access, then hold Space to road test speech in and out."
+  : "Open the URL, allow microphone access, then start a room.");
 if (options.promptReader) {
   console.log(`prompt reader: ${host.url}/prompt-reader (takes saved to ${options.promptReader.outputDir})`);
 }

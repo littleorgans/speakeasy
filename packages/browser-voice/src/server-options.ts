@@ -1,7 +1,7 @@
 import type { RuntimeConfig, TtsEngine } from "@speakeasy/convo-engine";
 import type { PromptReaderConfig } from "./prompt-reader.ts";
 import { constants } from "node:fs";
-import { access, readFile, stat } from "node:fs/promises";
+import { access, readdir, readFile, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { exactFields, isRecord } from "./http-guards.ts";
 import { SETUPS } from "./setup-registry.ts";
@@ -22,7 +22,7 @@ export function readBrowserVoiceOptions(
   argv: string[],
   env: NodeJS.ProcessEnv,
 ): { port: number; runtimeConfig: RuntimeConfig; promptReader?: PromptReaderConfig; hotwordsPath?: string;
-  setupRuntimeFile?: string; outputRoot?: string } {
+  setupRuntimeFile?: string; outputRoot?: string; home: "room" | "road-test" } {
   const portFlag = argv.indexOf("--port");
   const port = portFlag === -1 ? 4317 : Number(argv[portFlag + 1]);
   if (!Number.isInteger(port) || port < 0 || port > 65_535) {
@@ -38,6 +38,7 @@ export function readBrowserVoiceOptions(
   }
   return {
     port,
+    home: argv.includes("--road-test") ? "road-test" : "room",
     ...(setupRuntimeFile === undefined ? {} : { setupRuntimeFile }),
     ...(outputRoot === undefined ? {} : { outputRoot: absoluteLocation(outputRoot) }),
     ...(hotwordsPath !== undefined ? { hotwordsPath } : {}),
@@ -117,12 +118,14 @@ async function inspectSetupReadiness(locations: SetupRuntimeLocations, modelRoot
   const readiness: SetupReadiness[] = [];
   for (const setup of SETUPS) {
     const config = setup.id === "sweep/score-2" ? undefined : locations.python?.[setup.id];
+    let sizeBytes: number | undefined;
     try {
       if (setup.id === "sweep/score-2") {
         const root = join(modelRoot, "parakeet-ultra-sherpa-onnx-int8");
         for (const name of ["encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt", ".complete"]) {
           if (!(await stat(join(root, name))).isFile()) throw new Error();
         }
+        sizeBytes = await modelBytes(root);
       } else {
         if (!config) throw new Error();
         await access(config.pythonPath, constants.X_OK);
@@ -136,8 +139,9 @@ async function inspectSetupReadiness(locations: SetupRuntimeLocations, modelRoot
             if (!(await stat(join(config.modelPath, name))).isFile()) throw new Error();
           }
         }
+        sizeBytes = await modelBytes(config.modelPath);
       }
-      readiness.push({ setupId: setup.id, ready: true });
+      readiness.push({ setupId: setup.id, ready: true, sizeBytes });
     } catch { readiness.push({ setupId: setup.id, ready: false, reason: "runtime or model files need setup" }); }
     readiness.at(-1)!.deadlines = { loadMs: config?.loadTimeoutMs ?? DEFAULT_SETUP_TIMEOUT_MS,
       operationMs: config?.operationTimeoutMs ?? DEFAULT_SETUP_TIMEOUT_MS };
@@ -146,6 +150,18 @@ async function inspectSetupReadiness(locations: SetupRuntimeLocations, modelRoot
   const cleanup = readiness.find((entry) => entry.setupId === "mlx-cleanup/qwen-targeted")!;
   if (!ultra.ready) { cleanup.ready = false; cleanup.reason = "Ultra dependency needs setup"; }
   return readiness;
+}
+
+/** Bytes of a model file, or of the files directly inside a model directory. */
+async function modelBytes(path: string): Promise<number> {
+  const info = await stat(path);
+  if (info.isFile()) return info.size;
+  let total = 0;
+  for (const name of await readdir(path)) {
+    const entry = await stat(join(path, name));
+    if (entry.isFile()) total += entry.size;
+  }
+  return total;
 }
 
 function readFlag(argv: string[], flag: string): string | undefined {

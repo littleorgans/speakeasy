@@ -2,8 +2,10 @@ import { readFileSync } from "node:fs";
 import { isSetupId, SETUP_IDS, sha256, type SetupId } from "./setup-protocol.ts";
 
 type Json = null | boolean | number | string | readonly Json[] | { readonly [key: string]: Json };
+/** Plain text model card facts; size is measured from the configured files. */
+export type SetupCard = Readonly<{ runtime: string; transcript: "final" | "partials" }>;
 export type SetupDefinition = Readonly<{
-  id: SetupId; label: string; model: string; revision: string;
+  id: SetupId; label: string; card: SetupCard; model: string; revision: string;
   runtime: Readonly<Record<string, Json>>; controls: Readonly<Record<string, Json>>;
   operation: "transcribe" | "cleanup"; maxSamples: number; baseSetup?: SetupId;
   [key: string]: Json | undefined;
@@ -13,7 +15,7 @@ export type SetupManifest = Readonly<{
 }>;
 
 // Pins every model, runtime, control, dependency and portable artifact name.
-export const SETUP_MANIFEST_SHA256 = "86f83f550b1c1f00bf15262a04497ccfcddda696bf56743be8f91da32c3276b5";
+export const SETUP_MANIFEST_SHA256 = "770c690a4513d97043f466ff3b175d6dbffc10ec00cba238fda8b2a66ab1d94b";
 
 export function assertSetupManifest(value: unknown): asserts value is SetupManifest {
   if (sha256(JSON.stringify(value) ?? "") !== SETUP_MANIFEST_SHA256) {

@@ -1,0 +1,148 @@
+/* Transport Matters dark surfaces. One 8px grid, two type sizes, one left edge. */
+:root {
+  color-scheme: dark;
+  --bg: #111213;
+  --well: #0c0d0e;
+  --tile: #17181a;
+  --rule: #26282b;
+  --rule-2: #36393d;
+  --ink: #ececea;
+  --ink-2: #a0a19f;
+  --ink-3: #6a6c6c;
+  --mint: #8fdcb0;
+  --mint-soft: rgb(143 220 176 / 0.08);
+  --live: #e0806a;
+  --text: 15px;
+  --small: 13px;
+  --sans: system-ui, -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --mono: "SF Mono", ui-monospace, Menlo, monospace;
+  background: var(--bg);
+  color: var(--ink);
+  font: var(--text) / 1.6 var(--sans);
+}
+
+body { margin: 0; }
+
+[hidden] { display: none !important; }
+
+.page {
+  display: grid;
+  gap: 40px;
+  width: min(760px, 100% - 48px);
+  margin: 0 auto;
+  padding: 40px 0 48px;
+}
+
+h1, h2, p, dl, dd { margin: 0; }
+
+h1 { font-size: var(--text); font-weight: 600; }
+
+.quiet, .label, kbd, th, dt, footer { font-size: var(--small); color: var(--ink-3); }
+
+.label { display: flex; justify-content: space-between; gap: 16px; color: var(--ink-2); font-weight: 500; }
+
+.head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
+
+.head .quiet { text-align: right; }
+
+.choices { display: grid; gap: 24px; }
+
+.choice { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px 16px; align-items: center; }
+
+.choice .card { grid-column: 2; }
+
+.pair { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 8px; }
+
+select, button {
+  font: inherit;
+  color: var(--ink);
+  background: var(--tile);
+  border: 1px solid var(--rule-2);
+  border-radius: 6px;
+  min-height: 40px;
+  padding: 0 16px;
+}
+
+select { width: 100%; padding-right: 32px; }
+
+button { cursor: pointer; }
+
+button:hover:not(:disabled), select:hover:not(:disabled) { border-color: var(--ink-3); }
+
+button:disabled { color: var(--ink-3); border-color: var(--rule); cursor: default; }
+
+:focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; }
+
+kbd { font-family: var(--mono); margin-left: 8px; }
+
+.talk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+
+.hold { min-height: 48px; padding: 0 24px; border-color: var(--mint); background: var(--mint-soft); }
+
+.hold kbd { color: var(--ink-2); }
+
+.hold[aria-pressed="true"] { border-color: var(--live); background: rgb(224 128 106 / 0.12); }
+
+.level { flex: 1 1 120px; height: 2px; background: var(--rule); border-radius: 1px; overflow: hidden; }
+
+.level span { display: block; height: 100%; width: 0; background: var(--mint); transition: width 60ms linear; }
+
+.take { display: grid; gap: 24px; padding-top: 24px; border-top: 1px solid var(--rule); }
+
+.transcript { display: grid; gap: 8px; }
+
+.said { min-height: 3.2em; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.said.placeholder { color: var(--ink-3); }
+
+.timings { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+
+.group { display: grid; gap: 8px; align-content: start; }
+
+dl { display: grid; gap: 8px; }
+
+dl div { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
+
+dl div.wide { display: grid; gap: 0; }
+
+dt { flex: none; }
+
+dd { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; text-align: right; }
+
+.wide dd { text-align: left; }
+
+dd.missing { color: var(--ink-3); }
+
+.replay { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.settings { display: grid; gap: 8px; }
+
+.switch { display: flex; align-items: center; gap: 8px; width: fit-content; cursor: pointer; }
+
+.switch input { width: 16px; height: 16px; margin: 0; accent-color: var(--mint); }
+
+.history { display: grid; gap: 8px; }
+
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+
+th { text-align: left; font-weight: 500; padding: 0 16px 8px 0; border-bottom: 1px solid var(--rule); }
+
+td { padding: 8px 16px 8px 0; border-bottom: 1px solid var(--rule); vertical-align: top; font-size: var(--small); color: var(--ink-2); }
+
+td.said-cell { color: var(--ink); overflow-wrap: anywhere; }
+
+th:last-child, td:last-child { padding-right: 0; }
+
+.num { text-align: right; white-space: nowrap; }
+
+footer { padding-top: 24px; border-top: 1px solid var(--rule); }
+
+@media (max-width: 640px) {
+  .choice { grid-template-columns: 1fr; }
+  .choice .card { grid-column: 1; }
+  .timings { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .level span { transition: none; }
+}

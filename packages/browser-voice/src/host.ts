@@ -46,6 +46,13 @@ const STATIC_FILES = new Map([
   ["/setup-results.js", "setup-results.js"],
   ["/speech-output-controls.js", "speech-output-controls.js"],
   ["/speech-observations.js", "speech-observations.js"],
+  ["/road-test", "road-test.html"],
+  ["/road-test.css", "road-test.css"],
+  ["/road-test.js", "road-test.js"],
+  ["/mic-capture.js", "mic-capture.js"],
+  ["/voice-readback.js", "voice-readback.js"],
+  ["/talk-over.js", "talk-over.js"],
+  ["/road-test-text.js", "road-test-text.js"],
 ]);
 const PROMPT_READER_API = "/prompt-reader/";
 const PROMPT_READER_TAKES = "/prompt-reader/takes/";
@@ -75,6 +82,8 @@ export type BrowserVoiceServerOptions = {
   setupReadiness?: () => readonly SetupReadiness[];
   providers?: ProviderRoutesConfig;
   speechOutput?: Pick<SpeechOutputSessionOptions, "catalogue" | "createOutput" | "quiesce"> & { close?(): Promise<void> };
+  /** Page served at `/`; the road test stays at `/road-test` either way. */
+  home?: "room" | "road-test";
 };
 
 export async function startBrowserVoiceServer(options: BrowserVoiceServerOptions = {}): Promise<BrowserVoiceServer> {
@@ -113,7 +122,7 @@ export async function startBrowserVoiceServer(options: BrowserVoiceServerOptions
       void servePromptReader(request, response, promptReader, transcriber, hotwordsPath, lease);
       return;
     }
-    void serveStatic(request.url ?? "/", response);
+    void serveStatic(request.url ?? "/", response, options.home === "road-test" ? "/road-test" : "/");
   });
   const sockets = new WebSocketServer({ noServer: true });
   const outputSockets = new WebSocketServer({ noServer: true });
@@ -347,9 +356,10 @@ async function serveTake(
 async function serveStatic(
   requestUrl: string,
   response: ServerResponse,
+  home: string,
 ): Promise<void> {
   const pathname = new URL(requestUrl, "http://localhost").pathname;
-  const relative = STATIC_FILES.get(pathname);
+  const relative = STATIC_FILES.get(pathname === "/" ? home : pathname);
   if (!relative) {
     response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
     response.end("Not found");

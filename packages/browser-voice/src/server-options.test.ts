@@ -16,6 +16,7 @@ test("server options keep the model and use the cascade TTS voice", () => {
     }),
     {
       port: 4317,
+      home: "room",
       runtimeConfig: {
         llmModel: "operator-model",
         ttsEngine: "sherpa",
@@ -41,6 +42,11 @@ test("prompt reader flags come as a pair", () => {
     () => readBrowserVoiceOptions(["--out", "--prompts", "x"], {}),
     /--out needs a value/,
   );
+});
+
+test("road test flag serves the road test page at the root", () => {
+  assert.equal(readBrowserVoiceOptions(["--road-test", "--port", "4870"], {}).home, "road-test");
+  assert.equal(readBrowserVoiceOptions(["--port", "4870"], {}).home, "room");
 });
 
 test("hotwords flag selects an external list and requires its path", () => {
@@ -86,7 +92,9 @@ test("bootstrap constructs actual lazy transport and reports missing files witho
   }, cpu: { modelRoot: join(root, "missing") } }));
   const runtime = await createSetupRuntime(runtimeFile);
   assert.equal(runtime.executor.constructor.name, "SetupWorkers");
-  assert.equal(runtime.readiness().find((entry) => entry.setupId === "mlx-parakeet/v3-greedy")!.ready, true);
+  const v3 = runtime.readiness().find((entry) => entry.setupId === "mlx-parakeet/v3-greedy")!;
+  assert.equal(v3.ready, true);
+  assert.equal(v3.sizeBytes, "{}".length + "fake weights never loaded".length, "card size is measured from the model files");
   assert.equal(runtime.readiness().find((entry) => entry.setupId === "sweep/score-2")!.ready, false);
   await runtime.executor.close();
 });

@@ -70,13 +70,15 @@ class SpeakEasyPlayback extends AudioWorkletProcessor {
     return value;
   }
 
-  maybeReportDrain() {
+  // audioTime: context time from which this generation renders silence.
+  maybeReportDrain(audioTime = currentTime) {
     if (this.ended && this.queue.length === 0 && !this.reportedDrain) {
       this.reportedDrain = true;
       this.port.postMessage({
         kind: "drained",
         playbackId: this.playbackId,
         audioEndMs: Math.floor((this.playedInputSamples / this.inputRate) * 1000),
+        audioTime,
       });
     }
   }
@@ -105,7 +107,7 @@ class SpeakEasyPlayback extends AudioWorkletProcessor {
         channels[channel][index] = value;
       }
     }
-    this.maybeReportDrain();
+    this.maybeReportDrain(currentTime + primary.length / sampleRate);
     return true;
   }
 }

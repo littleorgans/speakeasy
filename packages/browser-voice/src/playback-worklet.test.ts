@@ -49,6 +49,7 @@ test("playback clear reports source audio rendered before interruption", () => {
   assert.deepEqual(messages, [
     { kind: "drained", playbackId: 7, audioEndMs: 26 },
   ]);
+  assert.equal(worklet.port.messages[0]?.audioTime, 2, "silence starts at the next render quantum");
 });
 
 function loadProcessor(): new () => WorkletInstance {
