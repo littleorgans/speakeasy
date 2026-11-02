@@ -1,0 +1,466 @@
+# fast-tts timed pass slot log
+
+## start 2026-11-02T22:19:26Z load { 3.05 4.97 10.03 }
+    uptime:  5:19  up 6 days, 11:36, 1 user, load averages: 3.05 4.97 10.03
+      PID  %CPU COMM
+    14055 106.5 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif).app/Contents/MacOS/Google Chrome Helper (Aperitif)
+    14043  72.2 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+      415  43.8 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+    66348  33.9 /Users/alphab/.local/share/mise/installs/node/25/bin/node
+    69801  22.9 /Users/alphab/.local/share/mise/installs/node/25/bin/claude
+    83940  16.9 postgres
+    55964   8.1 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+    32792   7.9 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+    66577   6.3 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper (Renderer).app/Contents/MacOS/Electron Helper (Renderer)
+    66368   6.3 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/venv/bin/python
+      600   4.7 /System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/com.apple.DriverKit-AppleBCMWLAN
+    46075   4.6 /Users/alphab/.local/share/mise/installs/node/25/bin/claude
+    74391   2.7 /Users/alphab/.local/share/mise/installs/node/25/bin/claude
+    66292   2.4 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/venv/bin/python
+      574   2.0 /usr/sbin/coreaudiod
+## sample 2026-11-02T22:20:26Z load { 5.28 5.24 9.78 }
+      PID  %CPU COMM
+    93133 187.7 node
+    14055  79.3 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif).app/Contents/MacOS/Google Chrome Helper (Aperitif)
+    14043  52.9 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+      415  49.1 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      385  32.1 /usr/libexec/opendirectoryd
+## sample 2026-11-02T22:21:26Z load { 5.59 5.33 9.50 }
+      PID  %CPU COMM
+    94888 368.0 node
+      385  48.0 /usr/libexec/opendirectoryd
+    14055  36.5 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif).app/Contents/MacOS/Google Chrome Helper (Aperitif)
+      415  27.1 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+    14043  19.9 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+## sample 2026-11-02T22:22:26Z load { 5.95 5.48 9.27 }
+      PID  %CPU COMM
+    97923 199.7 node
+      385  54.2 /usr/libexec/opendirectoryd
+      415  32.7 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      971  16.9 /System/Library/PrivateFrameworks/AssistantServices.framework/Versions/A/Support/assistantd
+    14043  14.2 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+## sample 2026-11-02T22:23:27Z load { 9.03 6.40 9.35 }
+      PID  %CPU COMM
+    99473 197.4 node
+    58249  96.4 /Users/alphab/.local/share/uv/tools/kmt-tagger/bin/python
+      385  55.9 /usr/libexec/opendirectoryd
+      415  25.6 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      971  16.3 /System/Library/PrivateFrameworks/AssistantServices.framework/Versions/A/Support/assistantd
+## sample 2026-11-02T22:24:27Z load { 6.33 6.11 9.03 }
+      PID  %CPU COMM
+      437 199.4 node
+      415  46.1 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      385  39.0 /usr/libexec/opendirectoryd
+    14043  12.4 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+      971  11.8 /System/Library/PrivateFrameworks/AssistantServices.framework/Versions/A/Support/assistantd
+## sample 2026-11-02T22:25:27Z load { 5.54 5.90 8.74 }
+      PID  %CPU COMM
+      437 198.3 node
+      385  54.1 /usr/libexec/opendirectoryd
+      415  52.8 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      971  17.3 /System/Library/PrivateFrameworks/AssistantServices.framework/Versions/A/Support/assistantd
+    14055  16.3 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif).app/Contents/MacOS/Google Chrome Helper (Aperitif)
+## sample 2026-11-02T22:26:27Z load { 5.45 5.84 8.53 }
+      PID  %CPU COMM
+      437 194.1 node
+      415  55.1 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      567  45.8 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+      385  30.4 /usr/libexec/opendirectoryd
+      971  10.5 /System/Library/PrivateFrameworks/AssistantServices.framework/Versions/A/Support/assistantd
+## sample 2026-11-02T22:27:27Z load { 5.14 5.70 8.29 }
+      PID  %CPU COMM
+      437 197.9 node
+     5353 122.7 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+      415  55.7 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      385  33.3 /usr/libexec/opendirectoryd
+    66348  28.2 /Users/alphab/.local/share/mise/installs/node/25/bin/node
+## sample 2026-11-02T22:28:27Z load { 5.78 5.81 8.15 }
+      PID  %CPU COMM
+    10227 197.4 node
+      415  52.9 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      385  24.2 /usr/libexec/opendirectoryd
+    14055   9.0 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif).app/Contents/MacOS/Google Chrome Helper (Aperitif)
+    31605   8.9 /System/Applications/Utilities/Activity Monitor.app/Contents/MacOS/Activity Monitor
+## sample 2026-11-02T22:29:27Z load { 4.46 5.40 7.84 }
+      PID  %CPU COMM
+    10227 192.7 node
+      415  73.1 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+    14055  72.0 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif).app/Contents/MacOS/Google Chrome Helper (Aperitif)
+    14043  52.5 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+      385  13.4 /usr/libexec/opendirectoryd
+## sample 2026-11-02T22:30:27Z load { 5.70 5.62 7.76 }
+      PID  %CPU COMM
+    10227 197.9 node
+      415  37.4 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      385  17.8 /usr/libexec/opendirectoryd
+      512  14.5 /usr/libexec/syspolicyd
+      971   5.1 /System/Library/PrivateFrameworks/AssistantServices.framework/Versions/A/Support/assistantd
+## sample 2026-11-02T22:31:27Z load { 5.48 5.53 7.57 }
+      PID  %CPU COMM
+    10227 200.0 node
+      725  55.2 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/corespotlightd
+      415  50.1 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+    66348  19.9 /Users/alphab/.local/share/mise/installs/node/25/bin/node
+      385  14.1 /usr/libexec/opendirectoryd
+## sample 2026-11-02T22:32:27Z load { 6.45 5.69 7.48 }
+      PID  %CPU COMM
+    18703 394.8 node
+      415  57.5 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+    66368  33.6 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/venv/bin/python
+    66348  21.9 /Users/alphab/.local/share/mise/installs/node/25/bin/node
+    70215  17.2 /Users/alphab/.local/share/mise/installs/node/25/bin/claude
+## sample 2026-11-02T22:33:27Z load { 8.77 6.46 7.65 }
+      PID  %CPU COMM
+    80113 140.3 /usr/libexec/spotlightknowledged.updater
+    21336 108.7 node
+      725  93.5 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/corespotlightd
+      415  56.2 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+    66368   9.1 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/venv/bin/python
+## sample 2026-11-02T22:34:27Z load { 23.88 11.68 9.54 }
+      PID  %CPU COMM
+    21336 395.5 node
+    67826 300.0 /System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd
+      415  45.8 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      385   7.6 /usr/libexec/opendirectoryd
+    66575   4.6 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+## sample 2026-11-02T22:35:27Z load { 15.73 11.55 9.64 }
+      PID  %CPU COMM
+    21336 396.1 node
+      415  45.2 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      567   9.9 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+      512   8.5 /usr/libexec/syspolicyd
+    66575   4.7 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+## sample 2026-11-02T22:36:27Z load { 10.27 10.75 9.46 }
+      PID  %CPU COMM
+    25423 398.7 node
+    67826  41.7 /System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd
+      415  38.6 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+    30627  30.3 /usr/libexec/textunderstandingd
+    14043   5.5 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+## sample 2026-11-02T22:37:27Z load { 8.22 10.04 9.28 }
+      PID  %CPU COMM
+    25423 397.9 node
+      415  41.4 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      725  31.3 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/corespotlightd
+    80113  16.1 /usr/libexec/spotlightknowledged.updater
+      512  14.0 /usr/libexec/syspolicyd
+## sample 2026-11-02T22:38:28Z load { 7.09 9.36 9.08 }
+      PID  %CPU COMM
+    30003 194.8 node
+      415  39.8 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+    14056  14.4 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif).app/Contents/MacOS/Google Chrome Helper (Aperitif)
+      567  12.5 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+      512  10.7 /usr/libexec/syspolicyd
+## sample 2026-11-02T22:39:28Z load { 5.46 8.42 8.74 }
+      PID  %CPU COMM
+    31411 198.2 node
+      415  42.8 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+    66292  34.0 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/venv/bin/python
+      348  28.4 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/Support/fseventsd
+     1459  14.6 postgres
+## sample 2026-11-02T22:40:28Z load { 5.05 7.81 8.49 }
+      PID  %CPU COMM
+    33284 198.0 node
+      415  35.3 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+    68290   5.4 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+      512   4.2 /usr/libexec/syspolicyd
+      567   4.0 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+## sample 2026-11-02T22:41:28Z load { 4.58 7.15 8.20 }
+      PID  %CPU COMM
+    33284 199.3 node
+      415  36.8 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      512  19.7 /usr/libexec/syspolicyd
+    14329   3.9 /System/Library/Frameworks/VideoToolbox.framework/Versions/A/XPCServices/VTDecoderXPCService.xpc/Contents/MacOS/VTDecoderXPCService
+    66575   3.9 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+## sample 2026-11-02T22:42:28Z load { 5.44 6.93 8.04 }
+      PID  %CPU COMM
+    33284 201.2 node
+      415  36.2 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+    66575   4.0 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+    66577   3.8 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper (Renderer).app/Contents/MacOS/Electron Helper (Renderer)
+    31605   3.7 /System/Applications/Utilities/Activity Monitor.app/Contents/MacOS/Activity Monitor
+## sample 2026-11-02T22:43:28Z load { 4.53 6.41 7.77 }
+      PID  %CPU COMM
+    33284 199.0 node
+      415  36.3 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      512   4.1 /usr/libexec/syspolicyd
+    66575   4.0 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+    66577   3.7 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper (Renderer).app/Contents/MacOS/Electron Helper (Renderer)
+## sample 2026-11-02T22:44:28Z load { 5.21 6.29 7.63 }
+      PID  %CPU COMM
+    33284 197.2 node
+      415  49.6 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      954  18.8 /usr/libexec/sysmond
+    31605  10.8 /System/Applications/Utilities/Activity Monitor.app/Contents/MacOS/Activity Monitor
+    14055   5.4 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif).app/Contents/MacOS/Google Chrome Helper (Aperitif)
+## sample 2026-11-02T22:45:28Z load { 4.98 6.06 7.45 }
+      PID  %CPU COMM
+    41075 199.6 node
+      415  34.6 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+    90559  15.1 /Users/alphab/.vscode/extensions/typescriptteam.native-preview-1.0.1-darwin-arm64/lib/tsc
+      512   6.1 /usr/libexec/syspolicyd
+      567   4.2 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+## sample 2026-11-02T22:46:28Z load { 4.69 5.77 7.25 }
+      PID  %CPU COMM
+    41075 197.9 node
+      415  35.7 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      512   6.3 /usr/libexec/syspolicyd
+    96921   3.9 /usr/libexec/trustd
+    66575   3.8 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+## sample 2026-11-02T22:47:28Z load { 4.77 5.57 7.07 }
+      PID  %CPU COMM
+    41075 200.0 node
+      415  35.2 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      512   4.4 /usr/libexec/syspolicyd
+      567   3.9 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+    66575   3.7 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+## sample 2026-11-02T22:48:28Z load { 4.73 5.41 6.90 }
+      PID  %CPU COMM
+    41075 199.3 node
+      415  37.3 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      512  18.2 /usr/libexec/syspolicyd
+      567   4.7 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+    66575   3.8 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+## sample 2026-11-02T22:49:28Z load { 4.78 5.29 6.75 }
+      PID  %CPU COMM
+    41075 200.0 node
+      415  36.2 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      567   7.2 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+    46075   4.7 /Users/alphab/.local/share/mise/installs/node/25/bin/claude
+    66575   4.0 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+## sample 2026-11-02T22:50:28Z load { 4.83 5.24 6.64 }
+      PID  %CPU COMM
+    49437  95.6 /var/folders/15/l6zdb_ln4tq4slrn7c3hps7m0000gn/T/tm-ae5f8cb0/venv-kokoro-mlx/bin/python
+      415  45.6 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+    66575   5.0 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+    66577   4.3 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper (Renderer).app/Contents/MacOS/Electron Helper (Renderer)
+    31605   4.0 /System/Applications/Utilities/Activity Monitor.app/Contents/MacOS/Activity Monitor
+## sample 2026-11-02T22:51:28Z load { 3.65 4.80 6.38 }
+      PID  %CPU COMM
+    50718  95.8 /var/folders/15/l6zdb_ln4tq4slrn7c3hps7m0000gn/T/tm-ae5f8cb0/venv-kokoro-mlx/bin/python
+      415  46.1 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      512   9.1 /usr/libexec/syspolicyd
+    66575   5.2 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+    66577   4.8 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper (Renderer).app/Contents/MacOS/Electron Helper (Renderer)
+## sample 2026-11-02T22:52:28Z load { 3.96 4.69 6.22 }
+      PID  %CPU COMM
+    53335  97.0 /var/folders/15/l6zdb_ln4tq4slrn7c3hps7m0000gn/T/tm-ae5f8cb0/venv-kokoro-mlx/bin/python
+    25762  90.1 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+      415  34.1 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+    31075  10.5 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+      512   6.6 /usr/libexec/syspolicyd
+## sample 2026-11-02T22:53:29Z load { 4.37 4.65 6.10 }
+      PID  %CPU COMM
+    54426  91.2 /var/folders/15/l6zdb_ln4tq4slrn7c3hps7m0000gn/T/tm-ae5f8cb0/venv-kokoro-mlx/bin/python
+      415  49.8 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+     2812  35.1 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+    93758  32.3 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+    66575   5.0 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+## sample 2026-11-02T22:54:29Z load { 3.38 4.31 5.87 }
+      PID  %CPU COMM
+      415  58.1 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+     4700  28.3 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+      512  18.5 /usr/libexec/syspolicyd
+    24727   5.8 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+    66575   5.4 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+## sample 2026-11-02T22:55:29Z load { 4.44 4.41 5.80 }
+      PID  %CPU COMM
+    57283  68.6 /var/folders/15/l6zdb_ln4tq4slrn7c3hps7m0000gn/T/tm-ae5f8cb0/venv-pocket/bin/python
+      415  56.4 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      954  22.0 /usr/libexec/sysmond
+    31605  12.5 /System/Applications/Utilities/Activity Monitor.app/Contents/MacOS/Activity Monitor
+      512   8.9 /usr/libexec/syspolicyd
+## sample 2026-11-02T22:56:29Z load { 4.40 4.37 5.69 }
+      PID  %CPU COMM
+    59392 192.7 /var/folders/15/l6zdb_ln4tq4slrn7c3hps7m0000gn/T/tm-ae5f8cb0/kokoro-ane-worker-build/release/KokoroAneWorker
+      415  46.4 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+    66575   4.9 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+      512   4.8 /usr/libexec/syspolicyd
+    66577   4.0 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper (Renderer).app/Contents/MacOS/Electron Helper (Renderer)
+## sample 2026-11-02T22:57:29Z load { 3.98 4.30 5.57 }
+      PID  %CPU COMM
+    62350  92.6 /var/folders/15/l6zdb_ln4tq4slrn7c3hps7m0000gn/T/tm-ae5f8cb0/kokoro-ane-worker-build/release/KokoroAneWorker
+      415  35.1 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      512  10.8 /usr/libexec/syspolicyd
+    54950   5.6 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+      567   3.7 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+## sample 2026-11-02T22:58:29Z load { 4.73 4.38 5.51 }
+      PID  %CPU COMM
+    63760 287.9 /var/folders/15/l6zdb_ln4tq4slrn7c3hps7m0000gn/T/tm-ae5f8cb0/kokoro-ane-worker-build/release/KokoroAneWorker
+      725 124.6 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/corespotlightd
+      415  47.1 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+    37635  37.6 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+    46075   6.9 /Users/alphab/.local/share/mise/installs/node/25/bin/claude
+## sample 2026-11-02T22:59:29Z load { 5.39 4.69 5.55 }
+      PID  %CPU COMM
+    65848 202.3 node
+      415  36.9 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+    66575   4.0 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+    66577   3.7 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper (Renderer).app/Contents/MacOS/Electron Helper (Renderer)
+    36184   3.7 /Users/alphab/.local/share/mise/installs/node/25/bin/claude
+## sample 2026-11-02T23:00:29Z load { 4.42 4.58 5.45 }
+      PID  %CPU COMM
+    66931 205.7 node
+     6643  76.0 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+      415  37.3 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      567   4.6 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+    66575   3.6 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+## sample 2026-11-02T23:01:29Z load { 4.42 4.56 5.38 }
+      PID  %CPU COMM
+    66931 201.9 node
+      415  37.1 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      567   5.5 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+    66575   3.9 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+    66577   3.5 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper (Renderer).app/Contents/MacOS/Electron Helper (Renderer)
+## sample 2026-11-02T23:02:29Z load { 3.79 4.35 5.25 }
+      PID  %CPU COMM
+    66931 200.0 node
+    47518  77.6 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+     4700  48.3 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+      415  35.1 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      567   4.1 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+## sample 2026-11-02T23:03:29Z load { 3.67 4.22 5.14 }
+      PID  %CPU COMM
+    72154 199.2 node
+      415  36.4 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      954  18.4 /usr/libexec/sysmond
+    11423  16.2 claude
+      567   3.7 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+## sample 2026-11-02T23:04:29Z load { 3.87 4.20 5.07 }
+      PID  %CPU COMM
+    72154 199.0 node
+    24727  37.5 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+      415  36.4 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+    96343   4.0 /usr/libexec/trustd
+      567   3.8 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+## sample 2026-11-02T23:05:29Z load { 4.15 4.27 5.03 }
+      PID  %CPU COMM
+    72154 202.0 node
+      415  36.3 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+    66575   3.6 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+      567   3.4 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+    66577   3.4 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper (Renderer).app/Contents/MacOS/Electron Helper (Renderer)
+## sample 2026-11-02T23:06:29Z load { 3.38 4.03 4.89 }
+      PID  %CPU COMM
+    77467 203.8 node
+     6643  94.0 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+      415  33.8 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      567   4.4 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+    66575   3.8 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+## sample 2026-11-02T23:07:30Z load { 5.25 4.45 4.99 }
+      PID  %CPU COMM
+    78040 206.3 node
+      415  36.2 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      567   3.7 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+    66575   3.7 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+    66577   3.5 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper (Renderer).app/Contents/MacOS/Electron Helper (Renderer)
+## sample 2026-11-02T23:08:30Z load { 4.32 4.40 4.94 }
+      PID  %CPU COMM
+    78040 201.7 node
+      415  34.8 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      567   3.8 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+    66575   3.5 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+    46075   3.4 /Users/alphab/.local/share/mise/installs/node/25/bin/claude
+## sample 2026-11-02T23:09:30Z load { 3.91 4.27 4.85 }
+      PID  %CPU COMM
+    78040 201.6 node
+      415  36.8 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+    46075   4.3 /Users/alphab/.local/share/mise/installs/node/25/bin/claude
+      567   3.8 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+    66575   3.8 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+## sample 2026-11-02T23:10:30Z load { 3.68 4.11 4.75 }
+      PID  %CPU COMM
+    83154 198.9 node
+      415  35.4 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      567   5.1 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+     5353   4.8 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+    66575   3.5 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+## sample 2026-11-02T23:11:30Z load { 5.60 4.54 4.86 }
+      PID  %CPU COMM
+    83154 197.6 node
+      415  35.7 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+    66575   3.6 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+      567   3.5 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+    66577   3.1 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper (Renderer).app/Contents/MacOS/Electron Helper (Renderer)
+## sample 2026-11-02T23:12:30Z load { 4.67 4.47 4.81 }
+      PID  %CPU COMM
+    88377 405.2 node
+     6643  79.9 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+      415  36.1 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+    65024  22.6 /Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper (Renderer).app/Contents/MacOS/Code Helper (Renderer)
+    31605   4.1 /System/Applications/Utilities/Activity Monitor.app/Contents/MacOS/Activity Monitor
+## sample 2026-11-02T23:13:30Z load { 5.53 4.74 4.88 }
+      PID  %CPU COMM
+    89834 422.2 node
+      415  35.6 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+    66575   3.8 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+      567   3.6 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+    66577   3.4 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper (Renderer).app/Contents/MacOS/Electron Helper (Renderer)
+## sample 2026-11-02T23:14:30Z load { 6.12 5.05 4.99 }
+      PID  %CPU COMM
+    89834 407.0 node
+      415  40.6 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      567   6.0 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+    66575   3.8 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+    66577   3.3 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper (Renderer).app/Contents/MacOS/Electron Helper (Renderer)
+## sample 2026-11-02T23:15:30Z load { 6.07 5.20 5.05 }
+      PID  %CPU COMM
+    89834 404.4 node
+      415  35.0 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      567   3.9 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+    66575   3.6 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+    66577   3.3 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper (Renderer).app/Contents/MacOS/Electron Helper (Renderer)
+## sample 2026-11-02T23:16:30Z load { 5.88 5.27 5.08 }
+      PID  %CPU COMM
+    93548 398.2 node
+      415  36.4 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+    66575   3.8 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+    14329   3.5 /System/Library/Frameworks/VideoToolbox.framework/Versions/A/XPCServices/VTDecoderXPCService.xpc/Contents/MacOS/VTDecoderXPCService
+      567   3.3 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+## sample 2026-11-02T23:17:30Z load { 5.81 5.36 5.12 }
+      PID  %CPU COMM
+    93548 403.9 node
+      415  35.9 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      567   3.6 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+    66575   3.4 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+    66577   3.2 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper (Renderer).app/Contents/MacOS/Electron Helper (Renderer)
+## sample 2026-11-02T23:18:30Z load { 5.70 5.41 5.16 }
+      PID  %CPU COMM
+    98614 361.2 /var/folders/15/l6zdb_ln4tq4slrn7c3hps7m0000gn/T/tm-ae5f8cb0/libpiper-install/bin/piper-split-worker
+      415  38.4 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+     6643  15.3 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+    46075   5.0 /Users/alphab/.local/share/mise/installs/node/25/bin/claude
+      567   3.8 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+## sample 2026-11-02T23:19:30Z load { 5.79 5.46 5.19 }
+      PID  %CPU COMM
+      763 392.2 /var/folders/15/l6zdb_ln4tq4slrn7c3hps7m0000gn/T/tm-ae5f8cb0/libpiper-install/bin/piper-split-worker
+      415  52.3 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+      760   6.2 node
+      567   5.3 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+    66575   3.8 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+## sample 2026-11-02T23:20:30Z load { 4.42 5.17 5.10 }
+      PID  %CPU COMM
+      415  42.3 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+     2496  19.9 postgres
+    46075  17.5 /Users/alphab/.local/share/mise/installs/node/25/bin/claude
+     2495  11.9 postgres
+    31605   9.3 /System/Applications/Utilities/Activity Monitor.app/Contents/MacOS/Activity Monitor
+
+## end 2026-11-02T23:20:59Z load { 3.20 4.80 4.97 }
+    uptime:  6:20  up 6 days, 12:38, 1 user, load averages: 3.20 4.80 4.97
+      PID  %CPU COMM
+      415  43.5 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+    46075  26.5 /Users/alphab/.local/share/mise/installs/node/25/bin/claude
+    66575  12.1 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper
+    66577   9.7 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/electron/Electron.app/Contents/Frameworks/Electron Helper (Renderer).app/Contents/MacOS/Electron Helper (Renderer)
+    66368   7.9 /Users/alphab/.transport-matters-preview/releases/20261102T153849Z-05071151c/venv/bin/python
+    66348   6.7 /Users/alphab/.local/share/mise/installs/node/25/bin/node
+      850   4.3 /System/Library/CoreServices/ControlCenter.app/Contents/MacOS/ControlCenter
+      567   4.1 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif Renderer).app/Contents/MacOS/Google Chrome Helper (Aperitif Renderer)
+      504   3.9 /usr/libexec/airportd
+     2734   3.8 postgres
+      508   2.9 /usr/sbin/mDNSResponder
+    14329   2.9 /System/Library/Frameworks/VideoToolbox.framework/Versions/A/XPCServices/VTDecoderXPCService.xpc/Contents/MacOS/VTDecoderXPCService
+    14055   2.2 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Versions/156.0.8078.48/Helpers/Google Chrome Helper (Aperitif).app/Contents/MacOS/Google Chrome Helper (Aperitif)
+      574   2.1 /usr/sbin/coreaudiod
+     2972   1.9 postgres

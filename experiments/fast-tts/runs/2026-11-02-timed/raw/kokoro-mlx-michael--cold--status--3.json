@@ -1,0 +1,73 @@
+{
+ "schema": "fast-tts.result.v1",
+ "engine": {
+  "id": "kokoro-mlx-michael",
+  "label": "Kokoro v1.0 MLX bf16 \u00b7 am_michael",
+  "runtime": "mlx-audio 0.6.3 (mlx 0.32.4)",
+  "provider": "mlx-metal-gpu",
+  "model": "mlx-community/Kokoro-82M-bf16",
+  "modelRevision": "a71e4d38b236d968966a2002c4c895dbd12b1c3c",
+  "voice": "am_michael",
+  "sampleRate": 24000,
+  "streaming": "segment waveforms: speak-easy planSegments + trimSilence port, one generate call, newline separated segments; not incremental within a segment",
+  "chunkPolicy": "first chunk: first clause or 4 words of sentence 1, then whole sentences; each chunk trimmed, 150 ms gap appended",
+  "cancellation": "between segments (host stops pulling the generator); an active segment's MLX inference is not preempted"
+ },
+ "environment": {
+  "machine": "Apple M2 Max",
+  "arch": "arm64",
+  "cpuCount": 12,
+  "memoryGiB": 96,
+  "os": "macOS 27.0.1",
+  "versions": {
+   "python": "3.12.5",
+   "mlx-audio": "0.6.3",
+   "mlx": "0.32.4",
+   "misaki": "0.9.4",
+   "spacy": "3.8.18",
+   "en-core-web-sm": "3.8.0",
+   "espeakng-loader": "0.2.4",
+   "phonemizer-fork": "3.3.2",
+   "numpy": "2.5.4"
+  },
+  "harnessCommit": "f0465da1b8f0"
+ },
+ "process": {
+  "temperature": "cold",
+  "timed": true,
+  "repeats": 1,
+  "startedAt": "2026-11-02T22:51:51+00:00",
+  "clock": "time.perf_counter_ns (monotonic)",
+  "playback": null,
+  "loadMs": 2493.889,
+  "warmupMs": null,
+  "loadDetail": {
+   "modelLoadMs": 167.122,
+   "g2pPipelineMs": 2326.761,
+   "note": "loadMs is mlx_audio load_model on the local snapshot plus the misaki G2P pipeline; mlx-audio reloads the voice pack inside every generate call"
+  }
+ },
+ "runs": [
+  {
+   "textId": "status",
+   "mode": "stream",
+   "temperature": "cold",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 137.216,
+     "audioMs": 1421.25,
+     "text": "The deploy finished and"
+    },
+    {
+     "index": 1,
+     "readyMs": 227.885,
+     "audioMs": 1422.833,
+     "text": "the site is live again."
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "note": "Agent to owner texts, the same for every engine. Ids status, question, code, warning, schedule, summary and reference keep the audio8-tts wording so results compare; the audio8 paragraph fits no length class and is left out.",
+  "texts": [
+    { "id": "status", "length": "short", "kind": "one line status", "text": "The deploy finished and the site is live again." },
+    { "id": "question", "length": "short", "kind": "question", "text": "Should I merge the pull request now, or wait for Sam to review it?" },
+    { "id": "code", "length": "short", "kind": "number and code", "text": "PR 418 merged at 14:05; main is green at commit 7f3a9c2 with 184 ms median latency." },
+    { "id": "warning", "length": "short", "kind": "one line warning", "text": "Heads up: the build server disk is ninety percent full." },
+    { "id": "schedule", "length": "short", "kind": "time and name", "text": "Your call with Priya moved to 3:30 pm, so you have about twenty minutes." },
+    { "id": "summary", "length": "medium", "kind": "two sentence summary", "text": "I fixed the flaky login test and pushed the change to your branch. Nothing else on the branch has changed." },
+    { "id": "reference", "length": "medium", "kind": "three sentence briefing", "text": "Good morning. I went through the overnight reports and nothing needs your attention. The weather looks clear, so the outdoor rehearsal can go ahead this afternoon." },
+    { "id": "blocked", "length": "medium", "kind": "three sentence blocker", "text": "I could not finish the database upgrade tonight. The backup step failed twice with a permissions error. I will retry in the morning after checking the access keys." },
+    { "id": "handover", "length": "long", "kind": "release handover paragraph", "text": "Here is where things stand on the release. The migration ran overnight and finished without errors, so the new tables are live in staging. I checked the dashboards this morning, and response times are back under two hundred milliseconds. Two small issues remain. The export button still times out on very large projects, and one of the email templates shows the old logo. I have opened tickets for both and assigned them to Maya, who expects to close them by Thursday. If you are happy with that plan, I will schedule the production rollout for Friday morning, before the team meeting. Let me know if you would rather wait until next week, and I will move everything back." },
+    { "id": "research", "length": "long", "kind": "research summary paragraph", "text": "I finished reading the three papers you flagged last night. The first one claims a forty percent speed up, but only on short prompts, and their test machine had twice our memory. The second paper is more useful: it shows that splitting text at commas cuts the wait before speech by about half. The third is mostly a survey, so I only kept the summary table. Overall, I think the comma trick is worth trying first, because it needs no new model and could ship in a day. I wrote up the details in the research folder, with links to each paper and the numbers I checked. Tell me if you want a shorter version for the team update on Monday." }
+  ]
+}

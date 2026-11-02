@@ -1,0 +1,162 @@
+{
+ "schema": "fast-tts.result.v1",
+ "engine": {
+  "id": "pocket-18m-bill",
+  "label": "Pocket TTS 18M \u00b7 bill_boerst",
+  "runtime": "pocket-tts 4.0.1 kyutai-labs/pocket-tts@91a9e96433bfe23375eea719b03f0081466f8e20 (torch 2.15.0)",
+  "provider": "cpu",
+  "model": "kyutai/pocket-tts-without-voice-cloning/languages/english_18m_2026-10",
+  "modelRevision": "a7056f505a4a8ca72d8b5fb1440071d6f1a35739",
+  "voice": "bill_boerst",
+  "sampleRate": 24000,
+  "threads": 1,
+  "streaming": "native incremental: generate_audio_stream, 12.5 Hz latents decoded by Mimi as queued",
+  "chunkPolicy": "upstream: text split at sentences into chunks of at most 50 tokens; each yield is one Mimi decode of every queued 80 ms frame (1920 samples each), so the first chunk is one frame",
+  "cancellation": "stop event before every latent frame (80 ms of audio) and every text chunk; queued frames still decode"
+ },
+ "environment": {
+  "machine": "Apple M2 Max",
+  "arch": "arm64",
+  "cpuCount": 12,
+  "memoryGiB": 96,
+  "os": "macOS 27.0.1",
+  "versions": {
+   "python": "3.12.5",
+   "pocket-tts": "4.0.1",
+   "torch": "2.15.0",
+   "sentencepiece": "0.2.2",
+   "numpy": "2.5.4"
+  },
+  "harnessCommit": "f0465da1b8f0"
+ },
+ "process": {
+  "temperature": "cold",
+  "timed": true,
+  "repeats": 1,
+  "startedAt": "2026-11-02T22:53:54+00:00",
+  "clock": "time.perf_counter_ns (monotonic)",
+  "playback": null,
+  "loadMs": 1903.169,
+  "warmupMs": null,
+  "loadDetail": {
+   "importMs": 1786.662,
+   "modelLoadMs": 116.049,
+   "voiceStateMs": 0.452,
+   "torchThreads": 1,
+   "note": "loadMs is torch and pocket_tts import, load_model on the local config, and the bill_boerst voice state from its safetensors"
+  }
+ },
+ "runs": [
+  {
+   "textId": "summary",
+   "mode": "stream",
+   "temperature": "cold",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 26.884,
+     "audioMs": 80.0,
+     "text": null
+    },
+    {
+     "index": 1,
+     "readyMs": 36.674,
+     "audioMs": 80.0,
+     "text": null
+    },
+    {
+     "index": 2,
+     "readyMs": 48.807,
+     "audioMs": 160.0,
+     "text": null
+    },
+    {
+     "index": 3,
+     "readyMs": 61.624,
+     "audioMs": 160.0,
+     "text": null
+    },
+    {
+     "index": 4,
+     "readyMs": 74.635,
+     "audioMs": 160.0,
+     "text": null
+    },
+    {
+     "index": 5,
+     "readyMs": 90.515,
+     "audioMs": 240.0,
+     "text": null
+    },
+    {
+     "index": 6,
+     "readyMs": 106.255,
+     "audioMs": 240.0,
+     "text": null
+    },
+    {
+     "index": 7,
+     "readyMs": 125.918,
+     "audioMs": 320.0,
+     "text": null
+    },
+    {
+     "index": 8,
+     "readyMs": 146.242,
+     "audioMs": 320.0,
+     "text": null
+    },
+    {
+     "index": 9,
+     "readyMs": 166.668,
+     "audioMs": 320.0,
+     "text": null
+    },
+    {
+     "index": 10,
+     "readyMs": 191.978,
+     "audioMs": 400.0,
+     "text": null
+    },
+    {
+     "index": 11,
+     "readyMs": 220.261,
+     "audioMs": 480.0,
+     "text": null
+    },
+    {
+     "index": 12,
+     "readyMs": 251.906,
+     "audioMs": 560.0,
+     "text": null
+    },
+    {
+     "index": 13,
+     "readyMs": 285.617,
+     "audioMs": 560.0,
+     "text": null
+    },
+    {
+     "index": 14,
+     "readyMs": 328.907,
+     "audioMs": 720.0,
+     "text": null
+    },
+    {
+     "index": 15,
+     "readyMs": 376.111,
+     "audioMs": 880.0,
+     "text": null
+    },
+    {
+     "index": 16,
+     "readyMs": 397.069,
+     "audioMs": 480.0,
+     "text": null
+    }
+   ]
+  }
+ ]
+}

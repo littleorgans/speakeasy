@@ -1,0 +1,72 @@
+{
+ "schema": "fast-tts.result.v1",
+ "engine": {
+  "id": "piper-kristin",
+  "label": "Piper Kristin medium · 2 threads, product default",
+  "runtime": "sherpa-onnx-node 2.0.1",
+  "provider": "cpu",
+  "model": "piper-kristin-medium",
+  "modelRevision": "sha256:f9a5c375c70d",
+  "voice": "kristin",
+  "sampleRate": 22050,
+  "threads": 2,
+  "streaming": "speak-easy sentence pipeline (SherpaTextToSpeech.speak, depth 1): segment waveforms, not incremental within a segment; full mode is one generateAsync call",
+  "chunkPolicy": "planSegments: first chunk is the first clause or 4 words of sentence 1, then whole sentences; trimSilence trims each chunk and appends a 150 ms gap",
+  "cancellation": "between segments (the host returns the generator); a depth 1 lookahead synth already started runs to completion"
+ },
+ "environment": {
+  "machine": "Apple M2 Max",
+  "arch": "arm64",
+  "cpuCount": 12,
+  "memoryGiB": 96,
+  "os": "macOS 27.0.1",
+  "versions": {
+   "node": "25.9.0",
+   "sherpa-onnx-node": "2.0.1"
+  },
+  "harnessCommit": "f0465da1b8f0"
+ },
+ "process": {
+  "temperature": "cold",
+  "timed": true,
+  "repeats": 1,
+  "startedAt": "2026-11-02T22:19:37.095Z",
+  "clock": "performance.now (monotonic)",
+  "playback": null,
+  "loadMs": 720.572,
+  "warmupMs": null,
+  "loadDetail": {
+   "nativeLoadMs": 571.036,
+   "note": "loadMs is TtsSynth.create (digest verify, native load, frontend) plus session open"
+  }
+ },
+ "runs": [
+  {
+   "textId": "summary",
+   "mode": "stream",
+   "temperature": "cold",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 74.125,
+     "audioMs": 1363.81,
+     "text": "I fixed the flaky"
+    },
+    {
+     "index": 1,
+     "readyMs": 237.437,
+     "audioMs": 3146.803,
+     "text": "login test and pushed the change to your branch."
+    },
+    {
+     "index": 2,
+     "readyMs": 350.797,
+     "audioMs": 2229.478,
+     "text": "Nothing else on the branch has changed."
+    }
+   ]
+  }
+ ]
+}

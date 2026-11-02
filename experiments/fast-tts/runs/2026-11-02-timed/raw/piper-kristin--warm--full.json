@@ -1,0 +1,795 @@
+{
+ "schema": "fast-tts.result.v1",
+ "engine": {
+  "id": "piper-kristin",
+  "label": "Piper Kristin medium · 2 threads, product default",
+  "runtime": "sherpa-onnx-node 2.0.1",
+  "provider": "cpu",
+  "model": "piper-kristin-medium",
+  "modelRevision": "sha256:f9a5c375c70d",
+  "voice": "kristin",
+  "sampleRate": 22050,
+  "threads": 2,
+  "streaming": "speak-easy sentence pipeline (SherpaTextToSpeech.speak, depth 1): segment waveforms, not incremental within a segment; full mode is one generateAsync call",
+  "chunkPolicy": "planSegments: first chunk is the first clause or 4 words of sentence 1, then whole sentences; trimSilence trims each chunk and appends a 150 ms gap",
+  "cancellation": "between segments (the host returns the generator); a depth 1 lookahead synth already started runs to completion"
+ },
+ "environment": {
+  "machine": "Apple M2 Max",
+  "arch": "arm64",
+  "cpuCount": 12,
+  "memoryGiB": 96,
+  "os": "macOS 27.0.1",
+  "versions": {
+   "node": "25.9.0",
+   "sherpa-onnx-node": "2.0.1"
+  },
+  "harnessCommit": "f0465da1b8f0"
+ },
+ "process": {
+  "temperature": "warm",
+  "timed": true,
+  "repeats": 5,
+  "startedAt": "2026-11-02T22:20:53.157Z",
+  "clock": "performance.now (monotonic)",
+  "playback": null,
+  "loadMs": 705.51,
+  "warmupMs": 39.657,
+  "loadDetail": {
+   "nativeLoadMs": 561.667,
+   "note": "loadMs is TtsSynth.create (digest verify, native load, frontend) plus session open"
+  }
+ },
+ "runs": [
+  {
+   "textId": "status",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 130.192,
+     "audioMs": 2542.585,
+     "text": "The deploy finished and the site is live again."
+    }
+   ]
+  },
+  {
+   "textId": "status",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 1,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 174.916,
+     "audioMs": 2623.855,
+     "text": "The deploy finished and the site is live again."
+    }
+   ]
+  },
+  {
+   "textId": "status",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 2,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 297.636,
+     "audioMs": 2530.975,
+     "text": "The deploy finished and the site is live again."
+    }
+   ]
+  },
+  {
+   "textId": "status",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 3,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 158.807,
+     "audioMs": 2589.025,
+     "text": "The deploy finished and the site is live again."
+    }
+   ]
+  },
+  {
+   "textId": "status",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 4,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 150.297,
+     "audioMs": 2589.025,
+     "text": "The deploy finished and the site is live again."
+    }
+   ]
+  },
+  {
+   "textId": "question",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 228.251,
+     "audioMs": 3866.122,
+     "text": "Should I merge the pull request now, or wait for Sam to review it?"
+    }
+   ]
+  },
+  {
+   "textId": "question",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 1,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 181.145,
+     "audioMs": 3819.683,
+     "text": "Should I merge the pull request now, or wait for Sam to review it?"
+    }
+   ]
+  },
+  {
+   "textId": "question",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 2,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 188.483,
+     "audioMs": 3866.122,
+     "text": "Should I merge the pull request now, or wait for Sam to review it?"
+    }
+   ]
+  },
+  {
+   "textId": "question",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 3,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 180.839,
+     "audioMs": 3784.853,
+     "text": "Should I merge the pull request now, or wait for Sam to review it?"
+    }
+   ]
+  },
+  {
+   "textId": "question",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 4,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 181.339,
+     "audioMs": 3761.633,
+     "text": "Should I merge the pull request now, or wait for Sam to review it?"
+    }
+   ]
+  },
+  {
+   "textId": "code",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 592.929,
+     "audioMs": 11776.009,
+     "text": "PR 418 merged at 14:05; main is green at commit 7f3a9c2 with 184 ms median latency."
+    }
+   ]
+  },
+  {
+   "textId": "code",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 1,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 591.079,
+     "audioMs": 11691.247,
+     "text": "PR 418 merged at 14:05; main is green at commit 7f3a9c2 with 184 ms median latency."
+    }
+   ]
+  },
+  {
+   "textId": "code",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 2,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 585.31,
+     "audioMs": 11762.041,
+     "text": "PR 418 merged at 14:05; main is green at commit 7f3a9c2 with 184 ms median latency."
+    }
+   ]
+  },
+  {
+   "textId": "code",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 3,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 620.306,
+     "audioMs": 11695.873,
+     "text": "PR 418 merged at 14:05; main is green at commit 7f3a9c2 with 184 ms median latency."
+    }
+   ]
+  },
+  {
+   "textId": "code",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 4,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 637.496,
+     "audioMs": 11935.057,
+     "text": "PR 418 merged at 14:05; main is green at commit 7f3a9c2 with 184 ms median latency."
+    }
+   ]
+  },
+  {
+   "textId": "warning",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 147.454,
+     "audioMs": 3111.474,
+     "text": "Heads up: the build server disk is ninety percent full."
+    }
+   ]
+  },
+  {
+   "textId": "warning",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 1,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 140.865,
+     "audioMs": 3076.644,
+     "text": "Heads up: the build server disk is ninety percent full."
+    }
+   ]
+  },
+  {
+   "textId": "warning",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 2,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 148.998,
+     "audioMs": 3250.794,
+     "text": "Heads up: the build server disk is ninety percent full."
+    }
+   ]
+  },
+  {
+   "textId": "warning",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 3,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 142.837,
+     "audioMs": 3134.694,
+     "text": "Heads up: the build server disk is ninety percent full."
+    }
+   ]
+  },
+  {
+   "textId": "warning",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 4,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 142.77,
+     "audioMs": 3099.864,
+     "text": "Heads up: the build server disk is ninety percent full."
+    }
+   ]
+  },
+  {
+   "textId": "schedule",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 246.394,
+     "audioMs": 5027.12,
+     "text": "Your call with Priya moved to 3:30 pm, so you have about twenty minutes."
+    }
+   ]
+  },
+  {
+   "textId": "schedule",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 1,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 248.908,
+     "audioMs": 5144.218,
+     "text": "Your call with Priya moved to 3:30 pm, so you have about twenty minutes."
+    }
+   ]
+  },
+  {
+   "textId": "schedule",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 2,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 229.698,
+     "audioMs": 4810.522,
+     "text": "Your call with Priya moved to 3:30 pm, so you have about twenty minutes."
+    }
+   ]
+  },
+  {
+   "textId": "schedule",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 3,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 242.395,
+     "audioMs": 5058.685,
+     "text": "Your call with Priya moved to 3:30 pm, so you have about twenty minutes."
+    }
+   ]
+  },
+  {
+   "textId": "schedule",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 4,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 242.016,
+     "audioMs": 5101.179,
+     "text": "Your call with Priya moved to 3:30 pm, so you have about twenty minutes."
+    }
+   ]
+  },
+  {
+   "textId": "summary",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 317.882,
+     "audioMs": 6768.617,
+     "text": "I fixed the flaky login test and pushed the change to your branch. Nothing else on the branch has changed."
+    }
+   ]
+  },
+  {
+   "textId": "summary",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 1,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 314.292,
+     "audioMs": 6664.127,
+     "text": "I fixed the flaky login test and pushed the change to your branch. Nothing else on the branch has changed."
+    }
+   ]
+  },
+  {
+   "textId": "summary",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 2,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 303.238,
+     "audioMs": 6524.807,
+     "text": "I fixed the flaky login test and pushed the change to your branch. Nothing else on the branch has changed."
+    }
+   ]
+  },
+  {
+   "textId": "summary",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 3,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 315.206,
+     "audioMs": 6733.787,
+     "text": "I fixed the flaky login test and pushed the change to your branch. Nothing else on the branch has changed."
+    }
+   ]
+  },
+  {
+   "textId": "summary",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 4,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 369.68,
+     "audioMs": 6548.027,
+     "text": "I fixed the flaky login test and pushed the change to your branch. Nothing else on the branch has changed."
+    }
+   ]
+  },
+  {
+   "textId": "reference",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 436.806,
+     "audioMs": 8147.029,
+     "text": "Good morning. I went through the overnight reports and nothing needs your attention. The weather looks clear, so the outdoor rehearsal can go ahead this afternoon."
+    }
+   ]
+  },
+  {
+   "textId": "reference",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 1,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 398.169,
+     "audioMs": 8027.029,
+     "text": "Good morning. I went through the overnight reports and nothing needs your attention. The weather looks clear, so the outdoor rehearsal can go ahead this afternoon."
+    }
+   ]
+  },
+  {
+   "textId": "reference",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 2,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 396.668,
+     "audioMs": 8103.22,
+     "text": "Good morning. I went through the overnight reports and nothing needs your attention. The weather looks clear, so the outdoor rehearsal can go ahead this afternoon."
+    }
+   ]
+  },
+  {
+   "textId": "reference",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 3,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 404.315,
+     "audioMs": 8326.032,
+     "text": "Good morning. I went through the overnight reports and nothing needs your attention. The weather looks clear, so the outdoor rehearsal can go ahead this afternoon."
+    }
+   ]
+  },
+  {
+   "textId": "reference",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 4,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 403.334,
+     "audioMs": 8200.816,
+     "text": "Good morning. I went through the overnight reports and nothing needs your attention. The weather looks clear, so the outdoor rehearsal can go ahead this afternoon."
+    }
+   ]
+  },
+  {
+   "textId": "blocked",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 426.501,
+     "audioMs": 8533.333,
+     "text": "I could not finish the database upgrade tonight. The backup step failed twice with a permissions error. I will retry in the morning after checking the access keys."
+    }
+   ]
+  },
+  {
+   "textId": "blocked",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 1,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 404.694,
+     "audioMs": 8396.19,
+     "text": "I could not finish the database upgrade tonight. The backup step failed twice with a permissions error. I will retry in the morning after checking the access keys."
+    }
+   ]
+  },
+  {
+   "textId": "blocked",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 2,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 407.446,
+     "audioMs": 8428.163,
+     "text": "I could not finish the database upgrade tonight. The backup step failed twice with a permissions error. I will retry in the morning after checking the access keys."
+    }
+   ]
+  },
+  {
+   "textId": "blocked",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 3,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 409.834,
+     "audioMs": 8415.873,
+     "text": "I could not finish the database upgrade tonight. The backup step failed twice with a permissions error. I will retry in the morning after checking the access keys."
+    }
+   ]
+  },
+  {
+   "textId": "blocked",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 4,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 414.502,
+     "audioMs": 8587.029,
+     "text": "I could not finish the database upgrade tonight. The backup step failed twice with a permissions error. I will retry in the morning after checking the access keys."
+    }
+   ]
+  },
+  {
+   "textId": "handover",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 1799.164,
+     "audioMs": 36483.855,
+     "text": "Here is where things stand on the release. The migration ran overnight and finished without errors, so the new tables are live in staging. I checked the dashboards this morning, and response times are back under two hundred milliseconds. Two small issues remain. The export button still times out on very large projects, and one of the email templates shows the old logo. I have opened tickets for both and assigned them to Maya, who expects to close them by Thursday. If you are happy with that plan, I will schedule the production rollout for Friday morning, before the team meeting. Let me know if you would rather wait until next week, and I will move everything back."
+    }
+   ]
+  },
+  {
+   "textId": "handover",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 1,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 1789.706,
+     "audioMs": 36846.349,
+     "text": "Here is where things stand on the release. The migration ran overnight and finished without errors, so the new tables are live in staging. I checked the dashboards this morning, and response times are back under two hundred milliseconds. Two small issues remain. The export button still times out on very large projects, and one of the email templates shows the old logo. I have opened tickets for both and assigned them to Maya, who expects to close them by Thursday. If you are happy with that plan, I will schedule the production rollout for Friday morning, before the team meeting. Let me know if you would rather wait until next week, and I will move everything back."
+    }
+   ]
+  },
+  {
+   "textId": "handover",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 2,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 1772.361,
+     "audioMs": 36712.789,
+     "text": "Here is where things stand on the release. The migration ran overnight and finished without errors, so the new tables are live in staging. I checked the dashboards this morning, and response times are back under two hundred milliseconds. Two small issues remain. The export button still times out on very large projects, and one of the email templates shows the old logo. I have opened tickets for both and assigned them to Maya, who expects to close them by Thursday. If you are happy with that plan, I will schedule the production rollout for Friday morning, before the team meeting. Let me know if you would rather wait until next week, and I will move everything back."
+    }
+   ]
+  },
+  {
+   "textId": "handover",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 3,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 1792.098,
+     "audioMs": 36394.875,
+     "text": "Here is where things stand on the release. The migration ran overnight and finished without errors, so the new tables are live in staging. I checked the dashboards this morning, and response times are back under two hundred milliseconds. Two small issues remain. The export button still times out on very large projects, and one of the email templates shows the old logo. I have opened tickets for both and assigned them to Maya, who expects to close them by Thursday. If you are happy with that plan, I will schedule the production rollout for Friday morning, before the team meeting. Let me know if you would rather wait until next week, and I will move everything back."
+    }
+   ]
+  },
+  {
+   "textId": "handover",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 4,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 1800.65,
+     "audioMs": 37085.941,
+     "text": "Here is where things stand on the release. The migration ran overnight and finished without errors, so the new tables are live in staging. I checked the dashboards this morning, and response times are back under two hundred milliseconds. Two small issues remain. The export button still times out on very large projects, and one of the email templates shows the old logo. I have opened tickets for both and assigned them to Maya, who expects to close them by Thursday. If you are happy with that plan, I will schedule the production rollout for Friday morning, before the team meeting. Let me know if you would rather wait until next week, and I will move everything back."
+    }
+   ]
+  },
+  {
+   "textId": "research",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 1631.507,
+     "audioMs": 33402.902,
+     "text": "I finished reading the three papers you flagged last night. The first one claims a forty percent speed up, but only on short prompts, and their test machine had twice our memory. The second paper is more useful: it shows that splitting text at commas cuts the wait before speech by about half. The third is mostly a survey, so I only kept the summary table. Overall, I think the comma trick is worth trying first, because it needs no new model and could ship in a day. I wrote up the details in the research folder, with links to each paper and the numbers I checked. Tell me if you want a shorter version for the team update on Monday."
+    }
+   ]
+  },
+  {
+   "textId": "research",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 1,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 1606.647,
+     "audioMs": 33553.515,
+     "text": "I finished reading the three papers you flagged last night. The first one claims a forty percent speed up, but only on short prompts, and their test machine had twice our memory. The second paper is more useful: it shows that splitting text at commas cuts the wait before speech by about half. The third is mostly a survey, so I only kept the summary table. Overall, I think the comma trick is worth trying first, because it needs no new model and could ship in a day. I wrote up the details in the research folder, with links to each paper and the numbers I checked. Tell me if you want a shorter version for the team update on Monday."
+    }
+   ]
+  },
+  {
+   "textId": "research",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 2,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 1849.14,
+     "audioMs": 33971.111,
+     "text": "I finished reading the three papers you flagged last night. The first one claims a forty percent speed up, but only on short prompts, and their test machine had twice our memory. The second paper is more useful: it shows that splitting text at commas cuts the wait before speech by about half. The third is mostly a survey, so I only kept the summary table. Overall, I think the comma trick is worth trying first, because it needs no new model and could ship in a day. I wrote up the details in the research folder, with links to each paper and the numbers I checked. Tell me if you want a shorter version for the team update on Monday."
+    }
+   ]
+  },
+  {
+   "textId": "research",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 3,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 1767.344,
+     "audioMs": 33344.399,
+     "text": "I finished reading the three papers you flagged last night. The first one claims a forty percent speed up, but only on short prompts, and their test machine had twice our memory. The second paper is more useful: it shows that splitting text at commas cuts the wait before speech by about half. The third is mostly a survey, so I only kept the summary table. Overall, I think the comma trick is worth trying first, because it needs no new model and could ship in a day. I wrote up the details in the research folder, with links to each paper and the numbers I checked. Tell me if you want a shorter version for the team update on Monday."
+    }
+   ]
+  },
+  {
+   "textId": "research",
+   "mode": "full",
+   "temperature": "warm",
+   "repeat": 4,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 1655.603,
+     "audioMs": 33725.533,
+     "text": "I finished reading the three papers you flagged last night. The first one claims a forty percent speed up, but only on short prompts, and their test machine had twice our memory. The second paper is more useful: it shows that splitting text at commas cuts the wait before speech by about half. The third is mostly a survey, so I only kept the summary table. Overall, I think the comma trick is worth trying first, because it needs no new model and could ship in a day. I wrote up the details in the research folder, with links to each paper and the numbers I checked. Tell me if you want a shorter version for the team update on Monday."
+    }
+   ]
+  }
+ ]
+}

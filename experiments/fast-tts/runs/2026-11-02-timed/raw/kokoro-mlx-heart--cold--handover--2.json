@@ -1,0 +1,115 @@
+{
+ "schema": "fast-tts.result.v1",
+ "engine": {
+  "id": "kokoro-mlx-heart",
+  "label": "Kokoro v1.0 MLX bf16 \u00b7 af_heart",
+  "runtime": "mlx-audio 0.6.3 (mlx 0.32.4)",
+  "provider": "mlx-metal-gpu",
+  "model": "mlx-community/Kokoro-82M-bf16",
+  "modelRevision": "a71e4d38b236d968966a2002c4c895dbd12b1c3c",
+  "voice": "af_heart",
+  "sampleRate": 24000,
+  "streaming": "segment waveforms: speak-easy planSegments + trimSilence port, one generate call, newline separated segments; not incremental within a segment",
+  "chunkPolicy": "first chunk: first clause or 4 words of sentence 1, then whole sentences; each chunk trimmed, 150 ms gap appended",
+  "cancellation": "between segments (host stops pulling the generator); an active segment's MLX inference is not preempted"
+ },
+ "environment": {
+  "machine": "Apple M2 Max",
+  "arch": "arm64",
+  "cpuCount": 12,
+  "memoryGiB": 96,
+  "os": "macOS 27.0.1",
+  "versions": {
+   "python": "3.12.5",
+   "mlx-audio": "0.6.3",
+   "mlx": "0.32.4",
+   "misaki": "0.9.4",
+   "spacy": "3.8.18",
+   "en-core-web-sm": "3.8.0",
+   "espeakng-loader": "0.2.4",
+   "phonemizer-fork": "3.3.2",
+   "numpy": "2.5.4"
+  },
+  "harnessCommit": "f0465da1b8f0"
+ },
+ "process": {
+  "temperature": "cold",
+  "timed": true,
+  "repeats": 1,
+  "startedAt": "2026-11-02T22:50:31+00:00",
+  "clock": "time.perf_counter_ns (monotonic)",
+  "playback": null,
+  "loadMs": 2648.12,
+  "warmupMs": null,
+  "loadDetail": {
+   "modelLoadMs": 166.05,
+   "g2pPipelineMs": 2482.064,
+   "note": "loadMs is mlx_audio load_model on the local snapshot plus the misaki G2P pipeline; mlx-audio reloads the voice pack inside every generate call"
+  }
+ },
+ "runs": [
+  {
+   "textId": "handover",
+   "mode": "stream",
+   "temperature": "cold",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 131.271,
+     "audioMs": 1077.208,
+     "text": "Here is where things"
+    },
+    {
+     "index": 1,
+     "readyMs": 223.33,
+     "audioMs": 1143.833,
+     "text": "stand on the release."
+    },
+    {
+     "index": 2,
+     "readyMs": 425.462,
+     "audioMs": 5483.417,
+     "text": "The migration ran overnight and finished without errors, so the new tables are live in staging."
+    },
+    {
+     "index": 3,
+     "readyMs": 621.201,
+     "audioMs": 5143.042,
+     "text": "I checked the dashboards this morning, and response times are back under two hundred milliseconds."
+    },
+    {
+     "index": 4,
+     "readyMs": 710.08,
+     "audioMs": 1423.333,
+     "text": "Two small issues remain."
+    },
+    {
+     "index": 5,
+     "readyMs": 936.585,
+     "audioMs": 6520.583,
+     "text": "The export button still times out on very large projects, and one of the email templates shows the old logo."
+    },
+    {
+     "index": 6,
+     "readyMs": 1136.129,
+     "audioMs": 5265.708,
+     "text": "I have opened tickets for both and assigned them to Maya, who expects to close them by Thursday."
+    },
+    {
+     "index": 7,
+     "readyMs": 1361.692,
+     "audioMs": 6226.125,
+     "text": "If you are happy with that plan, I will schedule the production rollout for Friday morning, before the team meeting."
+    },
+    {
+     "index": 8,
+     "readyMs": 1543.858,
+     "audioMs": 4324.708,
+     "text": "Let me know if you would rather wait until next week, and I will move everything back."
+    }
+   ]
+  }
+ ]
+}

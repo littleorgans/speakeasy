@@ -1,0 +1,1605 @@
+{
+ "schema": "fast-tts.result.v1",
+ "engine": {
+  "id": "piper-kristin",
+  "label": "Piper Kristin medium · 2 threads, product default",
+  "runtime": "sherpa-onnx-node 2.0.1",
+  "provider": "cpu",
+  "model": "piper-kristin-medium",
+  "modelRevision": "sha256:f9a5c375c70d",
+  "voice": "kristin",
+  "sampleRate": 22050,
+  "threads": 2,
+  "streaming": "speak-easy sentence pipeline (SherpaTextToSpeech.speak, depth 1): segment waveforms, not incremental within a segment; full mode is one generateAsync call",
+  "chunkPolicy": "planSegments: first chunk is the first clause or 4 words of sentence 1, then whole sentences; trimSilence trims each chunk and appends a 150 ms gap",
+  "cancellation": "between segments (the host returns the generator); a depth 1 lookahead synth already started runs to completion"
+ },
+ "environment": {
+  "machine": "Apple M2 Max",
+  "arch": "arm64",
+  "cpuCount": 12,
+  "memoryGiB": 96,
+  "os": "macOS 27.0.1",
+  "versions": {
+   "node": "25.9.0",
+   "sherpa-onnx-node": "2.0.1"
+  },
+  "harnessCommit": "f0465da1b8f0"
+ },
+ "process": {
+  "temperature": "warm",
+  "timed": true,
+  "repeats": 5,
+  "startedAt": "2026-11-02T22:20:22.208Z",
+  "clock": "performance.now (monotonic)",
+  "playback": null,
+  "loadMs": 681.955,
+  "warmupMs": 49.484,
+  "loadDetail": {
+   "nativeLoadMs": 540.282,
+   "note": "loadMs is TtsSynth.create (digest verify, native load, frontend) plus session open"
+  }
+ },
+ "runs": [
+  {
+   "textId": "status",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 70.483,
+     "audioMs": 1371.973,
+     "text": "The deploy finished and"
+    },
+    {
+     "index": 1,
+     "readyMs": 152.619,
+     "audioMs": 1629.615,
+     "text": "the site is live again."
+    }
+   ]
+  },
+  {
+   "textId": "status",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 1,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 67.973,
+     "audioMs": 1358.549,
+     "text": "The deploy finished and"
+    },
+    {
+     "index": 1,
+     "readyMs": 153.428,
+     "audioMs": 1688.027,
+     "text": "the site is live again."
+    }
+   ]
+  },
+  {
+   "textId": "status",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 2,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 65.933,
+     "audioMs": 1417.914,
+     "text": "The deploy finished and"
+    },
+    {
+     "index": 1,
+     "readyMs": 139.536,
+     "audioMs": 1571.882,
+     "text": "the site is live again."
+    }
+   ]
+  },
+  {
+   "textId": "status",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 3,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 66.639,
+     "audioMs": 1343.9,
+     "text": "The deploy finished and"
+    },
+    {
+     "index": 1,
+     "readyMs": 150.16,
+     "audioMs": 1673.605,
+     "text": "the site is live again."
+    }
+   ]
+  },
+  {
+   "textId": "status",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 4,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 73.91,
+     "audioMs": 1453.469,
+     "text": "The deploy finished and"
+    },
+    {
+     "index": 1,
+     "readyMs": 152.951,
+     "audioMs": 1638.322,
+     "text": "the site is live again."
+    }
+   ]
+  },
+  {
+   "textId": "question",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 65.864,
+     "audioMs": 1277.506,
+     "text": "Should I merge the"
+    },
+    {
+     "index": 1,
+     "readyMs": 215.697,
+     "audioMs": 2950.023,
+     "text": "pull request now, or wait for Sam to review it?"
+    }
+   ]
+  },
+  {
+   "textId": "question",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 1,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 60.567,
+     "audioMs": 1178.413,
+     "text": "Should I merge the"
+    },
+    {
+     "index": 1,
+     "readyMs": 202.367,
+     "audioMs": 2934.331,
+     "text": "pull request now, or wait for Sam to review it?"
+    }
+   ]
+  },
+  {
+   "textId": "question",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 2,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 61.619,
+     "audioMs": 1260.317,
+     "text": "Should I merge the"
+    },
+    {
+     "index": 1,
+     "readyMs": 192.975,
+     "audioMs": 2741.179,
+     "text": "pull request now, or wait for Sam to review it?"
+    }
+   ]
+  },
+  {
+   "textId": "question",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 3,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 63.327,
+     "audioMs": 1241.814,
+     "text": "Should I merge the"
+    },
+    {
+     "index": 1,
+     "readyMs": 191.081,
+     "audioMs": 2645.85,
+     "text": "pull request now, or wait for Sam to review it?"
+    }
+   ]
+  },
+  {
+   "textId": "question",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 4,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 63.168,
+     "audioMs": 1254.966,
+     "text": "Should I merge the"
+    },
+    {
+     "index": 1,
+     "readyMs": 193.462,
+     "audioMs": 2659.955,
+     "text": "pull request now, or wait for Sam to review it?"
+    }
+   ]
+  },
+  {
+   "textId": "code",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 138.021,
+     "audioMs": 2600.317,
+     "text": "PR 418 merged at"
+    },
+    {
+     "index": 1,
+     "readyMs": 595.693,
+     "audioMs": 9552.018,
+     "text": "14:05; main is green at commit 7f3a9c2 with 184 ms median latency."
+    }
+   ]
+  },
+  {
+   "textId": "code",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 1,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 122.11,
+     "audioMs": 2601.859,
+     "text": "PR 418 merged at"
+    },
+    {
+     "index": 1,
+     "readyMs": 618.558,
+     "audioMs": 9936.825,
+     "text": "14:05; main is green at commit 7f3a9c2 with 184 ms median latency."
+    }
+   ]
+  },
+  {
+   "textId": "code",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 2,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 126.858,
+     "audioMs": 2647.937,
+     "text": "PR 418 merged at"
+    },
+    {
+     "index": 1,
+     "readyMs": 581.349,
+     "audioMs": 9574.512,
+     "text": "14:05; main is green at commit 7f3a9c2 with 184 ms median latency."
+    }
+   ]
+  },
+  {
+   "textId": "code",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 3,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 125.802,
+     "audioMs": 2625.714,
+     "text": "PR 418 merged at"
+    },
+    {
+     "index": 1,
+     "readyMs": 590.753,
+     "audioMs": 9553.696,
+     "text": "14:05; main is green at commit 7f3a9c2 with 184 ms median latency."
+    }
+   ]
+  },
+  {
+   "textId": "code",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 4,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 126.179,
+     "audioMs": 2602.404,
+     "text": "PR 418 merged at"
+    },
+    {
+     "index": 1,
+     "readyMs": 594.015,
+     "audioMs": 9760.726,
+     "text": "14:05; main is green at commit 7f3a9c2 with 184 ms median latency."
+    }
+   ]
+  },
+  {
+   "textId": "warning",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 40.123,
+     "audioMs": 690.068,
+     "text": "Heads up:"
+    },
+    {
+     "index": 1,
+     "readyMs": 168.826,
+     "audioMs": 2604.898,
+     "text": "the build server disk is ninety percent full."
+    }
+   ]
+  },
+  {
+   "textId": "warning",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 1,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 35.832,
+     "audioMs": 544.354,
+     "text": "Heads up:"
+    },
+    {
+     "index": 1,
+     "readyMs": 166.499,
+     "audioMs": 2743.9,
+     "text": "the build server disk is ninety percent full."
+    }
+   ]
+  },
+  {
+   "textId": "warning",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 2,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 38.63,
+     "audioMs": 740.181,
+     "text": "Heads up:"
+    },
+    {
+     "index": 1,
+     "readyMs": 169.727,
+     "audioMs": 2723.673,
+     "text": "the build server disk is ninety percent full."
+    }
+   ]
+  },
+  {
+   "textId": "warning",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 3,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 40.513,
+     "audioMs": 688.844,
+     "text": "Heads up:"
+    },
+    {
+     "index": 1,
+     "readyMs": 175.882,
+     "audioMs": 2583.855,
+     "text": "the build server disk is ninety percent full."
+    }
+   ]
+  },
+  {
+   "textId": "warning",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 4,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 36.499,
+     "audioMs": 708.617,
+     "text": "Heads up:"
+    },
+    {
+     "index": 1,
+     "readyMs": 162.151,
+     "audioMs": 2591.837,
+     "text": "the build server disk is ninety percent full."
+    }
+   ]
+  },
+  {
+   "textId": "schedule",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 95.678,
+     "audioMs": 1986.213,
+     "text": "Your call with Priya"
+    },
+    {
+     "index": 1,
+     "readyMs": 263.5,
+     "audioMs": 3481.995,
+     "text": "moved to 3:30 pm, so you have about twenty minutes."
+    }
+   ]
+  },
+  {
+   "textId": "schedule",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 1,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 121.163,
+     "audioMs": 2073.016,
+     "text": "Your call with Priya"
+    },
+    {
+     "index": 1,
+     "readyMs": 285.273,
+     "audioMs": 3362.222,
+     "text": "moved to 3:30 pm, so you have about twenty minutes."
+    }
+   ]
+  },
+  {
+   "textId": "schedule",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 2,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 98.134,
+     "audioMs": 2026.531,
+     "text": "Your call with Priya"
+    },
+    {
+     "index": 1,
+     "readyMs": 260.838,
+     "audioMs": 3371.837,
+     "text": "moved to 3:30 pm, so you have about twenty minutes."
+    }
+   ]
+  },
+  {
+   "textId": "schedule",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 3,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 101.809,
+     "audioMs": 2155.057,
+     "text": "Your call with Priya"
+    },
+    {
+     "index": 1,
+     "readyMs": 267.675,
+     "audioMs": 3431.474,
+     "text": "moved to 3:30 pm, so you have about twenty minutes."
+    }
+   ]
+  },
+  {
+   "textId": "schedule",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 4,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 95.537,
+     "audioMs": 2004.036,
+     "text": "Your call with Priya"
+    },
+    {
+     "index": 1,
+     "readyMs": 259.255,
+     "audioMs": 3381.224,
+     "text": "moved to 3:30 pm, so you have about twenty minutes."
+    }
+   ]
+  },
+  {
+   "textId": "summary",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 75.256,
+     "audioMs": 1376.825,
+     "text": "I fixed the flaky"
+    },
+    {
+     "index": 1,
+     "readyMs": 235.326,
+     "audioMs": 3222.086,
+     "text": "login test and pushed the change to your branch."
+    },
+    {
+     "index": 2,
+     "readyMs": 342.822,
+     "audioMs": 2236.553,
+     "text": "Nothing else on the branch has changed."
+    }
+   ]
+  },
+  {
+   "textId": "summary",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 1,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 72.681,
+     "audioMs": 1409.206,
+     "text": "I fixed the flaky"
+    },
+    {
+     "index": 1,
+     "readyMs": 219.88,
+     "audioMs": 3020.68,
+     "text": "login test and pushed the change to your branch."
+    },
+    {
+     "index": 2,
+     "readyMs": 326.666,
+     "audioMs": 2113.968,
+     "text": "Nothing else on the branch has changed."
+    }
+   ]
+  },
+  {
+   "textId": "summary",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 2,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 68.272,
+     "audioMs": 1284.989,
+     "text": "I fixed the flaky"
+    },
+    {
+     "index": 1,
+     "readyMs": 212.329,
+     "audioMs": 2991.066,
+     "text": "login test and pushed the change to your branch."
+    },
+    {
+     "index": 2,
+     "readyMs": 324.543,
+     "audioMs": 2254.331,
+     "text": "Nothing else on the branch has changed."
+    }
+   ]
+  },
+  {
+   "textId": "summary",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 3,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 66.207,
+     "audioMs": 1291.61,
+     "text": "I fixed the flaky"
+    },
+    {
+     "index": 1,
+     "readyMs": 219.803,
+     "audioMs": 3095.374,
+     "text": "login test and pushed the change to your branch."
+    },
+    {
+     "index": 2,
+     "readyMs": 326.943,
+     "audioMs": 2219.456,
+     "text": "Nothing else on the branch has changed."
+    }
+   ]
+  },
+  {
+   "textId": "summary",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 4,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 66.713,
+     "audioMs": 1368.299,
+     "text": "I fixed the flaky"
+    },
+    {
+     "index": 1,
+     "readyMs": 208.455,
+     "audioMs": 2963.537,
+     "text": "login test and pushed the change to your branch."
+    },
+    {
+     "index": 2,
+     "readyMs": 309.857,
+     "audioMs": 2102.041,
+     "text": "Nothing else on the branch has changed."
+    }
+   ]
+  },
+  {
+   "textId": "reference",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 45.178,
+     "audioMs": 857.823,
+     "text": "Good morning."
+    },
+    {
+     "index": 1,
+     "readyMs": 234.292,
+     "audioMs": 3417.37,
+     "text": "I went through the overnight reports and nothing needs your attention."
+    },
+    {
+     "index": 2,
+     "readyMs": 419.06,
+     "audioMs": 3932.063,
+     "text": "The weather looks clear, so the outdoor rehearsal can go ahead this afternoon."
+    }
+   ]
+  },
+  {
+   "textId": "reference",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 1,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 41.043,
+     "audioMs": 819.274,
+     "text": "Good morning."
+    },
+    {
+     "index": 1,
+     "readyMs": 192.355,
+     "audioMs": 3293.152,
+     "text": "I went through the overnight reports and nothing needs your attention."
+    },
+    {
+     "index": 2,
+     "readyMs": 400.655,
+     "audioMs": 3943.175,
+     "text": "The weather looks clear, so the outdoor rehearsal can go ahead this afternoon."
+    }
+   ]
+  },
+  {
+   "textId": "reference",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 2,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 43.526,
+     "audioMs": 844.218,
+     "text": "Good morning."
+    },
+    {
+     "index": 1,
+     "readyMs": 204.495,
+     "audioMs": 3326.349,
+     "text": "I went through the overnight reports and nothing needs your attention."
+    },
+    {
+     "index": 2,
+     "readyMs": 411.215,
+     "audioMs": 4029.66,
+     "text": "The weather looks clear, so the outdoor rehearsal can go ahead this afternoon."
+    }
+   ]
+  },
+  {
+   "textId": "reference",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 3,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 42.868,
+     "audioMs": 838.866,
+     "text": "Good morning."
+    },
+    {
+     "index": 1,
+     "readyMs": 211.617,
+     "audioMs": 3535.556,
+     "text": "I went through the overnight reports and nothing needs your attention."
+    },
+    {
+     "index": 2,
+     "readyMs": 427.023,
+     "audioMs": 4038.73,
+     "text": "The weather looks clear, so the outdoor rehearsal can go ahead this afternoon."
+    }
+   ]
+  },
+  {
+   "textId": "reference",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 4,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 41.846,
+     "audioMs": 848.435,
+     "text": "Good morning."
+    },
+    {
+     "index": 1,
+     "readyMs": 195.019,
+     "audioMs": 3269.932,
+     "text": "I went through the overnight reports and nothing needs your attention."
+    },
+    {
+     "index": 2,
+     "readyMs": 391.67,
+     "audioMs": 3857.007,
+     "text": "The weather looks clear, so the outdoor rehearsal can go ahead this afternoon."
+    }
+   ]
+  },
+  {
+   "textId": "blocked",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 62.366,
+     "audioMs": 1235.011,
+     "text": "I could not finish"
+    },
+    {
+     "index": 1,
+     "readyMs": 167.832,
+     "audioMs": 2124.898,
+     "text": "the database upgrade tonight."
+    },
+    {
+     "index": 2,
+     "readyMs": 310.489,
+     "audioMs": 2936.236,
+     "text": "The backup step failed twice with a permissions error."
+    },
+    {
+     "index": 3,
+     "readyMs": 455.283,
+     "audioMs": 2966.803,
+     "text": "I will retry in the morning after checking the access keys."
+    }
+   ]
+  },
+  {
+   "textId": "blocked",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 1,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 60.425,
+     "audioMs": 1205.397,
+     "text": "I could not finish"
+    },
+    {
+     "index": 1,
+     "readyMs": 158.192,
+     "audioMs": 1972.381,
+     "text": "the database upgrade tonight."
+    },
+    {
+     "index": 2,
+     "readyMs": 301.006,
+     "audioMs": 2882.177,
+     "text": "The backup step failed twice with a permissions error."
+    },
+    {
+     "index": 3,
+     "readyMs": 451.687,
+     "audioMs": 3211.791,
+     "text": "I will retry in the morning after checking the access keys."
+    }
+   ]
+  },
+  {
+   "textId": "blocked",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 2,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 65.177,
+     "audioMs": 1192.653,
+     "text": "I could not finish"
+    },
+    {
+     "index": 1,
+     "readyMs": 177.38,
+     "audioMs": 2211.791,
+     "text": "the database upgrade tonight."
+    },
+    {
+     "index": 2,
+     "readyMs": 342.275,
+     "audioMs": 2798.594,
+     "text": "The backup step failed twice with a permissions error."
+    },
+    {
+     "index": 3,
+     "readyMs": 501.595,
+     "audioMs": 3139.184,
+     "text": "I will retry in the morning after checking the access keys."
+    }
+   ]
+  },
+  {
+   "textId": "blocked",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 3,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 62.989,
+     "audioMs": 1253.016,
+     "text": "I could not finish"
+    },
+    {
+     "index": 1,
+     "readyMs": 161.318,
+     "audioMs": 1976.961,
+     "text": "the database upgrade tonight."
+    },
+    {
+     "index": 2,
+     "readyMs": 300.524,
+     "audioMs": 2836.236,
+     "text": "The backup step failed twice with a permissions error."
+    },
+    {
+     "index": 3,
+     "readyMs": 445.04,
+     "audioMs": 2912.608,
+     "text": "I will retry in the morning after checking the access keys."
+    }
+   ]
+  },
+  {
+   "textId": "blocked",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 4,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 58.744,
+     "audioMs": 1184.399,
+     "text": "I could not finish"
+    },
+    {
+     "index": 1,
+     "readyMs": 154.034,
+     "audioMs": 1939.365,
+     "text": "the database upgrade tonight."
+    },
+    {
+     "index": 2,
+     "readyMs": 289.322,
+     "audioMs": 2945.215,
+     "text": "The backup step failed twice with a permissions error."
+    },
+    {
+     "index": 3,
+     "readyMs": 436.244,
+     "audioMs": 3055.011,
+     "text": "I will retry in the morning after checking the access keys."
+    }
+   ]
+  },
+  {
+   "textId": "handover",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 73.225,
+     "audioMs": 1382.449,
+     "text": "Here is where things"
+    },
+    {
+     "index": 1,
+     "readyMs": 148.648,
+     "audioMs": 1486.168,
+     "text": "stand on the release."
+    },
+    {
+     "index": 2,
+     "readyMs": 419.759,
+     "audioMs": 5505.578,
+     "text": "The migration ran overnight and finished without errors, so the new tables are live in staging."
+    },
+    {
+     "index": 3,
+     "readyMs": 677.509,
+     "audioMs": 5260.726,
+     "text": "I checked the dashboards this morning, and response times are back under two hundred milliseconds."
+    },
+    {
+     "index": 4,
+     "readyMs": 768.765,
+     "audioMs": 1826.122,
+     "text": "Two small issues remain."
+    },
+    {
+     "index": 5,
+     "readyMs": 1069.059,
+     "audioMs": 6202.54,
+     "text": "The export button still times out on very large projects, and one of the email templates shows the old logo."
+    },
+    {
+     "index": 6,
+     "readyMs": 1330.609,
+     "audioMs": 4886.893,
+     "text": "I have opened tickets for both and assigned them to Maya, who expects to close them by Thursday."
+    },
+    {
+     "index": 7,
+     "readyMs": 1644.086,
+     "audioMs": 6030.658,
+     "text": "If you are happy with that plan, I will schedule the production rollout for Friday morning, before the team meeting."
+    },
+    {
+     "index": 8,
+     "readyMs": 1856.829,
+     "audioMs": 4357.642,
+     "text": "Let me know if you would rather wait until next week, and I will move everything back."
+    }
+   ]
+  },
+  {
+   "textId": "handover",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 1,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 63.269,
+     "audioMs": 1253.968,
+     "text": "Here is where things"
+    },
+    {
+     "index": 1,
+     "readyMs": 136.502,
+     "audioMs": 1525.488,
+     "text": "stand on the release."
+    },
+    {
+     "index": 2,
+     "readyMs": 396.295,
+     "audioMs": 5286.893,
+     "text": "The migration ran overnight and finished without errors, so the new tables are live in staging."
+    },
+    {
+     "index": 3,
+     "readyMs": 678.934,
+     "audioMs": 5454.331,
+     "text": "I checked the dashboards this morning, and response times are back under two hundred milliseconds."
+    },
+    {
+     "index": 4,
+     "readyMs": 763.369,
+     "audioMs": 1710.295,
+     "text": "Two small issues remain."
+    },
+    {
+     "index": 5,
+     "readyMs": 1089.869,
+     "audioMs": 6482.041,
+     "text": "The export button still times out on very large projects, and one of the email templates shows the old logo."
+    },
+    {
+     "index": 6,
+     "readyMs": 1352.112,
+     "audioMs": 4968.707,
+     "text": "I have opened tickets for both and assigned them to Maya, who expects to close them by Thursday."
+    },
+    {
+     "index": 7,
+     "readyMs": 1664.079,
+     "audioMs": 6128.798,
+     "text": "If you are happy with that plan, I will schedule the production rollout for Friday morning, before the team meeting."
+    },
+    {
+     "index": 8,
+     "readyMs": 1872.037,
+     "audioMs": 4094.15,
+     "text": "Let me know if you would rather wait until next week, and I will move everything back."
+    }
+   ]
+  },
+  {
+   "textId": "handover",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 2,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 64.617,
+     "audioMs": 1265.034,
+     "text": "Here is where things"
+    },
+    {
+     "index": 1,
+     "readyMs": 136.807,
+     "audioMs": 1426.576,
+     "text": "stand on the release."
+    },
+    {
+     "index": 2,
+     "readyMs": 403.671,
+     "audioMs": 5663.265,
+     "text": "The migration ran overnight and finished without errors, so the new tables are live in staging."
+    },
+    {
+     "index": 3,
+     "readyMs": 666.725,
+     "audioMs": 5431.61,
+     "text": "I checked the dashboards this morning, and response times are back under two hundred milliseconds."
+    },
+    {
+     "index": 4,
+     "readyMs": 757.487,
+     "audioMs": 1966.44,
+     "text": "Two small issues remain."
+    },
+    {
+     "index": 5,
+     "readyMs": 1078.459,
+     "audioMs": 6570.794,
+     "text": "The export button still times out on very large projects, and one of the email templates shows the old logo."
+    },
+    {
+     "index": 6,
+     "readyMs": 1318.554,
+     "audioMs": 4778.685,
+     "text": "I have opened tickets for both and assigned them to Maya, who expects to close them by Thursday."
+    },
+    {
+     "index": 7,
+     "readyMs": 1632.571,
+     "audioMs": 6107.211,
+     "text": "If you are happy with that plan, I will schedule the production rollout for Friday morning, before the team meeting."
+    },
+    {
+     "index": 8,
+     "readyMs": 1839.509,
+     "audioMs": 4149.206,
+     "text": "Let me know if you would rather wait until next week, and I will move everything back."
+    }
+   ]
+  },
+  {
+   "textId": "handover",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 3,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 68.176,
+     "audioMs": 1339.728,
+     "text": "Here is where things"
+    },
+    {
+     "index": 1,
+     "readyMs": 143.65,
+     "audioMs": 1580.816,
+     "text": "stand on the release."
+    },
+    {
+     "index": 2,
+     "readyMs": 423.242,
+     "audioMs": 5677.551,
+     "text": "The migration ran overnight and finished without errors, so the new tables are live in staging."
+    },
+    {
+     "index": 3,
+     "readyMs": 682.529,
+     "audioMs": 5202.177,
+     "text": "I checked the dashboards this morning, and response times are back under two hundred milliseconds."
+    },
+    {
+     "index": 4,
+     "readyMs": 776.141,
+     "audioMs": 1868.073,
+     "text": "Two small issues remain."
+    },
+    {
+     "index": 5,
+     "readyMs": 1107.635,
+     "audioMs": 6152.608,
+     "text": "The export button still times out on very large projects, and one of the email templates shows the old logo."
+    },
+    {
+     "index": 6,
+     "readyMs": 1368.031,
+     "audioMs": 4891.429,
+     "text": "I have opened tickets for both and assigned them to Maya, who expects to close them by Thursday."
+    },
+    {
+     "index": 7,
+     "readyMs": 1678.324,
+     "audioMs": 5922.222,
+     "text": "If you are happy with that plan, I will schedule the production rollout for Friday morning, before the team meeting."
+    },
+    {
+     "index": 8,
+     "readyMs": 1909.723,
+     "audioMs": 4354.921,
+     "text": "Let me know if you would rather wait until next week, and I will move everything back."
+    }
+   ]
+  },
+  {
+   "textId": "handover",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 4,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 68.809,
+     "audioMs": 1385.986,
+     "text": "Here is where things"
+    },
+    {
+     "index": 1,
+     "readyMs": 146.24,
+     "audioMs": 1495.964,
+     "text": "stand on the release."
+    },
+    {
+     "index": 2,
+     "readyMs": 421.586,
+     "audioMs": 5547.574,
+     "text": "The migration ran overnight and finished without errors, so the new tables are live in staging."
+    },
+    {
+     "index": 3,
+     "readyMs": 678.498,
+     "audioMs": 5333.741,
+     "text": "I checked the dashboards this morning, and response times are back under two hundred milliseconds."
+    },
+    {
+     "index": 4,
+     "readyMs": 767.771,
+     "audioMs": 1806.803,
+     "text": "Two small issues remain."
+    },
+    {
+     "index": 5,
+     "readyMs": 1084.459,
+     "audioMs": 6349.932,
+     "text": "The export button still times out on very large projects, and one of the email templates shows the old logo."
+    },
+    {
+     "index": 6,
+     "readyMs": 1324.33,
+     "audioMs": 4738.231,
+     "text": "I have opened tickets for both and assigned them to Maya, who expects to close them by Thursday."
+    },
+    {
+     "index": 7,
+     "readyMs": 1645.575,
+     "audioMs": 5906.485,
+     "text": "If you are happy with that plan, I will schedule the production rollout for Friday morning, before the team meeting."
+    },
+    {
+     "index": 8,
+     "readyMs": 1855.063,
+     "audioMs": 4159.546,
+     "text": "Let me know if you would rather wait until next week, and I will move everything back."
+    }
+   ]
+  },
+  {
+   "textId": "research",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 63.28,
+     "audioMs": 1198.866,
+     "text": "I finished reading the"
+    },
+    {
+     "index": 1,
+     "readyMs": 160.419,
+     "audioMs": 1979.32,
+     "text": "three papers you flagged last night."
+    },
+    {
+     "index": 2,
+     "readyMs": 502.002,
+     "audioMs": 6690.703,
+     "text": "The first one claims a forty percent speed up, but only on short prompts, and their test machine had twice our memory."
+    },
+    {
+     "index": 3,
+     "readyMs": 811.526,
+     "audioMs": 6026.304,
+     "text": "The second paper is more useful: it shows that splitting text at commas cuts the wait before speech by about half."
+    },
+    {
+     "index": 4,
+     "readyMs": 974.423,
+     "audioMs": 3312.154,
+     "text": "The third is mostly a survey, so I only kept the summary table."
+    },
+    {
+     "index": 5,
+     "readyMs": 1271.548,
+     "audioMs": 5882.086,
+     "text": "Overall, I think the comma trick is worth trying first, because it needs no new model and could ship in a day."
+    },
+    {
+     "index": 6,
+     "readyMs": 1553.189,
+     "audioMs": 5012.88,
+     "text": "I wrote up the details in the research folder, with links to each paper and the numbers I checked."
+    },
+    {
+     "index": 7,
+     "readyMs": 1726.394,
+     "audioMs": 3615.193,
+     "text": "Tell me if you want a shorter version for the team update on Monday."
+    }
+   ]
+  },
+  {
+   "textId": "research",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 1,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 62.515,
+     "audioMs": 1244.943,
+     "text": "I finished reading the"
+    },
+    {
+     "index": 1,
+     "readyMs": 166.081,
+     "audioMs": 2056.553,
+     "text": "three papers you flagged last night."
+    },
+    {
+     "index": 2,
+     "readyMs": 499.642,
+     "audioMs": 6396.508,
+     "text": "The first one claims a forty percent speed up, but only on short prompts, and their test machine had twice our memory."
+    },
+    {
+     "index": 3,
+     "readyMs": 806.705,
+     "audioMs": 6240.544,
+     "text": "The second paper is more useful: it shows that splitting text at commas cuts the wait before speech by about half."
+    },
+    {
+     "index": 4,
+     "readyMs": 976.263,
+     "audioMs": 3447.664,
+     "text": "The third is mostly a survey, so I only kept the summary table."
+    },
+    {
+     "index": 5,
+     "readyMs": 1261.842,
+     "audioMs": 5744.263,
+     "text": "Overall, I think the comma trick is worth trying first, because it needs no new model and could ship in a day."
+    },
+    {
+     "index": 6,
+     "readyMs": 1518.438,
+     "audioMs": 4904.218,
+     "text": "I wrote up the details in the research folder, with links to each paper and the numbers I checked."
+    },
+    {
+     "index": 7,
+     "readyMs": 1702.382,
+     "audioMs": 3526.077,
+     "text": "Tell me if you want a shorter version for the team update on Monday."
+    }
+   ]
+  },
+  {
+   "textId": "research",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 2,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 60.483,
+     "audioMs": 1171.927,
+     "text": "I finished reading the"
+    },
+    {
+     "index": 1,
+     "readyMs": 160.268,
+     "audioMs": 1972.608,
+     "text": "three papers you flagged last night."
+    },
+    {
+     "index": 2,
+     "readyMs": 506.49,
+     "audioMs": 6537.143,
+     "text": "The first one claims a forty percent speed up, but only on short prompts, and their test machine had twice our memory."
+    },
+    {
+     "index": 3,
+     "readyMs": 795.832,
+     "audioMs": 6009.751,
+     "text": "The second paper is more useful: it shows that splitting text at commas cuts the wait before speech by about half."
+    },
+    {
+     "index": 4,
+     "readyMs": 957.577,
+     "audioMs": 3347.347,
+     "text": "The third is mostly a survey, so I only kept the summary table."
+    },
+    {
+     "index": 5,
+     "readyMs": 1255.589,
+     "audioMs": 5938.141,
+     "text": "Overall, I think the comma trick is worth trying first, because it needs no new model and could ship in a day."
+    },
+    {
+     "index": 6,
+     "readyMs": 1499.053,
+     "audioMs": 4899.184,
+     "text": "I wrote up the details in the research folder, with links to each paper and the numbers I checked."
+    },
+    {
+     "index": 7,
+     "readyMs": 1665.999,
+     "audioMs": 3650.295,
+     "text": "Tell me if you want a shorter version for the team update on Monday."
+    }
+   ]
+  },
+  {
+   "textId": "research",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 3,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 57.801,
+     "audioMs": 1184.082,
+     "text": "I finished reading the"
+    },
+    {
+     "index": 1,
+     "readyMs": 154.222,
+     "audioMs": 2002.494,
+     "text": "three papers you flagged last night."
+    },
+    {
+     "index": 2,
+     "readyMs": 499.291,
+     "audioMs": 6371.701,
+     "text": "The first one claims a forty percent speed up, but only on short prompts, and their test machine had twice our memory."
+    },
+    {
+     "index": 3,
+     "readyMs": 800.912,
+     "audioMs": 6014.422,
+     "text": "The second paper is more useful: it shows that splitting text at commas cuts the wait before speech by about half."
+    },
+    {
+     "index": 4,
+     "readyMs": 958.482,
+     "audioMs": 3301.723,
+     "text": "The third is mostly a survey, so I only kept the summary table."
+    },
+    {
+     "index": 5,
+     "readyMs": 1257.959,
+     "audioMs": 6003.991,
+     "text": "Overall, I think the comma trick is worth trying first, because it needs no new model and could ship in a day."
+    },
+    {
+     "index": 6,
+     "readyMs": 1497.568,
+     "audioMs": 4770.884,
+     "text": "I wrote up the details in the research folder, with links to each paper and the numbers I checked."
+    },
+    {
+     "index": 7,
+     "readyMs": 1686.1,
+     "audioMs": 3595.646,
+     "text": "Tell me if you want a shorter version for the team update on Monday."
+    }
+   ]
+  },
+  {
+   "textId": "research",
+   "mode": "stream",
+   "temperature": "warm",
+   "repeat": 4,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 69.38,
+     "audioMs": 1329.388,
+     "text": "I finished reading the"
+    },
+    {
+     "index": 1,
+     "readyMs": 171.62,
+     "audioMs": 1965.714,
+     "text": "three papers you flagged last night."
+    },
+    {
+     "index": 2,
+     "readyMs": 493.408,
+     "audioMs": 6530.34,
+     "text": "The first one claims a forty percent speed up, but only on short prompts, and their test machine had twice our memory."
+    },
+    {
+     "index": 3,
+     "readyMs": 797.435,
+     "audioMs": 6147.664,
+     "text": "The second paper is more useful: it shows that splitting text at commas cuts the wait before speech by about half."
+    },
+    {
+     "index": 4,
+     "readyMs": 965.541,
+     "audioMs": 3446.757,
+     "text": "The third is mostly a survey, so I only kept the summary table."
+    },
+    {
+     "index": 5,
+     "readyMs": 1269.493,
+     "audioMs": 5973.061,
+     "text": "Overall, I think the comma trick is worth trying first, because it needs no new model and could ship in a day."
+    },
+    {
+     "index": 6,
+     "readyMs": 1519.634,
+     "audioMs": 4860.181,
+     "text": "I wrote up the details in the research folder, with links to each paper and the numbers I checked."
+    },
+    {
+     "index": 7,
+     "readyMs": 1695.236,
+     "audioMs": 3722.132,
+     "text": "Tell me if you want a shorter version for the team update on Monday."
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,66 @@
+{
+ "schema": "fast-tts.result.v1",
+ "engine": {
+  "id": "kokoro-michael",
+  "label": "Kokoro v1.0 · am_michael · 2 threads, product default",
+  "runtime": "sherpa-onnx-node 2.0.1",
+  "provider": "cpu",
+  "model": "kokoro-v1.0",
+  "modelRevision": "sha256:b40f62b166ac",
+  "voice": "am_michael",
+  "sampleRate": 24000,
+  "threads": 2,
+  "streaming": "speak-easy sentence pipeline (SherpaTextToSpeech.speak, depth 1): segment waveforms, not incremental within a segment; full mode is one generateAsync call",
+  "chunkPolicy": "planSegments: first chunk is the first clause or 4 words of sentence 1, then whole sentences; trimSilence trims each chunk and appends a 150 ms gap",
+  "cancellation": "between segments (the host returns the generator); a depth 1 lookahead synth already started runs to completion"
+ },
+ "environment": {
+  "machine": "Apple M2 Max",
+  "arch": "arm64",
+  "cpuCount": 12,
+  "memoryGiB": 96,
+  "os": "macOS 27.0.1",
+  "versions": {
+   "node": "25.9.0",
+   "sherpa-onnx-node": "2.0.1"
+  },
+  "harnessCommit": "f0465da1b8f0"
+ },
+ "process": {
+  "temperature": "cold",
+  "timed": true,
+  "repeats": 1,
+  "startedAt": "2026-11-02T22:38:28.790Z",
+  "clock": "performance.now (monotonic)",
+  "playback": null,
+  "loadMs": 673.457,
+  "warmupMs": null,
+  "loadDetail": {
+   "nativeLoadMs": 397.504,
+   "note": "loadMs is TtsSynth.create (digest verify, native load, frontend) plus session open"
+  }
+ },
+ "runs": [
+  {
+   "textId": "status",
+   "mode": "stream",
+   "temperature": "cold",
+   "repeat": 0,
+   "playbackStartMs": null,
+   "chunks": [
+    {
+     "index": 0,
+     "readyMs": 790.998,
+     "audioMs": 1473.625,
+     "text": "The deploy finished and"
+    },
+    {
+     "index": 1,
+     "readyMs": 1612.394,
+     "audioMs": 1487.833,
+     "text": "the site is live again."
+    }
+   ]
+  }
+ ]
+}
