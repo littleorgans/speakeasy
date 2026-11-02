@@ -79,6 +79,10 @@ python3 -I experiments/audio8-tts/build_listen.py $CLIPS/..
 
 ## Timing
 
-On a quiet machine: `OUT=$TMPDIR/a8-timed RUNS=3 experiments/audio8-tts/run-timed.sh`, then `python3 -I experiments/audio8-tts/summarize.py results.json $TMPDIR/a8-timed/*.json`.
+On a quiet machine: `OUT=$TMPDIR/a8-timed RUNS=3 experiments/audio8-tts/run-timed.sh`, then `python3 -I experiments/audio8-tts/summarize.py results.json $TMPDIR/a8-timed/*.json`. The full pass took 45 min on an M2 Max.
+
+Streaming only (both ONNX routes, paragraph and status, about 15 min): `STREAM_ONLY=1 OUT=$TMPDIR/a8-stream RUNS=3 experiments/audio8-tts/run-timed.sh`, then `summarize.py` as above; it also prints a per chunk table.
+
+`audio8_bench.py` wraps the runtime's own prompt build, slow AR step and codec decode calls to record prefill (slow steps at prompt positions) and decode time on every pass, plus, per stream chunk, ready time, gap since the previous chunk, chunk audio length and the decode window in frames.
 
 Definitions. Warm runs follow one warmup synth in the same process; cold load is reported separately. TTFA is request to first audio ready: the first sentence segment for the sherpa baselines, the first stream chunk for Audio8 streaming, and the whole synthesis for Audio8 full mode. RTF is request to last audio ready over audio duration. Audio8 samples with a fixed seed (42); upstream ONNX runtimes use 5 threads, speak-easy sherpa uses 2.

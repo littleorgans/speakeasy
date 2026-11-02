@@ -9,6 +9,8 @@ Both runtimes share one API: ArkTtsRuntime.synthesize() and .stream(chunk_frames
   render:   cold load, one warmup, then `runs` passes per text and mode.
             full:   TTFA is the whole synthesis (no audio before it ends).
             stream: TTFA is the first stream chunk; RTF is time to the last chunk over audio.
+            Every pass records prefill and codec decode cost; stream passes add per chunk
+            ready time, gap, audio length and decode window (see Probe).
 """
 
 from __future__ import annotations
@@ -60,24 +62,77 @@ def bundled(args) -> None:
     print(f"registered {args.name}: codes {list(codes.shape)}")
 
 
-def run_once(runtime, mode: str, text: str, voice: str, seed: int, chunk_frames: int):
+class Probe:
+    """Times the runtime's own calls without changing them, by wrapping instance attributes.
+
+    Prefill is every slow AR step at a prompt position: one batched call on 0.6B, one call per
+    prompt position on 0.1B. Decode is every codec decoder call; its window is the frame count
+    the call received.
+    """
+
+    def __init__(self, runtime):
+        self.reset()
+        build, slow, decode = runtime.prompt_builder.build, runtime._slow_step, runtime.decode_codes
+
+        def timed_build(*args, **kwargs):
+            prompt = build(*args, **kwargs)
+            self.prompt_frames = int(prompt.shape[2])
+            return prompt
+
+        def timed_slow(codes, position, state):
+            start = time.perf_counter()
+            result = slow(codes, position, state)
+            if int(max(position if hasattr(position, "__len__") else [position])) < self.prompt_frames:
+                self.prefill_ms += (time.perf_counter() - start) * 1000
+            return result
+
+        def timed_decode(codes):
+            start = time.perf_counter()
+            audio = decode(codes)
+            self.last_decode = {"windowFrames": int(codes.shape[-1]), "decodeMs": (time.perf_counter() - start) * 1000}
+            self.decode_ms += self.last_decode["decodeMs"]
+            self.decode_calls += 1
+            return audio
+
+        runtime.prompt_builder.build = timed_build
+        runtime._slow_step = timed_slow
+        runtime.decode_codes = timed_decode
+
+    def reset(self) -> None:
+        self.prompt_frames, self.prefill_ms, self.decode_ms, self.decode_calls = 0, 0.0, 0.0, 0
+        self.last_decode: dict = {}
+
+    def costs(self) -> dict:
+        return {"promptFrames": self.prompt_frames, "prefillMs": self.prefill_ms,
+                "decodeMs": self.decode_ms, "decodeCalls": self.decode_calls}
+
+
+def run_once(runtime, probe: Probe, mode: str, text: str, voice: str, seed: int, chunk_frames: int):
+    rate = int(runtime.manifest["sample_rate"])
+    probe.reset()
     start = time.perf_counter()
     if mode == "full":
         audio, codes = runtime.synthesize(text=text, voice=voice, seed=seed)
         end = time.perf_counter() - start
-        return audio, {"ttfaMs": end * 1000, "lastReadyMs": end * 1000, "frames": int(codes.shape[1])}
+        return audio, {"ttfaMs": end * 1000, "lastReadyMs": end * 1000, "frames": int(codes.shape[1]),
+                       **probe.costs()}
     import numpy as np
 
-    chunks, first, frames = [], None, 0
+    chunks, records, frames, previous = [], [], 0, 0.0
     for event in runtime.stream(chunk_frames=chunk_frames, text=text, voice=voice, seed=seed):
         if event["type"] == "audio_chunk":
-            first = first if first is not None else time.perf_counter() - start
+            ready = (time.perf_counter() - start) * 1000
             chunks.append(event["audio"])
+            records.append({"seq": event["seq"], "readyMs": ready, "gapMs": ready - previous,
+                            "audioMs": event["audio"].size / rate * 1000, "frameCount": event["frame_count"],
+                            **probe.last_decode})
+            previous = ready
         else:
             frames = int(event["codes"].shape[1])
     end = time.perf_counter() - start
     return np.concatenate(chunks), {
-        "ttfaMs": first * 1000, "lastReadyMs": end * 1000, "frames": frames, "chunks": len(chunks)
+        "ttfaMs": records[0]["readyMs"], "lastReadyMs": end * 1000, "frames": frames, "chunks": len(chunks),
+        **probe.costs(), "chunkRecords": records,
     }
 
 
@@ -91,6 +146,7 @@ def render(args) -> None:
     start = time.perf_counter()
     runtime = ArkTtsRuntime(args.model_dir, args.voices_dir, threads=args.threads)
     cold_load_ms = (time.perf_counter() - start) * 1000
+    probe = Probe(runtime)
     rate = int(runtime.manifest["sample_rate"])
     start = time.perf_counter()
     runtime.synthesize(text="Warm up.", voice=args.voice[0], seed=args.seed, max_new_tokens=32)
@@ -102,7 +158,7 @@ def render(args) -> None:
             for item in texts:
                 passes = []
                 for run in range(args.runs):
-                    audio, timing = run_once(runtime, mode, item["text"], voice, args.seed, args.chunk_frames)
+                    audio, timing = run_once(runtime, probe, mode, item["text"], voice, args.seed, args.chunk_frames)
                     audio_ms = audio.size / rate * 1000
                     passes.append({**timing, "audioMs": audio_ms, "rtf": timing["lastReadyMs"] / audio_ms})
                     if run == 0:
