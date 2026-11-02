@@ -10,7 +10,7 @@ set -euo pipefail
 RUNS="${RUNS:-5}"
 OUT="${OUT:?set OUT to a scratch directory}"
 MODELS="${MODELS:-$HOME/Dev/LLM/DEV/helioy/speak-easy/models/tts}"
-ENGINES="${ENGINES:-piper-kristin kokoro-heart kokoro-michael}"
+ENGINES="${ENGINES:-piper-kristin piper-kristin-t4 kokoro-heart kokoro-heart-t4 kokoro-michael}"
 MODES="${MODES:-stream full}"
 COLD_TEXTS="${COLD_TEXTS:-status summary handover}"  # one per length class
 HERE=experiments/fast-tts

@@ -9,7 +9,7 @@ Adapted from the audio8-tts experiment (branch `tm/audio8-tts-research--75e44b1b
 - `CONTRACT.md`: metrics, endpoints, cold and warm, the result JSON schema, clip names.
 - `cohort.json`: ten agent to owner texts: five short, three medium, two long.
 - `fasttts.py`: Python helper for candidates (stdlib; `DevicePlayer` needs numpy and sounddevice). Records runs, captures the environment, validates and writes result JSON, writes WAV, and holds `derive`, the one implementation of RTF and underruns. `selftest` exercises it with a synthetic engine.
-- `render-baselines.ts`: baselines through speak-easy's own path (`TtsSynth` behind `SherpaTextToSpeech`, sentence pipeline, Piper Plus frontend, `cpu` provider, no `onProgress`). Engines `piper-kristin`, `kokoro-heart`, `kokoro-michael`; modes `stream` (sentence pipeline) and `full` (one synth call).
+- `render-baselines.ts`: baselines through speak-easy's own path (`TtsSynth` behind `SherpaTextToSpeech`, sentence pipeline, Piper Plus frontend, `cpu` provider, no `onProgress`). Engines `piper-kristin`, `kokoro-heart`, `kokoro-michael` at the product default threads, plus `piper-kristin-t4` and `kokoro-heart-t4` at 4 threads; modes `stream` (sentence pipeline) and `full` (one synth call).
 - `run-timed.sh`: the timed pass, one fresh process per engine and temperature.
 - `summarize.py`: validates and merges result files into a summary JSON and a markdown table.
 - `build_listen.py`: writes the owner listening page from the summary and the clips.
@@ -46,10 +46,27 @@ python3 -I experiments/fast-tts/summarize.py $ASSETS/results.json $TMPDIR/ftts-t
 python3 -I experiments/fast-tts/build_listen.py $ASSETS --summary $ASSETS/results.json --template $TEMPLATE
 ```
 
-Defaults: `RUNS=5`, engines `piper-kristin kokoro-heart kokoro-michael`, modes `stream full`, cold texts `status summary handover` (one per length class). The untimed smoke with `RUNS=1` took about 7 minutes; expect roughly 35 for the default timed pass.
+Defaults: `RUNS=5`, engines `piper-kristin piper-kristin-t4 kokoro-heart kokoro-heart-t4 kokoro-michael`, modes `stream full`, cold texts `status summary handover` (one per length class). Engines without `-t4` use speak-easy's product default thread count (`DEFAULT_NUM_THREADS` in `synth.ts`, 2); `-t4` engines use 4 threads, and each label names its count. Estimate, from smoke RTFs and about 145 s of cohort audio per pass: about 45 minutes, up to an hour if the machine is busy. Kokoro dominates: each 2 thread Kokoro engine takes about 12 minutes for both modes.
+
+## Baseline first audio versus voice-out g2p-F10
+
+Voice-out finding g2p-F10 (research `tracks/voice-out`, `experiments/g2p-bench.cjs`) reports Kristin warm first PCM of 22.1 ms for u01 ("Done.") and 43.0 ms for u10's first sentence ("I stopped the deploy."), at 4 threads; the same finding gives 32.5 and 66.5 ms at 2 threads. The first E1 smoke gave Kristin a 115 ms short median. A probe (untimed, same M2 Max, sherpa-onnx-node 2.0.1, Piper Plus frontend 4fd95c24, load average 8 to 23 from other work) explains the gap. The harness itself adds no defect:
+
+| Factor | Effect | Evidence |
+| --- | --- | --- |
+| First chunk text | Largest structural factor. Synth time scales with audio length (about 0.05 x audio at 2 threads). "Done." is 0.63 s of audio; the harness's first chunks are `planSegments` heads of up to 4 words, such as "The deploy finished and" at 1.35 s, the size of u10's first sentence. | Direct `TtsSynth.synth`, 2 threads, median of 9: "Done." 31.8 ms, "I stopped the deploy." 65.5 ms, "The deploy finished and" 69.8 ms |
+| Threads | speak-easy's product default is 2; the g2p-F10 headline is 4. | The 2 thread direct synth reproduces g2p-F10's own 2 thread figures within 1 ms |
+| Machine load | The first smoke ran under heavy load. A rerun of the same engine and texts later gave Kristin 74 ms (was 115) and Kokoro af_heart 688 ms (was 1178). | Smoke reruns, untimed |
+| Frontend per call | Negligible: the G2P loads once per synth, as in g2p-bench. | `frontend.request` 0.07 to 0.18 ms |
+| Pipeline | Under 1 ms. | Segment `readyAtMs` 85.4 ms vs caller receive 85.8 ms; dispatching the next chunk 0.2 ms |
+| Clock endpoint | The same: monotonic clock, submit to PCM returned by `generateAsync`. The harness adds `trimSilence` and one generator hop, both inside the pipeline figure. | Code read of both |
+| sherpa, frontend | The same: 2.0.1, Piper Plus 4fd95c24. Node 25.9.0 here vs 26.13.0 there, not isolated. | Result environments |
+
+So the short class median (five texts, first chunks of 2 to 4 words) sits above u01's single word by design, and the thread comparison needs the quiet slot: under this load 4 threads flipped between runs, slower than 2 in the probe ("Done." 74 vs 32 ms) and faster in the smoke rerun (61 vs 74 ms). RTF also differs by definition: g2p-F10 divides one call's time by raw audio including model padding, while this contract divides submit to last chunk by trimmed audio with 150 ms gaps.
 
 ## Notes
 
 - First audio for the baselines is the first sentence pipeline segment reaching the caller; the pipeline carves a short first chunk (`planSegments`) and trims segment silence (`trimSilence`), so streamed clips have a fixed 150 ms gap between segments.
+- A synth started while another runs on the same `OfflineTts` is slower (one probe: 77 to 103 ms). The harness drains every chunk, so its runs never overlap; a cancelled stream does leave its lookahead synth running.
 - The baselines do not play audio, so their playback start is `null`; `fasttts.DevicePlayer` measures it for Python engines.
-- speak-easy sherpa uses 2 threads; `loadMs` includes speak-easy's payload digest check, with the native load in `loadDetail.nativeLoadMs`.
+- `loadMs` includes speak-easy's payload digest check, with the native load in `loadDetail.nativeLoadMs`.

@@ -20,7 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fasttts as ft  # noqa: E402
 
-BASELINES = ("piper-kristin", "kokoro-heart", "kokoro-michael")
+BASELINES = ("piper-kristin", "piper-kristin-t4", "kokoro-heart", "kokoro-heart-t4", "kokoro-michael")
 LENGTHS = (("short", "Short replies", "One sentence"), ("medium", "Medium replies", "Two or three sentences"),
            ("long", "Long replies", "One paragraph, six or more sentences"))
 

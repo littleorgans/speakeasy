@@ -21,11 +21,14 @@ import { TtsSynth, writeWav } from "../../packages/speech-io/src/tts/synth.ts";
  * Adapted from experiments/audio8-tts/render-baselines.ts (audio8-tts thread).
  */
 
+// threads unset: TtsSynth's product default (DEFAULT_NUM_THREADS in synth.ts).
 const ENGINES = {
   "piper-kristin": { label: "Piper Kristin medium", model: "piper-kristin-medium", voice: "kristin" },
+  "piper-kristin-t4": { label: "Piper Kristin medium", model: "piper-kristin-medium", voice: "kristin", threads: 4 },
   "kokoro-heart": { label: "Kokoro v1.0 · af_heart", model: "kokoro-v1.0", voice: "af_heart" },
+  "kokoro-heart-t4": { label: "Kokoro v1.0 · af_heart", model: "kokoro-v1.0", voice: "af_heart", threads: 4 },
   "kokoro-michael": { label: "Kokoro v1.0 · am_michael", model: "kokoro-v1.0", voice: "am_michael" },
-} as const satisfies Record<string, { label: string; model: LocalOutputModelId; voice: string }>;
+} as const satisfies Record<string, { label: string; model: LocalOutputModelId; voice: string; threads?: number }>;
 type EngineId = keyof typeof ENGINES;
 
 type CohortText = { id: string; length: string; text: string };
@@ -55,7 +58,7 @@ if (!Object.hasOwn(ENGINES, engineId ?? "") || (temperature !== "cold" && temper
   || !values.json || (mode !== "stream" && mode !== "full")) {
   throw new Error(USAGE);
 }
-const engine = ENGINES[engineId];
+const engine: { label: string; model: LocalOutputModelId; voice: string; threads?: number } = ENGINES[engineId];
 const repeats = temperature === "cold" ? 1 : Number(values.repeats);
 const cohort = (JSON.parse(await readFile(join(import.meta.dirname, "cohort.json"), "utf8")) as { texts: CohortText[] }).texts;
 const texts = (values.text ?? (temperature === "cold" ? ["status"] : cohort.map((item) => item.id)))
@@ -69,7 +72,7 @@ if (readiness.state !== "ready") throw new Error(`${engine.model} not ready: ${r
 const { voice, speed } = resolveLocalOutput({ schema: 1, provider: { kind: "local" }, model: engine.model, voice: engine.voice, speed: 1 });
 
 const loadStart = performance.now();
-const synth = await TtsSynth.create(engine.model, undefined, { root: values.root, allowDownload: false });
+const synth = await TtsSynth.create(engine.model, engine.threads, { root: values.root, allowDownload: false });
 const session = await new SherpaTextToSpeech(async () => synth).open({ model: engine.model, voice: voice.speakerId, speed });
 const loadMs = performance.now() - loadStart;
 const warmupMs = temperature === "warm" ? await synth.warmup() : null;
@@ -90,7 +93,9 @@ await session.close();
 const document = {
   schema: "fast-tts.result.v1",
   engine: {
-    id: engineId, label: engine.label, runtime: `sherpa-onnx-node ${packageVersion("sherpa-onnx-node")}`, provider: "cpu",
+    id: engineId,
+    label: `${engine.label} · ${synth.numThreads} threads${engine.threads === undefined ? ", product default" : ""}`,
+    runtime: `sherpa-onnx-node ${packageVersion("sherpa-onnx-node")}`, provider: "cpu",
     model: engine.model, modelRevision: `sha256:${LOCAL_TTS_MODELS[engine.model].files[0].sha256.slice(0, 12)}`,
     voice: engine.voice, sampleRate: synth.sampleRate, threads: synth.numThreads,
     streaming: mode === "stream" ? "speak-easy sentence pipeline (planSegments, depth 1, trimSilence)" : "one generateAsync call",
