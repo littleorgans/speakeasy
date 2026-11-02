@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fasttts as ft  # noqa: E402
 
 BASELINES = ("piper-kristin", "piper-kristin-t4", "kokoro-heart", "kokoro-heart-t4", "kokoro-michael")
+POLICY_TITLES = {"streaming": "Streaming", "chunkPolicy": "Chunk policy", "cancellation": "Cancellation"}
 LENGTHS = (("short", "Short replies", "One sentence"), ("medium", "Medium replies", "Two or three sentences"),
            ("long", "Long replies", "One paragraph, six or more sentences"))
 
@@ -96,6 +97,16 @@ def engines_table(cols: list[dict]) -> str:
             f'<tbody>{"".join(rows)}</tbody></table>')
 
 
+def policies_table(cols: list[dict]) -> str:
+    """The standard optional engine fields (CONTRACT.md), one row per engine."""
+    engines = list({col["entry"]["engine"]["id"]: col["entry"]["engine"] for col in cols}.values())
+    head = "".join(f'<th scope="col">{esc(POLICY_TITLES[key])}</th>' for key in ft.POLICY_KEYS)
+    rows = "".join(f'<tr><th scope="row">{esc(engine["label"])}</th>'
+                   + "".join(f'<td>{esc(engine.get(key) or "not stated")}</td>' for key in ft.POLICY_KEYS) + "</tr>"
+                   for engine in engines)
+    return f'<table><thead><tr><th scope="col">Engine</th>{head}</tr></thead><tbody>{rows}</tbody></table>'
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("root", type=Path, help="assets/fast-tts directory; listen.html is written here")
@@ -150,6 +161,13 @@ def main() -> None:
       <div class="body">
         <h2>Warm medians per length, pooled over texts</h2>
         {engines_table(cols)}
+      </div>
+    </section>
+    <section class="row">
+      <p class="index">Policies</p>
+      <div class="body">
+        <h2>How each engine streams, chunks and stops</h2>
+        {policies_table(cols)}
       </div>
     </section>
     <section class="row">

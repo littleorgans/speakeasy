@@ -57,8 +57,11 @@ One JSON file per process, `schema: "fast-tts.result.v1"`. File names: `<engine>
     "model": "kokoro-v1.0",
     "modelRevision": "sha256:b40f62b166ac", // weights digest or upstream revision
     "voice": "af_heart",
-    "sampleRate": 24000
-    // optional extras: threads, streaming, quantization, ...
+    "sampleRate": 24000,
+    "streaming": "speak-easy sentence pipeline ...", // standard optional fields, see below
+    "chunkPolicy": "planSegments: first clause or 4 words ...",
+    "cancellation": "between segments ..."
+    // other optional extras: threads, quantization, ...
   },
   "environment": {
     "machine": "Apple M2 Max", "arch": "arm64", "cpuCount": 12, "memoryGiB": 96,
@@ -89,6 +92,12 @@ One JSON file per process, `schema: "fast-tts.result.v1"`. File names: `<engine>
 }
 ```
 
+Standard optional engine fields, free text, one per engine (the same in every mode); `fasttts.validate` rejects them empty or not text, and the listening page shows each:
+
+- `streaming`: how audio reaches the caller in stream mode, such as native incremental decoding or whole segment waveforms.
+- `chunkPolicy`: what one chunk is: how the text is split, how the first chunk is carved, any trim or gap added.
+- `cancellation`: where a stop request takes effect and what still runs after it.
+
 `mode` is `stream` (audio arrives in chunks before synthesis ends) or `full` (one call, all audio at once). `fasttts.validate` checks a document; `summarize.py` rejects files that fail it.
 
 ## Clips
@@ -97,6 +106,6 @@ The first warm repeat of each text is saved as mono WAV at the engine's native r
 
 ## Plugging in a candidate
 
-1. Write one script per engine (Python: import `fasttts`; other languages: emit the same JSON).
+1. Write one script per engine (Python: implement `fasttts.Engine` and call `fasttts.run_engine`, which owns the flags, the cold and warm loops and the clips; other languages: emit the same JSON). State `streaming`, `chunkPolicy` and `cancellation`.
 2. Smoke it untimed, run `summarize.py` on its files and check the page with `build_listen.py`.
 3. Add its fresh process blocks to `run-timed.sh` and wait for a quiet slot for the timed pass.

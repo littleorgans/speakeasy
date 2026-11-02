@@ -11,6 +11,11 @@ This module is also the one implementation of the derived metrics: `derive` turn
 a raw run into first audio, playback start, RTF and underruns, and summarize.py
 uses it for every engine, TypeScript or Python.
 
+A Python engine script defines an `Engine` and calls `run_engine`, which owns the
+CLI (the flags of render-baselines.ts), load timing, warmup, the cold and warm
+loops and clip writing. `Result` and `Run` stay public for scripts that need
+their own loop.
+
 CLI: `python3 -I experiments/fast-tts/fasttts.py selftest --out <dir> [--play]`
 writes a synthetic engine's result file to check a setup end to end.
 """
@@ -19,6 +24,8 @@ from __future__ import annotations
 
 import argparse
 import array
+import hashlib
+import itertools
 import json
 import os
 import platform
@@ -29,11 +36,13 @@ import time
 import wave
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Callable, Iterable, Protocol
 
 SCHEMA = "fast-tts.result.v1"
 HERE = Path(__file__).resolve().parent
 TEMPERATURES = ("cold", "warm")
 MODES = ("stream", "full")
+WARMUP_TEXT = "Warm up."
 
 
 def now_ms() -> float:
@@ -136,6 +145,7 @@ class Result:
 
 
 ENGINE_KEYS = ("id", "label", "runtime", "provider", "model", "modelRevision", "voice", "sampleRate")
+POLICY_KEYS = ("streaming", "chunkPolicy", "cancellation")  # standard optional engine fields, free text
 
 
 def validate(doc: dict) -> None:
@@ -147,6 +157,8 @@ def validate(doc: dict) -> None:
     problems += [f"engine.{key} missing" for key in ENGINE_KEYS if engine.get(key) in (None, "")]
     if not str(engine.get("id", "")).replace("-", "").replace("_", "").replace(".", "").isalnum():
         problems.append("engine.id must be letters, digits, '-', '_' or '.' (it names clip files)")
+    problems += [f"engine.{key} must be non-empty text" for key in POLICY_KEYS
+                 if key in engine and not (isinstance(engine[key], str) and engine[key])]
     env = doc.get("environment", {})
     problems += [f"environment.{key} missing" for key in ("machine", "os", "versions") if not env.get(key)]
     process = doc.get("process", {})
@@ -211,6 +223,100 @@ def write_wav(path: Path, samples, sample_rate: int) -> None:
         out.setsampwidth(2)
         out.setframerate(sample_rate)
         out.writeframes(pcm.tobytes())
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def verify_digests(expected: Iterable[tuple[Path, str]]) -> None:
+    """Exit unless every file's sha256 matches; call off the clock, before load."""
+    for path, digest in expected:
+        if sha256_file(path) != digest:
+            raise SystemExit(f"{path}: sha256 mismatch, expected {digest}")
+
+
+class Engine(Protocol):
+    """One engine as `run_engine` drives it. Construct off the clock (digest checks)."""
+
+    sample_rate: int
+
+    def load(self) -> dict:
+        """Load the model until it accepts text; returns `process.loadDetail`. Timed as `loadMs`."""
+
+    def describe(self) -> tuple[dict, dict[str, str]]:
+        """After load: the engine fields except `id` (CONTRACT.md, with POLICY_KEYS), and the stack versions."""
+
+    def stream(self, text: str) -> Iterable[tuple[Any, str | None]]:
+        """Each chunk as soon as the caller has it: (float samples, chunk text or None)."""
+
+    def full(self, text: str) -> Any:
+        """All float samples from one call."""
+
+
+def run_engine(description: str, engines: Iterable[str], build: Callable[[str, Path], Engine]) -> None:
+    """The engine script CLI: one engine, one temperature and mode per process (CONTRACT.md).
+
+    Cold loads and runs one --text with no warmup; warm loads, discards one
+    WARMUP_TEXT synthesis, then runs --repeats passes over the texts. The first
+    repeat of each text is written to --clips. `build(engine_id, root)` returns
+    the engine, not yet loaded.
+    """
+    parser = argparse.ArgumentParser(description=description, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--engine", choices=list(engines), required=True)
+    parser.add_argument("--temperature", choices=TEMPERATURES, required=True)
+    parser.add_argument("--json", type=Path, required=True)
+    parser.add_argument("--root", type=Path, default=Path.cwd() / "models" / "tts")
+    parser.add_argument("--mode", choices=MODES, default="stream")
+    parser.add_argument("--repeats", type=int, default=1)
+    parser.add_argument("--text", action="append")
+    parser.add_argument("--clips", type=Path)
+    parser.add_argument("--timed", action="store_true")
+    args = parser.parse_args()
+    texts = load_cohort(args.text or (["status"] if args.temperature == "cold" else None))
+    if args.temperature == "cold" and len(texts) != 1:
+        raise SystemExit("cold takes exactly one --text")
+    repeats = 1 if args.temperature == "cold" else args.repeats
+
+    engine = build(args.engine, args.root)
+    start = now_ms()
+    load_detail = engine.load()
+    load_ms = now_ms() - start
+    fields, versions = engine.describe()
+    result = Result({"id": args.engine, **fields}, args.temperature, args.timed, repeats, versions)
+    result.process["loadMs"] = round(load_ms, 3)
+    result.process["loadDetail"] = load_detail
+    if args.temperature == "warm":
+        warm = now_ms()
+        engine.full(WARMUP_TEXT)
+        result.process["warmupMs"] = round(now_ms() - warm, 3)
+
+    suffix = "--full" if args.mode == "full" else ""
+    for item in texts:
+        for repeat in range(repeats):
+            run = result.start(item["id"], args.mode, repeat)
+            clip = measure(engine, run, item["text"])
+            if repeat == 0 and args.clips:
+                write_wav(args.clips / f"{item['id']}--{args.engine}{suffix}.wav", clip, engine.sample_rate)
+    result.write(args.json)
+    print(f"{args.engine} {args.temperature} {args.mode}: {len(result.runs)} runs, load {load_ms:.0f} ms -> {args.json}")
+
+
+def measure(engine: Engine, run: Run, text: str) -> Iterable:
+    """Synthesize one text in the run's mode, recording each chunk; returns the clip samples."""
+    if run.row["mode"] == "full":
+        clip = engine.full(text)
+        run.chunk(len(clip) / engine.sample_rate * 1000, text)
+        return clip
+    pieces = []
+    for samples, chunk_text in engine.stream(text):
+        run.chunk(len(samples) / engine.sample_rate * 1000, chunk_text)
+        pieces.append(samples)
+    return itertools.chain.from_iterable(pieces)
 
 
 class DevicePlayer:

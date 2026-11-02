@@ -98,7 +98,12 @@ const document = {
     runtime: `sherpa-onnx-node ${packageVersion("sherpa-onnx-node")}`, provider: "cpu",
     model: engine.model, modelRevision: `sha256:${LOCAL_TTS_MODELS[engine.model].files[0].sha256.slice(0, 12)}`,
     voice: engine.voice, sampleRate: synth.sampleRate, threads: synth.numThreads,
-    streaming: mode === "stream" ? "speak-easy sentence pipeline (planSegments, depth 1, trimSilence)" : "one generateAsync call",
+    streaming: "speak-easy sentence pipeline (SherpaTextToSpeech.speak, depth 1): segment waveforms, "
+      + "not incremental within a segment; full mode is one generateAsync call",
+    chunkPolicy: "planSegments: first chunk is the first clause or 4 words of sentence 1, then whole sentences; "
+      + "trimSilence trims each chunk and appends a 150 ms gap",
+    cancellation: "between segments (the host returns the generator); a depth 1 lookahead synth already "
+      + "started runs to completion",
   },
   environment: environment(),
   process: {

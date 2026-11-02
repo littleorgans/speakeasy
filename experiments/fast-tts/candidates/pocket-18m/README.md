@@ -1,6 +1,6 @@
 # Candidate: Pocket TTS 18M (October 2026)
 
-Kyutai Pocket TTS, the English 18.2M parameter checkpoint (15.6M flow LM plus 2.6M Mimi decoder), from the no voice cloning snapshot, on PyTorch CPU. Engine `pocket-18m-bill` (voice bill_boerst, precomputed state). `render.py` follows [CONTRACT.md](../../CONTRACT.md) and imports `fasttts` from `experiments/fast-tts/`.
+Kyutai Pocket TTS, the English 18.2M parameter checkpoint (15.6M flow LM plus 2.6M Mimi decoder), from the no voice cloning snapshot, on PyTorch CPU. Engine `pocket-18m-bill` (voice bill_boerst, precomputed state). `render.py` follows [CONTRACT.md](../../CONTRACT.md): it defines the engine and hands the CLI and loops to `fasttts.run_engine`.
 
 ## Pins
 
@@ -41,7 +41,7 @@ $PY -I experiments/fast-tts/candidates/pocket-18m/render.py --root $MODELS --eng
   --temperature warm --repeats 1 --json $TMPDIR/pocket-18m-bill--warm--stream.json --clips $ASSETS/clips
 ```
 
-Flags match `render-baselines.ts`. The timed block for `run-timed.sh` is the kokoro-mlx one with `PY=$TMPDIR/venv-pocket/bin/python`, `candidates/pocket-18m/render.py` and engine `pocket-18m-bill`.
+Flags match `render-baselines.ts`. `run-timed.sh` runs `pocket-18m-bill` by default, with `POCKET_PY` (default `$TMPDIR/venv-pocket/bin/python`).
 
 ## Stream policy
 

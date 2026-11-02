@@ -1,6 +1,6 @@
 # Candidate: Kokoro v1.0 on MLX
 
-Kokoro 82M v1.0, the mlx-community bf16 conversion, run by mlx-audio on the Apple GPU (Metal). Engines `kokoro-mlx-heart` (af_heart) and `kokoro-mlx-michael` (am_michael). `render.py` follows [CONTRACT.md](../../CONTRACT.md) and imports `fasttts` from `experiments/fast-tts/`.
+Kokoro 82M v1.0, the mlx-community bf16 conversion, run by mlx-audio on the Apple GPU (Metal). Engines `kokoro-mlx-heart` (af_heart) and `kokoro-mlx-michael` (am_michael). `render.py` follows [CONTRACT.md](../../CONTRACT.md): it defines the engine and hands the CLI and loops to `fasttts.run_engine`.
 
 ## Pins
 
@@ -43,21 +43,7 @@ $PY -I experiments/fast-tts/candidates/kokoro-mlx/render.py --root $MODELS --eng
 
 Flags match `render-baselines.ts`: `--temperature cold|warm`, `--mode stream|full`, `--repeats N`, `--text <id>` (repeatable; cold takes one, default `status`), `--clips <dir>`, `--timed`.
 
-Timed pass block for `run-timed.sh`, same file names as the baselines:
-
-```bash
-for engine in kokoro-mlx-heart kokoro-mlx-michael; do
-  for text in $COLD_TEXTS; do for i in $(seq 1 "$RUNS"); do
-    $PY -I experiments/fast-tts/candidates/kokoro-mlx/render.py --root "$MODELS" --engine $engine --temperature cold \
-      --text $text $TIMED --json "$OUT/$engine--cold--$text--$i.json" >> "$OUT/$engine--cold.log" 2>&1
-  done; done
-  for mode in $MODES; do
-    $PY -I experiments/fast-tts/candidates/kokoro-mlx/render.py --root "$MODELS" --engine $engine --temperature warm \
-      --mode $mode --repeats "$RUNS" $TIMED ${CLIPS:+--clips "$CLIPS"} --json "$OUT/$engine--warm--$mode.json" \
-      > "$OUT/$engine--warm--$mode.log" 2>&1
-  done
-done
-```
+`run-timed.sh` runs both engines by default, with `KOKORO_MLX_PY` (default `$TMPDIR/venv-kokoro-mlx/bin/python`).
 
 ## Stream policy
 

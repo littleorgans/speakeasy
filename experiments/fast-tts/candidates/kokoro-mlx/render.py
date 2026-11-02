@@ -1,8 +1,7 @@
 """fast-tts candidate: Kokoro v1.0 on MLX (mlx-audio), Apple GPU.
 
-Emits the shared result JSON (CONTRACT.md) for one engine per process, like
-render-baselines.ts: cold loads and runs one --text with no warmup; warm loads,
-discards one "Warm up." synthesis, then runs --repeats passes over the texts.
+Emits the shared result JSON (CONTRACT.md) for one engine per process through
+fasttts.run_engine, with the flags of render-baselines.ts.
 
 Stream mode follows the baselines' chunk policy so first audio compares: a port
 of speak-easy planSegments (short first chunk of at most 4 words or the first
@@ -18,8 +17,6 @@ Run from the speak-easy repo root with the env from README.md:
 
 from __future__ import annotations
 
-import argparse
-import hashlib
 import os
 import re
 import sys
@@ -42,7 +39,6 @@ VOICES = {"af_heart": "2c1c733b0e6576c810e268d3e440c21dea4e0f0131a3ba4cfc98d7fe6
 ENGINES = {"kokoro-mlx-heart": ("Kokoro v1.0 MLX bf16 · af_heart", "af_heart"),
            "kokoro-mlx-michael": ("Kokoro v1.0 MLX bf16 · am_michael", "am_michael")}
 LANG_CODE = "a"  # misaki en-US G2P with espeak-ng fallback
-WARMUP_TEXT = "Warm up."
 
 # speak-easy packages/speech-io/src/tts/stream.ts constants, ported unchanged.
 FIRST_CHUNK_MAX_WORDS = 4
@@ -80,21 +76,12 @@ def trim_silence(samples: np.ndarray, sample_rate: int) -> np.ndarray:
     return np.concatenate([samples[start:end], gap])
 
 
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
 class KokoroMlx:
-    def __init__(self, root: Path, voice: str) -> None:
+    def __init__(self, engine_id: str, root: Path) -> None:
+        self.label, self.voice = ENGINES[engine_id]
         self.snapshot = root / SNAPSHOT
-        self.voice = voice
-        for name, digest in ((WEIGHTS[0], WEIGHTS[1]), (f"voices/{voice}.safetensors", VOICES[voice])):
-            if sha256(self.snapshot / name) != digest:
-                raise SystemExit(f"{self.snapshot / name}: sha256 mismatch, expected {digest}")
+        ft.verify_digests([(self.snapshot / WEIGHTS[0], WEIGHTS[1]),
+                           (self.snapshot / f"voices/{self.voice}.safetensors", VOICES[self.voice])])
 
     def load(self) -> dict:
         start = ft.now_ms()
@@ -108,6 +95,21 @@ class KokoroMlx:
         return {"modelLoadMs": round(loaded - start, 3), "g2pPipelineMs": round(ft.now_ms() - loaded, 3),
                 "note": "loadMs is mlx_audio load_model on the local snapshot plus the misaki G2P pipeline; "
                         "mlx-audio reloads the voice pack inside every generate call"}
+
+    def describe(self) -> tuple[dict, dict[str, str]]:
+        versions = {name: version(name) for name in ("mlx-audio", "mlx", "misaki", "spacy", "en-core-web-sm",
+                                                     "espeakng-loader", "phonemizer-fork", "numpy")}
+        return {
+            "label": self.label, "runtime": f"mlx-audio {versions['mlx-audio']} (mlx {versions['mlx']})",
+            "provider": "mlx-metal-gpu", "model": REPO, "modelRevision": REVISION, "voice": self.voice,
+            "sampleRate": self.sample_rate,
+            "streaming": "segment waveforms: speak-easy planSegments + trimSilence port, one generate call, "
+                         "newline separated segments; not incremental within a segment",
+            "chunkPolicy": f"first chunk: first clause or {FIRST_CHUNK_MAX_WORDS} words of sentence 1, "
+                           "then whole sentences; each chunk trimmed, 150 ms gap appended",
+            "cancellation": "between segments (host stops pulling the generator); an active segment's "
+                            "MLX inference is not preempted",
+        }, versions
 
     def generate(self, text: str, split_pattern: str | None):
         """Each completed segment waveform as float32 numpy (np.asarray forces MLX evaluation)."""
@@ -125,66 +127,5 @@ class KokoroMlx:
         return np.concatenate(list(self.generate(text, None)))
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--engine", choices=ENGINES, required=True)
-    parser.add_argument("--temperature", choices=ft.TEMPERATURES, required=True)
-    parser.add_argument("--json", type=Path, required=True)
-    parser.add_argument("--root", type=Path, default=Path.cwd() / "models" / "tts")
-    parser.add_argument("--mode", choices=ft.MODES, default="stream")
-    parser.add_argument("--repeats", type=int, default=1)
-    parser.add_argument("--text", action="append")
-    parser.add_argument("--clips", type=Path)
-    parser.add_argument("--timed", action="store_true")
-    args = parser.parse_args()
-    label, voice = ENGINES[args.engine]
-    texts = ft.load_cohort(args.text or (["status"] if args.temperature == "cold" else None))
-    if args.temperature == "cold" and len(texts) != 1:
-        raise SystemExit("cold takes exactly one --text")
-    repeats = 1 if args.temperature == "cold" else args.repeats
-
-    engine = KokoroMlx(args.root, voice)  # digest checks off the clock
-    start = ft.now_ms()
-    load_detail = engine.load()
-    load_ms = ft.now_ms() - start
-    versions = {name: version(name) for name in ("mlx-audio", "mlx", "misaki", "spacy", "en-core-web-sm",
-                                                 "espeakng-loader", "phonemizer-fork", "numpy")}
-    result = ft.Result({
-        "id": args.engine, "label": label, "runtime": f"mlx-audio {versions['mlx-audio']} (mlx {versions['mlx']})",
-        "provider": "mlx-metal-gpu", "model": REPO, "modelRevision": REVISION, "voice": voice,
-        "sampleRate": engine.sample_rate,
-        "streaming": "segment waveforms: speak-easy planSegments + trimSilence port, one generate call, "
-                     "newline separated segments; not incremental within a segment",
-        "chunkPolicy": f"first chunk: first clause or {FIRST_CHUNK_MAX_WORDS} words of sentence 1, "
-                       "then whole sentences; each chunk trimmed, 150 ms gap appended",
-        "cancellation": "between segments (host stops pulling the generator); an active segment's "
-                        "MLX inference is not preempted",
-    }, args.temperature, args.timed, repeats, versions)
-    result.process["loadMs"] = round(load_ms, 3)
-    result.process["loadDetail"] = load_detail
-    if args.temperature == "warm":
-        warm = ft.now_ms()
-        engine.full(WARMUP_TEXT)
-        result.process["warmupMs"] = round(ft.now_ms() - warm, 3)
-
-    for item in texts:
-        for repeat in range(repeats):
-            run = result.start(item["id"], args.mode, repeat)
-            if args.mode == "stream":
-                pieces = []
-                for samples, line in engine.stream(item["text"]):
-                    run.chunk(samples.size / engine.sample_rate * 1000, line)
-                    pieces.append(samples)
-                clip = np.concatenate(pieces)
-            else:
-                clip = engine.full(item["text"])
-                run.chunk(clip.size / engine.sample_rate * 1000, item["text"])
-            if repeat == 0 and args.clips:
-                suffix = "--full" if args.mode == "full" else ""
-                ft.write_wav(args.clips / f"{item['id']}--{args.engine}{suffix}.wav", clip, engine.sample_rate)
-    result.write(args.json)
-    print(f"{args.engine} {args.temperature} {args.mode}: {len(result.runs)} runs, load {load_ms:.0f} ms -> {args.json}")
-
-
 if __name__ == "__main__":
-    main()
+    ft.run_engine(__doc__, ENGINES, KokoroMlx)

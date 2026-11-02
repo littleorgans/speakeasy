@@ -10,28 +10,38 @@ set -euo pipefail
 RUNS="${RUNS:-5}"
 OUT="${OUT:?set OUT to a scratch directory}"
 MODELS="${MODELS:-$HOME/Dev/LLM/DEV/helioy/speak-easy/models/tts}"
-ENGINES="${ENGINES:-piper-kristin piper-kristin-t4 kokoro-heart kokoro-heart-t4 kokoro-michael}"
+ENGINES="${ENGINES:-piper-kristin piper-kristin-t4 kokoro-heart kokoro-heart-t4 kokoro-michael kokoro-mlx-heart kokoro-mlx-michael pocket-18m-bill}"
+KOKORO_MLX_PY="${KOKORO_MLX_PY:-$TMPDIR/venv-kokoro-mlx/bin/python}"  # candidate envs: candidates/*/README.md
+POCKET_PY="${POCKET_PY:-$TMPDIR/venv-pocket/bin/python}"
 MODES="${MODES:-stream full}"
 COLD_TEXTS="${COLD_TEXTS:-status summary handover}"  # one per length class
 HERE=experiments/fast-tts
 TIMED=--timed; [ "${SMOKE:-0}" = 1 ] && TIMED=
 mkdir -p "$OUT"
 
+# render <engine> <flags>: one fresh process of the engine's script. Every script takes the same flags.
+render() {
+  local engine=$1
+  shift
+  case "$engine" in
+    kokoro-mlx-*) "$KOKORO_MLX_PY" -I "$HERE/candidates/kokoro-mlx/render.py" --engine "$engine" "$@" ;;
+    pocket-18m-*) "$POCKET_PY" -I "$HERE/candidates/pocket-18m/render.py" --engine "$engine" "$@" ;;
+    *) node "$HERE/render-baselines.ts" --engine "$engine" "$@" ;;
+  esac
+}
+
 for engine in $ENGINES; do
   for text in $COLD_TEXTS; do
     for i in $(seq 1 "$RUNS"); do
-      node "$HERE/render-baselines.ts" --root "$MODELS" --engine "$engine" --temperature cold --text "$text" \
+      render "$engine" --root "$MODELS" --temperature cold --text "$text" \
         $TIMED --json "$OUT/$engine--cold--$text--$i.json" >> "$OUT/$engine--cold.log" 2>&1
     done
   done
   for mode in $MODES; do
-    node "$HERE/render-baselines.ts" --root "$MODELS" --engine "$engine" --temperature warm --mode "$mode" \
+    render "$engine" --root "$MODELS" --temperature warm --mode "$mode" \
       --repeats "$RUNS" $TIMED ${CLIPS:+--clips "$CLIPS"} --json "$OUT/$engine--warm--$mode.json" \
       > "$OUT/$engine--warm--$mode.log" 2>&1
   done
 done
-
-# Candidate engines: add one block per engine here, same shape and file names
-# (<engine>--cold--<text>--<i>.json, <engine>--warm--<mode>.json), each a fresh process.
 
 echo "timed runs done: $OUT"

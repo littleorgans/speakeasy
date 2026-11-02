@@ -8,9 +8,10 @@ Adapted from the audio8-tts experiment (branch `tm/audio8-tts-research--75e44b1b
 
 - `CONTRACT.md`: metrics, endpoints, cold and warm, the result JSON schema, clip names.
 - `cohort.json`: ten agent to owner texts: five short, three medium, two long.
-- `fasttts.py`: Python helper for candidates (stdlib; `DevicePlayer` needs numpy and sounddevice). Records runs, captures the environment, validates and writes result JSON, writes WAV, and holds `derive`, the one implementation of RTF and underruns. `selftest` exercises it with a synthetic engine.
+- `fasttts.py`: Python helper for candidates (stdlib; `DevicePlayer` needs numpy and sounddevice). `run_engine` is the shared engine script runner (the flags of `render-baselines.ts`, load timing, warmup, cold and warm loops, clips): a candidate implements `Engine` and calls it. Below it, `Result` and `Run` record runs; the module also captures the environment, verifies weight digests, validates and writes result JSON, writes WAV, and holds `derive`, the one implementation of RTF and underruns. `selftest` exercises it with a synthetic engine.
 - `render-baselines.ts`: baselines through speak-easy's own path (`TtsSynth` behind `SherpaTextToSpeech`, sentence pipeline, Piper Plus frontend, `cpu` provider, no `onProgress`). Engines `piper-kristin`, `kokoro-heart`, `kokoro-michael` at the product default threads, plus `piper-kristin-t4` and `kokoro-heart-t4` at 4 threads; modes `stream` (sentence pipeline) and `full` (one synth call).
-- `run-timed.sh`: the timed pass, one fresh process per engine and temperature.
+- `candidates/`: one directory per candidate with its `render.py` and a README (pins, licences, setup, stream policy): `kokoro-mlx` (engines `kokoro-mlx-heart`, `kokoro-mlx-michael`) and `pocket-18m` (`pocket-18m-bill`).
+- `run-timed.sh`: the timed pass, one fresh process per engine and temperature; its `render` function maps each engine to its script.
 - `summarize.py`: validates and merges result files into a summary JSON and a markdown table.
 - `build_listen.py`: writes the owner listening page from the summary and the clips.
 
@@ -26,6 +27,8 @@ mkdir -p $ASSETS/clips
 # Only for DevicePlayer (playback start endpoint) or the selftest with --play:
 uv venv --python 3.13 $TMPDIR/ftts-env && uv pip install --python $TMPDIR/ftts-env/bin/python numpy sounddevice
 ```
+
+Candidates need their weights in `MODELS` and their Python envs, `$TMPDIR/venv-kokoro-mlx` and `$TMPDIR/venv-pocket` (override with `KOKORO_MLX_PY`, `POCKET_PY`); the commands are in each candidate README.
 
 ## Smoke (untimed, any time)
 
@@ -46,7 +49,7 @@ python3 -I experiments/fast-tts/summarize.py $ASSETS/results.json $TMPDIR/ftts-t
 python3 -I experiments/fast-tts/build_listen.py $ASSETS --summary $ASSETS/results.json --template $TEMPLATE
 ```
 
-Defaults: `RUNS=5`, engines `piper-kristin piper-kristin-t4 kokoro-heart kokoro-heart-t4 kokoro-michael`, modes `stream full`, cold texts `status summary handover` (one per length class). Engines without `-t4` use speak-easy's product default thread count (`DEFAULT_NUM_THREADS` in `synth.ts`, 2); `-t4` engines use 4 threads, and each label names its count. Estimate, from smoke RTFs and about 145 s of cohort audio per pass: about 45 minutes, up to an hour if the machine is busy. Kokoro dominates: each 2 thread Kokoro engine takes about 12 minutes for both modes.
+Defaults: `RUNS=5`, engines `piper-kristin piper-kristin-t4 kokoro-heart kokoro-heart-t4 kokoro-michael kokoro-mlx-heart kokoro-mlx-michael pocket-18m-bill`, modes `stream full`, cold texts `status summary handover` (one per length class). Engines without `-t4` use speak-easy's product default thread count (`DEFAULT_NUM_THREADS` in `synth.ts`, 2); `-t4` engines use 4 threads, and each label names its count. Estimate, from smoke RTFs and about 145 s of cohort audio per pass: about 45 minutes, up to an hour if the machine is busy. Kokoro dominates: each 2 thread Kokoro engine takes about 12 minutes for both modes. The three candidates add an estimated 15 minutes (their `RUNS=1` smoke took about 2 minutes together).
 
 ## Baseline first audio versus voice-out g2p-F10
 
