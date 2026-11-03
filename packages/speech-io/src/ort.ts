@@ -57,6 +57,6 @@ export {
   type SplitTdtModel,
 } from "./engines/ort-tdt-models.ts";
 export type { OrtBinding, OrtGraph, OrtTensor } from "./engines/ort-tdt-graphs.ts";
-export { loadOrtBinding } from "./engines/ort-tdt-runtime.ts";
+export { loadOrtBinding } from "./engines/ort-runtime.ts";
 
 export { MoonshineEngine } from "./engines/moonshine.ts";

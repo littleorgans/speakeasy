@@ -5,7 +5,7 @@ import { isGraniteModelId } from "./ort-granite-models.ts";
 import { resolveOrtModel, type OrtModelId } from "./ort-models.ts";
 import { OrtTdtEngine } from "./ort-tdt.ts";
 import { isOrtTdtModelId, type OrtTdtModelId } from "./ort-tdt-models.ts";
-import { loadOrtBinding } from "./ort-tdt-runtime.ts";
+import { loadOrtBinding } from "./ort-runtime.ts";
 import { OrtWhistleEngine } from "./ort-whistle.ts";
 import { loadWhistleRuntime } from "./ort-whistle-runtime.ts";
 import type { SilenceGateMode } from "./offline-session.ts";

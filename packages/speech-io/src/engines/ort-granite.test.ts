@@ -53,6 +53,7 @@ function fakeRuntime(script: (number[] | Error)[] = []): FakeRuntime {
           const ids = Array.from({ length: outFrames }, (_, frame) => next[frame] ?? 0);
           return logitsFor(ids, VOCAB_SIZE);
         },
+        async release() {},
       };
     },
   };

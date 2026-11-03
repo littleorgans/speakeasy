@@ -58,6 +58,7 @@ function fakeRuntime(
           if (result instanceof Error) throw result;
           return result;
         },
+        release: async () => {},
       };
     },
   };

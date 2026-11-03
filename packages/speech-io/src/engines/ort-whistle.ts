@@ -34,6 +34,8 @@ export type WhistleFiles = {
 
 export type WhistleRecognizer = {
   transcribe(pcm: Float32Array, language: string | undefined): Promise<TranscribeResult>;
+  /** Free the native sessions. */
+  release(): Promise<void>;
 };
 
 export type WhistleRuntime = {

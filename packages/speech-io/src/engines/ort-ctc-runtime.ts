@@ -1,5 +1,6 @@
 import * as ort from "onnxruntime-node";
 import type { CtcLogits } from "./ctc-decode.ts";
+import { createCpuSession, ORT_VERSION } from "./ort-runtime.ts";
 
 /**
  * onnxruntime-node wiring for single graph CTC models: features in, logits
@@ -11,6 +12,8 @@ import type { CtcLogits } from "./ctc-decode.ts";
 export type CtcGraph = {
   /** `features` is row major `[frames, featureDim]`, batch of one. */
   run(features: Float32Array, frames: number, featureDim: number): Promise<CtcLogits>;
+  /** Free the native session. */
+  release(): Promise<void>;
 };
 
 export type CtcRuntime = {
@@ -22,14 +25,9 @@ const INPUT = "input_features";
 const OUTPUT = "logits";
 
 export const ortCtcRuntime: CtcRuntime = {
-  version: ort.env.versions.common,
+  version: ORT_VERSION,
   async loadGraph(path, { threads }) {
-    const session = await ort.InferenceSession.create(path, {
-      executionProviders: ["cpu"],
-      intraOpNumThreads: threads,
-      graphOptimizationLevel: "all",
-      logSeverityLevel: 3,
-    });
+    const session = await createCpuSession(path, threads, "tuned");
     return {
       async run(features, frames, featureDim) {
         const input = new ort.Tensor("float32", features, [1, frames, featureDim]);
@@ -40,6 +38,7 @@ export const ortCtcRuntime: CtcRuntime = {
         }
         return { data: logits.data as Float32Array, frames: outFrames, vocab };
       },
+      release: () => session.release(),
     };
   },
 };
