@@ -297,6 +297,22 @@ export const LOCAL_TTS_MODELS = {
     ],
     attribution: ["README.md"],
   },
+  "phonon-40m": {
+    name: "phonon-40m-en-bc7e8ae7",
+    note: "Phonon 40M English, gradium/phonon-40m-en@bc7e8ae7, default voice, 24000 Hz",
+    family: "worker",
+    sampleRate: 24_000,
+    numSpeakers: 1,
+    hub: { repo: "gradium/phonon-40m-en", revision: "bc7e8ae7e543a7a3e4604753e42fbda76ddf0781" },
+    files: [
+      { name: "config.json", bytes: 4_634, sha256: "3e89e90b9e7ae5a74c6b4e694960c37fd2ec85906d84adfcc1440c64307aa4f1" },
+      { name: "model.safetensors", bytes: 121_713_400, sha256: "dcd22ffd4944e7dcce19762f2a34fa6e57b70ed5307b63784ec234656975daad" },
+      { name: "tokenizer.json", bytes: 277_967, sha256: "691a00068fa7b989f2f3e5ae5daa2d1a5bb319f2d5360deafcfb19a8bb6e7936" },
+      { name: "default-voice.safetensors", bytes: 256_136, sha256: "0de1098d1051686a138d068e83ff09deb5053328bc74ec9541a1fdb90bfc24da" },
+      { name: "README.md", bytes: 10_535, sha256: "8fd1d3c26f9fd21f8f7bda3556c589d80bd9b69b6d746ac9f5e02366b509fc63" },
+    ],
+    attribution: ["README.md"],
+  },
   "qwen3-tts-0.6b": {
     name: "qwen3-tts-0.6b-customvoice-q8-fd9df936",
     note: "Qwen3 TTS 12Hz 0.6B CustomVoice Q8_0 GGUF, sakasegawa/Qwen3-TTS-12Hz-0.6B-CustomVoice-GGUF@fd9df936, 24000 Hz",

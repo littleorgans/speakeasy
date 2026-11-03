@@ -18,7 +18,7 @@ import time
 from pins import attest_snapshot, pinned_files, runtime_identity
 
 
-VOICES = {"phonon-31m": "default"}
+VOICES = {"phonon-31m": "default", "phonon-40m": "default"}
 PYTHON_VERSION = "3.12.5"
 RUNTIME_VERSIONS = {"ptts": "0.6.0", "numpy": "2.5.4"}
 SAMPLE_RATE = 24_000

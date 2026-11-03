@@ -102,6 +102,18 @@ export const LOCAL_OUTPUT_MODELS = [
     voices: [{ id: "default", label: "Default", languages: ["en"], speakerId: 0 }],
   },
   {
+    id: "phonon-40m",
+    label: "Phonon 40M English",
+    provider: { kind: "local" },
+    runtime: "ptts 0.6.0 (Rust), CPU, f32",
+    defaultVoice: "default",
+    sampleRate: 24_000,
+    streaming: "sentence",
+    licence: "CC BY-NC 4.0 weights, tokenizer and voice; ptts code MIT or Apache 2.0.",
+    terms: "Noncommercial use only, credit required; no impersonation or speaker deception; voice cloning requires consent; disclose synthetic speech where relevant",
+    voices: [{ id: "default", label: "Default", languages: ["en"], speakerId: 0 }],
+  },
+  {
     id: "qwen3-tts-0.6b",
     label: "Qwen3 TTS 0.6B",
     provider: { kind: "local" },
