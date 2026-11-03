@@ -159,3 +159,38 @@ export type Releasable = { release(): Promise<void> };
 export async function releaseAll(...parts: Releasable[]): Promise<void> {
   await Promise.all(parts.map((part) => part.release()));
 }
+
+/**
+ * Await loads started together, as Promise.all does. When any fails, wait
+ * for the rest to settle, release every loaded part that has `release()`,
+ * then reject with the first failure in time, so a partial load leaks no
+ * native session. Plain reads (vocabularies, filters) load alongside.
+ */
+export async function loadAll<T extends readonly unknown[] | []>(
+  loads: T,
+): Promise<{ -readonly [K in keyof T]: Awaited<T[K]> }> {
+  let failure: { error: unknown } | undefined;
+  const outcomes = await Promise.allSettled(
+    loads.map((load) =>
+      Promise.resolve(load).catch((error: unknown) => {
+        failure ??= { error };
+        throw error;
+      }),
+    ),
+  );
+  if (!failure) {
+    return outcomes.map((outcome) => (outcome as PromiseFulfilledResult<unknown>).value) as {
+      -readonly [K in keyof T]: Awaited<T[K]>;
+    };
+  }
+  await Promise.allSettled(
+    outcomes.flatMap((outcome) =>
+      outcome.status === "fulfilled" && isReleasable(outcome.value) ? [outcome.value.release()] : [],
+    ),
+  );
+  throw failure.error;
+}
+
+function isReleasable(value: unknown): value is Releasable {
+  return typeof (value as Partial<Releasable> | null | undefined)?.release === "function";
+}

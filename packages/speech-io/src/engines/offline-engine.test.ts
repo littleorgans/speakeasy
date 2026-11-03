@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { test } from "node:test";
 import type { FinalEvent, STTErrorEvent, STTSession } from "../contract.ts";
-import { Lazy, OfflineLifecycle, type OfflineAdapter } from "./offline-engine.ts";
+import { Lazy, loadAll, OfflineLifecycle, type OfflineAdapter } from "./offline-engine.ts";
 
 /** The lifecycle over a fake adapter whose loads are named "model 1", "model 2", ... */
 
@@ -211,4 +211,35 @@ test("Lazy shares one load, retries after a failure, and detaches on take", asyn
   assert.equal(await lazy.take(), 2);
   assert.equal(lazy.take(), undefined);
   assert.equal(await lazy.get(), 3);
+});
+
+test("loadAll answers every load in order", async () => {
+  assert.deepEqual(await loadAll([Promise.resolve(1), Promise.resolve("vocabulary")]), [1, "vocabulary"]);
+});
+
+test("loadAll waits for every load, releases the loaded parts, then rejects with the first failure", async () => {
+  const released: string[] = [];
+  const part = (name: string) => ({
+    release: async () => {
+      released.push(name);
+    },
+  });
+  const late = deferred<never>();
+  const pending = deferred<ReturnType<typeof part>>();
+  const loading = assert.rejects(
+    loadAll([
+      Promise.resolve(part("a")),
+      late.promise,
+      Promise.resolve("vocabulary"),
+      pending.promise,
+      Promise.reject(new Error("first")),
+    ]),
+    /first/,
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(released, []);
+  late.reject(new Error("second"));
+  pending.resolve(part("b"));
+  await loading;
+  assert.deepEqual(released.sort(), ["a", "b"]);
 });

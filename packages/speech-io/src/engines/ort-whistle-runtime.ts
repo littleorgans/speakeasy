@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import * as ort from "onnxruntime-node";
-import { releaseAll } from "./offline-engine.ts";
+import { loadAll, releaseAll } from "./offline-engine.ts";
 import { createCpuSession, ORT_VERSION } from "./ort-runtime.ts";
 import type { WhistleFiles, WhistleRecognizer, WhistleRuntime } from "./ort-whistle.ts";
 import { OrtBackend } from "./vendor/whistle/backend.js";
@@ -39,7 +39,7 @@ async function createWhistleRecognizer(
     ),
     engram: new Engram(pack),
   };
-  const [encoder, decoder] = await Promise.all([
+  const [encoder, decoder] = await loadAll([
     createCpuSession(files.encoder, threads, "reference"),
     createCpuSession(files.decoder, threads, "reference"),
   ]);

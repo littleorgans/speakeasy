@@ -33,6 +33,8 @@ type Fake = {
   steps: Float32Array[];
   created: string[];
   released: string[];
+  /** A graph file whose next session creation fails. */
+  failCreate?: string;
   /** Intra op threads per graph file. */
   threads: Record<string, number>;
   failure?: Error;
@@ -120,6 +122,10 @@ function fakeBinding(fake: Fake): OrtBinding {
   return {
     version: "fake",
     createSession: async (path, { threads }) => {
+      if (fake.failCreate === basename(path)) {
+        fake.failCreate = undefined;
+        throw new Error("session failed");
+      }
       fake.created.push(basename(path));
       fake.threads[basename(path)] = threads;
       const run = fakeGraph(basename(path), fake);
@@ -317,4 +323,18 @@ test("release frees every graph once and the next open loads them again", async 
   assert.deepEqual(fake.released.sort(), ["decoder.onnx", "encoder.onnx", "frontend.onnx", "joint.onnx"]);
   await engine.open();
   assert.equal(fake.created.length, 8);
+});
+
+test("a failed graph load releases the graphs it built, and the next open loads them all", async () => {
+  const id = "en-phonon-2-int8";
+  const fake: Fake = { runs: {}, steps: [], created: [], released: [], threads: {}, failCreate: "encoder-model.int8.onnx" };
+  const engine = new OrtTdtEngine({ model: id, modelRoot: await seededRoot(id), binding: fakeBinding(fake) });
+  await assert.rejects(engine.open(), /session failed/);
+  assert.deepEqual(fake.released.sort(), ["decoder_joint-model.onnx", "preprocessor-model.onnx"]);
+  await engine.open();
+  assert.deepEqual(fake.created.slice(2).sort(), [
+    "decoder_joint-model.onnx",
+    "encoder-model.int8.onnx",
+    "preprocessor-model.onnx",
+  ]);
 });
