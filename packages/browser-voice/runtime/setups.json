@@ -279,7 +279,7 @@
       "id": "hex/vocabulary",
       "label": "Hex Unified with word list",
       "card": {
-        "runtime": "transcribe.cpp 7045d1c, Metal GPU, whole take, word list Claude, GPT, Grok, Codex, TM, whoami",
+        "runtime": "transcribe.cpp 7045d1c, Metal GPU, word list Claude, GPT, Grok, Codex, TM, whoami",
         "transcript": "final",
         "terms": "NVIDIA Open Model License"
       },
@@ -325,7 +325,7 @@
       "id": "cohere/transcribe",
       "label": "Cohere Transcribe",
       "card": {
-        "runtime": "transcribe.cpp 7045d1c, Metal GPU, whole take",
+        "runtime": "transcribe.cpp 7045d1c, Metal GPU",
         "transcript": "final"
       },
       "model": "handy-computer/cohere-transcribe-03-2026-gguf",
