@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -100,6 +101,22 @@ test("offline snapshots phrases and score, and caches successful preparation", a
   await writeFile(tokenFile, "malformed");
   await engine.open();
   assert.equal(files[0]?.words, "a\n");
+});
+
+test("offline release drops the recognizer; the next open constructs again from the kept preparation", async () => {
+  const { engine, configs, files, tokenFile, streams } = await setup({ phrases: ["a"] });
+  assert.ok(engine instanceof SherpaOfflineEngine);
+  const stale = await engine.open();
+  await engine.release();
+  await writeFile(tokenFile, "malformed");
+  await engine.open();
+  assert.equal(configs.length, 2);
+  assert.deepEqual(files.map(({ words }) => words), ["a\n", "a\n"]);
+  stale.pushAudio(new Float32Array(160));
+  stale.flush();
+  const [error] = (await once(stale, "error")) as [{ err: unknown }];
+  assert.match(String(error.err), /SherpaOfflineEngine: model released/);
+  assert.equal(streams(), 0);
 });
 
 test("offline snapshots recreate an absent temp parent and retain private cleanup", async (t) => {

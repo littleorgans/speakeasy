@@ -2,10 +2,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assertSampleRate } from "../audio/pcm.js";
 import type { STTConfig, STTSession, VoiceToText } from "../contract.ts";
+import { Lazy, OfflineLifecycle } from "./offline-engine.ts";
 import { prepareOfflineHotwords, snapshotHotwords, type OfflineHotwords } from "./offline-hotwords.ts";
-import { BufferedOfflineSession, type SilenceGate } from "./offline-session.ts";
 import { resultDetail } from "./result.ts";
 import {
   SHERPA_FEATURE_DIM,
@@ -35,10 +34,10 @@ import { resolveSherpaModel, type OfflineSherpaModel } from "./sherpa-models.ts"
 export class SherpaOfflineEngine implements VoiceToText {
   readonly #asset: SherpaModelAsset<OfflineSherpaModel>;
   readonly #binding: SherpaBinding;
-  readonly #silenceGate: SilenceGate | undefined;
   readonly #hotwords: OfflineHotwords | undefined;
-  #preparation: Promise<string | undefined> | undefined;
-  #recognizer: OfflineRecognizer | undefined;
+  /** Assets and hotword vocabulary, kept for the engine's life once they succeed. */
+  readonly #preparation = new Lazy(() => this.#preflight());
+  readonly #lifecycle: OfflineLifecycle<string | undefined, OfflineRecognizer>;
 
   constructor(options: SherpaEngineOptions) {
     const model = resolveSherpaModel(options.model);
@@ -49,11 +48,25 @@ export class SherpaOfflineEngine implements VoiceToText {
     }
     this.#asset = new SherpaModelAsset(model, options);
     this.#binding = options.binding;
-    this.#silenceGate = options.silenceGate;
     this.#hotwords = snapshotHotwords(options.hotwords);
     if (this.#hotwords && (model.family !== "nemo-transducer" || !model.hotwordTokenizer)) {
       throw new Error(`${model.name}: unsupported offline hotword tokenizer`);
     }
+    // One recognizer serves every session; offline streams are per decode.
+    this.#lifecycle = new OfflineLifecycle({
+      name: "SherpaOfflineEngine",
+      maxAudioMs: model.maxAudioMs,
+      silenceGate: options.silenceGate,
+      // Construction waits for open(): browser-voice times it apart from processing.
+      prepare: "preflight",
+      preflight: () => this.#preparation.get(),
+      load: (vocabulary) => this.#createRecognizer(vocabulary),
+      decoder: (recognizer) => async (audio) => {
+        const stream = recognizer.createStream();
+        stream.acceptWaveform({ samples: audio, sampleRate: SHERPA_SAMPLE_RATE });
+        return resultDetail(await recognizer.decodeAsync(stream));
+      },
+    });
   }
 
   get label(): string {
@@ -68,34 +81,20 @@ export class SherpaOfflineEngine implements VoiceToText {
     return SHERPA_NUM_THREADS;
   }
 
-  async prepare(): Promise<void> {
-    await this.#prepare();
+  prepare(): Promise<void> {
+    return this.#lifecycle.prepare();
   }
 
-  async open(config?: STTConfig): Promise<STTSession> {
-    assertSampleRate("SherpaOfflineEngine", config);
-    const vocabulary = await this.#prepare();
-    // One recognizer serves every session; offline streams are per decode.
-    this.#recognizer ??= this.#createRecognizer(vocabulary);
-    const recognizer = this.#recognizer;
-    const maxSamples = (this.model.maxAudioMs * SHERPA_SAMPLE_RATE) / 1_000;
-    return new BufferedOfflineSession(
-      maxSamples,
-      async (audio) => {
-        const stream = recognizer.createStream();
-        stream.acceptWaveform({ samples: audio, sampleRate: SHERPA_SAMPLE_RATE });
-        return resultDetail(await recognizer.decodeAsync(stream));
-      },
-      this.#silenceGate,
-    );
+  open(config?: STTConfig): Promise<STTSession> {
+    return this.#lifecycle.open(config);
   }
 
-  #prepare(): Promise<string | undefined> {
-    this.#preparation ??= this.#preflight().catch((error: unknown) => {
-      this.#preparation = undefined;
-      throw error;
-    });
-    return this.#preparation;
+  /**
+   * Drop the recognizer once its decodes finish; a later open() constructs
+   * another from the kept preparation. sherpa exposes no native free.
+   */
+  release(): Promise<void> {
+    return this.#lifecycle.release();
   }
 
   async #preflight(): Promise<string | undefined> {
