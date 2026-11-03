@@ -13,8 +13,8 @@ import {
 import { OfflineLifecycle } from "./offline-engine.ts";
 import type { SilenceGate } from "./offline-session.ts";
 import type { CtcGraph, CtcRuntime } from "./ort-ctc-runtime.ts";
+import { resolveModelPaths } from "./model.ts";
 import {
-  resolveGraniteFiles,
   resolveGraniteModel,
   type GraniteCtcModel,
   type GraniteModelId,
@@ -59,7 +59,7 @@ export class OrtGraniteEngine implements VoiceToText {
 
   constructor(options: OrtGraniteEngineOptions) {
     this.model = resolveGraniteModel(options.model);
-    this.#files = resolveGraniteFiles(this.model, options.modelRoot);
+    this.#files = resolveModelPaths(this.model, options.modelRoot);
     this.#runtime = options.runtime;
     // One graph serves every session; a failed load is retried on next use.
     this.#lifecycle = new OfflineLifecycle({
@@ -97,10 +97,10 @@ export class OrtGraniteEngine implements VoiceToText {
 
   async #load(): Promise<LoadedModel> {
     const vocab = ByteLevelVocab.fromTokenizerJson(
-      await readFile(join(this.#files.dir, this.model.tokenizer.name), "utf8"),
+      await readFile(join(this.#files.dir, this.model.tokenizer), "utf8"),
       this.model.blankToken,
     );
-    const graph = await this.#runtime.loadGraph(join(this.#files.dir, this.model.graph.name), {
+    const graph = await this.#runtime.loadGraph(join(this.#files.dir, this.model.graph), {
       threads: this.threads,
     });
     return { graph, vocab };

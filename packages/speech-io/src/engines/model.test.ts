@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
+import {
+  CC_BY_4_0,
+  downloadBytes,
+  lookupModel,
+  pinned,
+  resolveModelPaths,
+} from "./model.ts";
 import type { SilenceGatePolicy } from "./offline-session.ts";
-import { resolveGraniteFiles } from "./ort-granite-models.ts";
 import { ORT_MODELS, type OrtModel } from "./ort-models.ts";
-import { resolveOrtTdtPaths } from "./ort-tdt-models.ts";
-import { resolveWhistleFiles } from "./ort-whistle-models.ts";
-import { resolveModelPaths, SHERPA_MODELS, type SherpaModel } from "./sherpa-models.ts";
+import { SHERPA_MODELS, type SherpaModel } from "./sherpa-models.ts";
 
 /**
  * Every registry id, pinned: the sha256 of canonical JSON (keys sorted,
@@ -35,20 +39,6 @@ const EXPECTED: Record<string, string> = {
   "en-parakeet-redux": "5da926b1124119142bc41f1f188ec240539f12d445b25c96638d16a0abc46740",
 };
 
-function resolved(model: SherpaModel | OrtModel) {
-  if (!("family" in model)) return resolveModelPaths(model, ROOT);
-  switch (model.family) {
-    case "granite-ctc":
-      return resolveGraniteFiles(model, ROOT);
-    case "whistle":
-      return resolveWhistleFiles(model, ROOT);
-    case "parakeet-tdt":
-      return resolveOrtTdtPaths(model, ROOT);
-    default:
-      return resolveModelPaths(model, ROOT);
-  }
-}
-
 function canonical(value: unknown): string {
   return JSON.stringify(value, (_key, inner: unknown) =>
     inner !== null && typeof inner === "object" && !Array.isArray(inner)
@@ -61,7 +51,7 @@ function pinnedView(model: SherpaModel | OrtModel): string {
   // Streaming descriptors have no gate and sherpa ones no threads.
   const optional = model as { silenceGate?: SilenceGatePolicy; threads?: number };
   return canonical({
-    asset: resolved(model),
+    asset: resolveModelPaths(model, ROOT),
     licence: model.licence,
     maxAudioMs: model.maxAudioMs,
     silenceGate: optional.silenceGate ?? null,
@@ -77,4 +67,41 @@ test("every model id resolves to its pinned asset and metadata", () => {
     const view = pinnedView(model);
     assert.equal(createHash("sha256").update(view).digest("hex"), EXPECTED[id], `${id}: ${view}`);
   }
+});
+
+const BASE = "https://example.test/org/repo/resolve/0123456";
+
+test("a pinned file's URL path defaults to its name", () => {
+  assert.deepEqual(pinned(BASE, "tokens.txt", 10, "ab"), {
+    name: "tokens.txt",
+    url: `${BASE}/tokens.txt`,
+    sha256: "ab",
+    bytes: 10,
+  });
+  assert.equal(pinned(BASE, "model.onnx", 10, "ab", "onnx/model.onnx").url, `${BASE}/onnx/model.onnx`);
+});
+
+const common = { name: "demo-model", note: "", licence: { ...CC_BY_4_0, attribution: null, source: "" }, maxAudioMs: 1 };
+const fileSet = { ...common, files: [pinned(BASE, "a.onnx", 3, "aa"), pinned(BASE, "b.txt", 4, "bb")] };
+const archived = { ...common, archive: { url: `${BASE}/demo-model.tar.bz2`, sha256: "cc", bytes: 9 } };
+
+test("both sources resolve under the root and report their download size", () => {
+  assert.deepEqual(resolveModelPaths(fileSet, "/data"), { dir: "/data/demo-model", files: fileSet.files });
+  assert.deepEqual(resolveModelPaths(archived, "/data"), {
+    url: archived.archive.url,
+    sha256: "cc",
+    archive: "/data/demo-model.tar.bz2",
+    dir: "/data/demo-model",
+  });
+  assert.equal(downloadBytes(fileSet), 7);
+  assert.equal(downloadBytes(archived), 9);
+});
+
+test("lookup names the registry and its ids; prototype keys are not ids", () => {
+  const registry = { "demo-a": fileSet, "demo-b": archived };
+  assert.equal(lookupModel(registry, "demo-b", "demo"), archived);
+  assert.throws(() => lookupModel(registry, "nope", "demo"), {
+    message: 'Unknown demo model "nope"; available: demo-a, demo-b',
+  });
+  assert.throws(() => lookupModel(registry, "toString", "demo"), /Unknown demo model "toString"/);
 });

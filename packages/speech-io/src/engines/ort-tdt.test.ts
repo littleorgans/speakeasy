@@ -6,15 +6,12 @@ import { basename, join } from "node:path";
 import { after, test } from "node:test";
 import type { EmptyEvent, FinalEvent } from "../contract.ts";
 import { COMPLETE_MARKER, completeMarkerValue } from "./assets.ts";
+import { resolveModelPaths } from "./model.ts";
 import type { OrtBinding, OrtGraph, OrtTensor } from "./ort-tdt-graphs.ts";
 import type { SilenceGate } from "./offline-session.ts";
 import { ORT_THREADS } from "./ort-models.ts";
 import { OrtTdtEngine } from "./ort-tdt.ts";
-import {
-  ORT_TDT_MODELS,
-  resolveOrtTdtPaths,
-  type OrtTdtModelId,
-} from "./ort-tdt-models.ts";
+import { ORT_TDT_MODELS, type OrtTdtModelId } from "./ort-tdt-models.ts";
 
 /**
  * OrtTdtEngine over fake onnxruntime sessions: each fake graph answers with
@@ -156,7 +153,7 @@ async function seededRoot(id: OrtTdtModelId): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "speak-easy-ort-tdt-"));
   after(() => rm(root, { recursive: true, force: true }));
   const model = ORT_TDT_MODELS[id];
-  const paths = resolveOrtTdtPaths(model, root);
+  const paths = resolveModelPaths(model, root);
   await mkdir(paths.dir, { recursive: true });
   await writeFile(join(paths.dir, COMPLETE_MARKER), completeMarkerValue(paths));
   const entries = Object.entries(PIECES);

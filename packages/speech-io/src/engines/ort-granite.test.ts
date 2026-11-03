@@ -7,15 +7,12 @@ import { after, test } from "node:test";
 import type { EmptyEvent, FinalEvent } from "../contract.ts";
 import { COMPLETE_MARKER, completeMarkerValue } from "./assets.ts";
 import { logitsFor, TINY_TOKENIZER } from "./ctc-test-support.ts";
+import { resolveModelPaths } from "./model.ts";
 import type { CtcRuntime } from "./ort-ctc-runtime.ts";
 import { OrtGraniteEngine } from "./ort-granite.ts";
 import type { SilenceGate } from "./offline-session.ts";
 import { ORT_THREADS } from "./ort-models.ts";
-import {
-  GRANITE_MODELS,
-  resolveGraniteFiles,
-  type GraniteModelId,
-} from "./ort-granite-models.ts";
+import { GRANITE_MODELS, type GraniteModelId } from "./ort-granite-models.ts";
 
 const MODEL: GraniteModelId = "en-granite-speech-5.0-470m-turboctc-int8";
 const VOCAB_SIZE = 7;
@@ -68,9 +65,9 @@ function fakeRuntime(script: (number[] | Error)[] = []): FakeRuntime {
 async function seededRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "speak-easy-granite-"));
   after(() => rm(root, { recursive: true, force: true }));
-  const spec = resolveGraniteFiles(GRANITE_MODELS[MODEL], root);
+  const spec = resolveModelPaths(GRANITE_MODELS[MODEL], root);
   await mkdir(spec.dir, { recursive: true });
-  await writeFile(join(spec.dir, GRANITE_MODELS[MODEL].tokenizer.name), TINY_TOKENIZER);
+  await writeFile(join(spec.dir, GRANITE_MODELS[MODEL].tokenizer), TINY_TOKENIZER);
   await writeFile(join(spec.dir, COMPLETE_MARKER), completeMarkerValue(spec));
   return root;
 }

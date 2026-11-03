@@ -40,14 +40,16 @@ export type {
 export { resultDetail, resultText, type ResultDetail } from "./engines/result.ts";
 
 export {
-  isSherpaModelId,
   resolveModelPaths,
-  resolveSherpaModel,
-  SHERPA_MODELS,
-  type CanaryModel,
   type ModelArchive,
   type ModelFile,
   type ModelLicence,
+} from "./engines/model.ts";
+export {
+  isSherpaModelId,
+  resolveSherpaModel,
+  SHERPA_MODELS,
+  type CanaryModel,
   type MoonshineModel,
   type NemoTransducerModel,
   type OfflineSherpaModel,

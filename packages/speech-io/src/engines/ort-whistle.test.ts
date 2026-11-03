@@ -6,17 +6,14 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import type { EmptyEvent, FinalEvent, STTErrorEvent } from "../contract.ts";
 import { COMPLETE_MARKER, completeMarkerValue } from "./assets.ts";
+import { resolveModelPaths } from "./model.ts";
 import {
   OrtWhistleEngine,
   whistleDetail,
   type WhistleFiles,
   type WhistleRuntime,
 } from "./ort-whistle.ts";
-import {
-  ORT_WHISTLE_MODELS,
-  resolveWhistleFiles,
-  type WhistleModelId,
-} from "./ort-whistle-models.ts";
+import { ORT_WHISTLE_MODELS, type WhistleModelId } from "./ort-whistle-models.ts";
 import type { SilenceGate } from "./offline-session.ts";
 import { ORT_THREADS } from "./ort-models.ts";
 import { LANGS, type TranscribeResult } from "./vendor/whistle/whistle.js";
@@ -76,7 +73,7 @@ function said(text: string, words: TranscribeResult["words"] = []): TranscribeRe
 async function seededRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "speak-easy-ort-"));
   after(() => rm(root, { recursive: true, force: true }));
-  const spec = resolveWhistleFiles(ORT_WHISTLE_MODELS[MODEL], root);
+  const spec = resolveModelPaths(ORT_WHISTLE_MODELS[MODEL], root);
   await mkdir(spec.dir, { recursive: true });
   await writeFile(join(spec.dir, COMPLETE_MARKER), completeMarkerValue(spec));
   return root;

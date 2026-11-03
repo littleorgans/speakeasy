@@ -7,7 +7,8 @@ import { test } from "node:test";
 import { createSherpaEngine } from "./sherpa-factory.ts";
 import { SherpaOfflineEngine } from "./sherpa-offline.ts";
 import type { Hotwords, OfflineRecognizerConfig } from "./sherpa-api.ts";
-import { resolveModelPaths, SHERPA_MODELS, type SherpaModelId } from "./sherpa-models.ts";
+import { resolveModelPaths } from "./model.ts";
+import { SHERPA_MODELS, type SherpaModelId } from "./sherpa-models.ts";
 import { bindingWith, seededModelRoot } from "./test-support.ts";
 
 const ULTRA = "en-parakeet-ultra-int8";

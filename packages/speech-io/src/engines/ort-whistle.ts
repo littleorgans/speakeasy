@@ -4,8 +4,8 @@ import { ensureAsset, type FileSetSpec } from "./assets.ts";
 import { OfflineLifecycle } from "./offline-engine.ts";
 import type { SilenceGate } from "./offline-session.ts";
 import { resultText, type ResultDetail } from "./result.ts";
+import { resolveModelPaths } from "./model.ts";
 import {
-  resolveWhistleFiles,
   resolveWhistleModel,
   type WhistleModel,
   type WhistleModelId,
@@ -63,7 +63,7 @@ export class OrtWhistleEngine implements VoiceToText {
 
   constructor(options: OrtWhistleEngineOptions) {
     this.model = resolveWhistleModel(options.model);
-    this.paths = resolveWhistleFiles(this.model, options.modelRoot);
+    this.paths = resolveModelPaths(this.model, options.modelRoot);
     this.#runtime = options.runtime;
     // A failed load is retried on the next open.
     this.#lifecycle = new OfflineLifecycle({

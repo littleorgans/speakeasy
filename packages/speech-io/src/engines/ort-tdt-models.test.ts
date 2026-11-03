@@ -1,11 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  downloadBytes,
-  ORT_TDT_MODELS,
-  resolveOrtTdtModel,
-  type OrtTdtModel,
-} from "./ort-tdt-models.ts";
+import { downloadBytes } from "./model.ts";
+import { ORT_TDT_MODELS, resolveOrtTdtModel, type OrtTdtModel } from "./ort-tdt-models.ts";
 
 const REVISION_URL = /^https:\/\/huggingface\.co\/[^/]+\/[^/]+\/resolve\/[0-9a-f]{40}\//;
 

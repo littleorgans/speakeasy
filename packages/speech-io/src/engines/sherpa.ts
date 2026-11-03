@@ -23,8 +23,8 @@ import type {
   OnlineStream,
   SherpaBinding,
 } from "./sherpa-api.ts";
+import { resolveModelPaths } from "./model.ts";
 import {
-  resolveModelPaths,
   resolveSherpaModel,
   type SherpaModel,
   type SherpaModelId,

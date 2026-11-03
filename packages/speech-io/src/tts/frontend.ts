@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { TtsRequest } from "sherpa-onnx-node";
 import { ensureAsset, type FileSetSpec } from "../engines/assets.ts";
-import type { ModelLicence } from "../engines/sherpa-models.ts";
+import type { ModelLicence } from "../engines/model.ts";
 import { TTS_ROOT, verifyTtsFiles, type TtsModelFamily } from "./models.ts";
 import { EnglishG2P, normalizeNumbers } from "./vendor/piper-plus-g2p/en/index.js";
 

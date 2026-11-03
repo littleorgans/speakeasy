@@ -1,11 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  isSherpaModelId,
-  resolveModelPaths,
-  SHERPA_MODELS,
-  type SherpaModel,
-} from "./sherpa-models.ts";
+import { resolveModelPaths } from "./model.ts";
+import { isSherpaModelId, SHERPA_MODELS, type SherpaModel } from "./sherpa-models.ts";
 
 const entries = Object.entries(SHERPA_MODELS) as [string, SherpaModel][];
 

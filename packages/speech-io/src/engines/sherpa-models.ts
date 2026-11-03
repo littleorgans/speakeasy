@@ -1,6 +1,12 @@
-import { join } from "node:path";
-import type { AssetFile, AssetSpec, FileSetSpec } from "./assets.ts";
-import type { SilenceGatePolicy } from "./offline-session.ts";
+import {
+  APACHE_2_0,
+  CC_BY_4_0,
+  hasModelId,
+  lookupModel,
+  pinned,
+  type ModelCommon,
+  type OfflineCommon,
+} from "./model.ts";
 
 /**
  * Registry of sherpa-onnx STT models: streaming Zipformer transducers for
@@ -22,44 +28,6 @@ import type { SilenceGatePolicy } from "./offline-session.ts";
 
 const ASR_MODELS_BASE =
   "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models";
-
-export type ModelArchive = {
-  url: string;
-  sha256: string;
-  bytes: number;
-};
-
-export type ModelFile = AssetFile & { bytes: number };
-
-/** Where a model downloads from: one release tarball, or pinned loose files. */
-type ModelSource = { archive: ModelArchive } | { files: readonly ModelFile[] };
-
-export type ModelLicence = {
-  /** SPDX id, or a LicenseRef for unlisted terms. */
-  id: string;
-  terms: string;
-  commercialUse: boolean;
-  redistribution: boolean;
-  /** Credit line a consumer must show, or null when none is required. */
-  attribution: string | null;
-  source: string;
-};
-
-type ModelCommon = ModelSource & {
-  /** Release tarball basename; doubles as the extracted directory name. */
-  name: string;
-  /** Human note: architecture / training data / param scale. */
-  note: string;
-  licence: ModelLicence;
-  /** Longest utterance a host should hold open for this model. */
-  maxAudioMs: number;
-};
-
-type OfflineCommon = ModelCommon & {
-  kind: "offline";
-  /** Opt in to the silence gate (`offline-session.ts::SilenceGate`). */
-  silenceGate?: SilenceGatePolicy;
-};
 
 type TransducerFiles = {
   encoder: string;
@@ -122,23 +90,6 @@ export type SherpaModel = StreamingSherpaModel | OfflineSherpaModel;
 
 const STREAMING_MAX_AUDIO_MS = 120_000;
 
-const APACHE_2_0 = {
-  id: "Apache-2.0",
-  terms:
-    "Apache License 2.0: use, modify and redistribute; keep the licence and notices when redistributing.",
-  commercialUse: true,
-  redistribution: true,
-  attribution: null,
-} as const;
-
-const CC_BY_4_0 = {
-  id: "CC-BY-4.0",
-  terms:
-    "Creative Commons Attribution 4.0: use, adapt and redistribute, including commercially, with attribution.",
-  commercialUse: true,
-  redistribution: true,
-} as const;
-
 const PARAKEET_ULTRA_BASE =
   "https://huggingface.co/tpmaerk/parakeet-ultra-sherpa-onnx-int8/resolve/b86784a3a5356cbd126f710b61cd90c5fe5898f1";
 
@@ -198,30 +149,10 @@ export const SHERPA_MODELS = {
     name: "parakeet-ultra-sherpa-onnx-int8",
     note: "Moondream Parakeet Ultra (Parakeet TDT 0.6B v3 fine tune), sherpa export, offline, int8, punctuation and case",
     files: [
-      {
-        name: "encoder.int8.onnx",
-        url: `${PARAKEET_ULTRA_BASE}/encoder.int8.onnx`,
-        sha256: "f4d06712d32431b1718eceba2153c314ac4425e8fe708a3534f5e56c5ad53697", // publisher digest
-        bytes: 652_282_347,
-      },
-      {
-        name: "decoder.int8.onnx",
-        url: `${PARAKEET_ULTRA_BASE}/decoder.int8.onnx`,
-        sha256: "94373c6405c8149d1c9d1e9862514e0e3e88dab1c7de18fac9d5df9c6ba5efdd", // publisher digest
-        bytes: 11_845_275,
-      },
-      {
-        name: "joiner.int8.onnx",
-        url: `${PARAKEET_ULTRA_BASE}/joiner.int8.onnx`,
-        sha256: "8a71aaccfdba3d451775507a889afd2257d2e754463fd81095a8c8f290f924c2", // publisher digest
-        bytes: 6_355_277,
-      },
-      {
-        name: "tokens.txt",
-        url: `${PARAKEET_ULTRA_BASE}/tokens.txt`,
-        sha256: "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d", // publisher digest (card)
-        bytes: 93_939,
-      },
+      pinned(PARAKEET_ULTRA_BASE, "encoder.int8.onnx", 652_282_347, "f4d06712d32431b1718eceba2153c314ac4425e8fe708a3534f5e56c5ad53697"), // publisher digest
+      pinned(PARAKEET_ULTRA_BASE, "decoder.int8.onnx", 11_845_275, "94373c6405c8149d1c9d1e9862514e0e3e88dab1c7de18fac9d5df9c6ba5efdd"), // publisher digest
+      pinned(PARAKEET_ULTRA_BASE, "joiner.int8.onnx", 6_355_277, "8a71aaccfdba3d451775507a889afd2257d2e754463fd81095a8c8f290f924c2"), // publisher digest
+      pinned(PARAKEET_ULTRA_BASE, "tokens.txt", 93_939, "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d"), // publisher digest (card)
     ],
     licence: {
       ...CC_BY_4_0,
@@ -383,38 +314,13 @@ export type SherpaModelId = keyof typeof SHERPA_MODELS;
 // is omitted. Hosts choose their own model by configuration.
 export const DEFAULT_SHERPA_MODEL: SherpaModelId = "en-kroko-2025-08-06";
 
-/**
- * Resolve a descriptor to its pinned asset under `root`; descriptor file names
- * join onto the returned `dir`.
- */
-export function resolveModelPaths(
-  model: SherpaModel,
-  root: string,
-): AssetSpec | FileSetSpec {
-  const dir = join(root, model.name);
-  if ("files" in model) {
-    return { dir, files: model.files };
-  }
-  return {
-    url: model.archive.url,
-    sha256: model.archive.sha256,
-    archive: join(root, `${model.name}.tar.bz2`),
-    dir,
-  };
-}
-
 /** Validate a model id against the registry. */
 export function resolveSherpaModel(id: string): SherpaModel {
-  if (isSherpaModelId(id)) {
-    return SHERPA_MODELS[id];
-  }
-  throw new Error(
-    `Unknown sherpa model "${id}"; available: ${Object.keys(SHERPA_MODELS).join(", ")}`,
-  );
+  return lookupModel(SHERPA_MODELS, id, "sherpa");
 }
 
 export function isSherpaModelId(value: string): value is SherpaModelId {
-  return Object.hasOwn(SHERPA_MODELS, value);
+  return hasModelId(SHERPA_MODELS, value);
 }
 
 /** Parse a CLI `--model` value into a typed id, or throw with the valid set. */

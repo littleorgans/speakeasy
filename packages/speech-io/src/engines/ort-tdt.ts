@@ -4,9 +4,9 @@ import { OfflineLifecycle } from "./offline-engine.ts";
 import type { SilenceGate } from "./offline-session.ts";
 import { greedyTdt, tdtResult } from "./ort-tdt-decode.ts";
 import { loadTdtGraphs, type OrtBinding, type TdtGraphs } from "./ort-tdt-graphs.ts";
+import { resolveModelPaths } from "./model.ts";
 import {
   resolveOrtTdtModel,
-  resolveOrtTdtPaths,
   type OrtTdtModel,
   type OrtTdtModelId,
 } from "./ort-tdt-models.ts";
@@ -41,7 +41,7 @@ export class OrtTdtEngine implements VoiceToText {
 
   constructor(options: OrtTdtEngineOptions) {
     this.model = resolveOrtTdtModel(options.model);
-    this.paths = resolveOrtTdtPaths(this.model, options.modelRoot);
+    this.paths = resolveModelPaths(this.model, options.modelRoot);
     this.#binding = options.binding;
     // One set of graphs serves every session; a failed load is retried.
     this.#lifecycle = new OfflineLifecycle({

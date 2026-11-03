@@ -1,7 +1,11 @@
-import { join } from "node:path";
-import type { FileSetSpec } from "./assets.ts";
-import type { SilenceGatePolicy } from "./offline-session.ts";
-import type { ModelFile, ModelLicence } from "./sherpa-models.ts";
+import {
+  CC_BY_4_0,
+  hasModelId,
+  lookupModel,
+  pinned,
+  type FileSetSource,
+  type OfflineCommon,
+} from "./model.ts";
 
 /**
  * Registry of Parakeet TDT exports that run on onnxruntime-node rather than
@@ -42,24 +46,14 @@ export type MelConfig = {
   preemphasis: number;
 };
 
-type OrtTdtCommon = {
-  kind: "offline";
+/** Every file sits at one pinned repository revision. */
+type OrtTdtCommon = OfflineCommon<FileSetSource> & {
   family: "parakeet-tdt";
-  /** Directory name under the model root. */
-  name: string;
-  note: string;
-  /** Files at one pinned repository revision, under the model directory. */
-  files: readonly ModelFile[];
-  licence: ModelLicence;
-  /** Longest utterance a host should hold open for this model. */
-  maxAudioMs: number;
   /**
    * onnxruntime intra op threads for the front end and encoder; omit for
    * `ort-models.ts::ORT_THREADS`. Per step graphs always run on one.
    */
   threads?: number;
-  /** Opt in to the silence gate (`offline-session.ts::SilenceGate`). */
-  silenceGate?: SilenceGatePolicy;
   decoding: TdtDecoding;
   encoder: string;
 };
@@ -89,14 +83,6 @@ export type SplitTdtModel = OrtTdtCommon & {
 
 export type OrtTdtModel = FusedTdtModel | SplitTdtModel;
 
-const CC_BY = {
-  id: "CC-BY-4.0",
-  terms:
-    "Creative Commons Attribution 4.0: use, adapt and redistribute, including commercially, with attribution.",
-  commercialUse: true,
-  redistribution: true,
-} as const;
-
 /** Parakeet TDT 0.6B v3 decoding, shared by all three exports. */
 const PARAKEET_V3_TDT: TdtDecoding = {
   vocabSize: 8_193,
@@ -113,10 +99,6 @@ const PHONON_BASE =
   "https://huggingface.co/tiyuvta/Phonon-2-ONNX/resolve/12c9688bbc4fc52d23c1a66ca873fd3ac6ed4408";
 const REDUX_BASE =
   "https://huggingface.co/eschmidbauer/parakeet-redux-onnx/resolve/1c285ba78d6f1880803f65355133a5ad3559a407";
-
-function pinned(base: string, name: string, bytes: number, sha256: string): ModelFile {
-  return { name, url: `${base}/${name}`, sha256, bytes };
-}
 
 export const ORT_TDT_MODELS = {
   "en-fluid-speech-mini": {
@@ -137,7 +119,7 @@ export const ORT_TDT_MODELS = {
       pinned(FLUID_BASE, "NOTICE", 507, "29ac6c3c2bf16b44f2f544df9bed2bf5aaf1afd8c5674aedfe99ddce2cdcb223"), // computed
     ],
     licence: {
-      ...CC_BY,
+      ...CC_BY_4_0,
       attribution:
         "Fluid Speech Mini by FluidVoice. Built on NVIDIA Parakeet TDT 0.6B v3 and Moondream Parakeet Ultra. Licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).",
       source:
@@ -170,7 +152,7 @@ export const ORT_TDT_MODELS = {
       pinned(PHONON_BASE, "NOTICE", 3_306, "8d9d079319a53da70cda7589f597f0c5b2fce8ad61b6ef7ec67d59a0bbbffdad"), // computed
     ],
     licence: {
-      ...CC_BY,
+      ...CC_BY_4_0,
       attribution:
         "Phonon-2 by Fermion Research, derived from NVIDIA Parakeet TDT 0.6B v3; ONNX conversion by Tiyuvta. Licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).",
       source:
@@ -199,7 +181,7 @@ export const ORT_TDT_MODELS = {
       pinned(REDUX_BASE, "vocab.txt", 93_939, "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d"), // computed
     ],
     licence: {
-      ...CC_BY,
+      ...CC_BY_4_0,
       attribution:
         "Parakeet Redux by Moondream, derived from NVIDIA Parakeet TDT 0.6B v3; ONNX export by eschmidbauer. Licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).",
       source:
@@ -221,23 +203,9 @@ export const ORT_TDT_MODELS = {
 export type OrtTdtModelId = keyof typeof ORT_TDT_MODELS;
 
 export function isOrtTdtModelId(value: string): value is OrtTdtModelId {
-  return Object.hasOwn(ORT_TDT_MODELS, value);
+  return hasModelId(ORT_TDT_MODELS, value);
 }
 
 export function resolveOrtTdtModel(id: string): OrtTdtModel {
-  if (isOrtTdtModelId(id)) {
-    return ORT_TDT_MODELS[id];
-  }
-  throw new Error(
-    `Unknown ORT TDT model "${id}"; available: ${Object.keys(ORT_TDT_MODELS).join(", ")}`,
-  );
-}
-
-/** Total download size, the figure a consent surface shows. */
-export function downloadBytes(model: OrtTdtModel): number {
-  return model.files.reduce((total, file) => total + file.bytes, 0);
-}
-
-export function resolveOrtTdtPaths(model: OrtTdtModel, root: string): FileSetSpec {
-  return { dir: join(root, model.name), files: model.files };
+  return lookupModel(ORT_TDT_MODELS, id, "ORT TDT");
 }
