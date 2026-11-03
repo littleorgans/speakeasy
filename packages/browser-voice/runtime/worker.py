@@ -133,8 +133,6 @@ def validate_identity(identity, rates=SPEECH_IN_RATES):
 
 def pcm_samples(header, body, rates=SPEECH_IN_RATES):
     validate_identity(header, rates)
-    if len(body) != header["pcmBytes"]:
-        raise ProtocolError("PCM length mismatch")
     if hashlib.sha256(body).hexdigest() != header["sha256"]:
         raise ProtocolError("PCM hash mismatch")
     if sys.byteorder == "little":

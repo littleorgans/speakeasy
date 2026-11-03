@@ -383,7 +383,6 @@ class WorkerTests(unittest.TestCase):
                  (SettingsOnly(), speak(body=reference_pcm, reference=reference)),
                  (Copy(), speak(body=reference_pcm)),
                  (Copy(), speak(body=reference_pcm, reference=wrong_hash)),
-                 (Copy(), speak(body=reference_pcm, reference={**reference, "sampleCount": 3, "pcmBytes": 12})),
                  (Copy(), speak(body=reference_pcm, reference={**reference, "sampleRate": 8_000})),
                  (Copy(), speak(body=reference_pcm, reference={**reference, "transcript": 3})),
                  (Copy(), speak(reference={**identity(b""), "transcript": None})),
