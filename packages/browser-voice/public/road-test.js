@@ -116,14 +116,16 @@ export class RoadTestPage {
     for (const which of ["take", "talk-over"]) this.elements[`replay-${which}`].addEventListener("click", () => this.replay(which));
     this.elements["replay-voice"].addEventListener("click", () => this.replay("voice"));
     this.elements["read-again"].addEventListener("click", () => void this.readAgain());
+    const nativeControl = (target) => target?.closest?.("input, select, textarea, button, a, summary, [contenteditable]:not([contenteditable=false]), [role=button]");
     document.addEventListener("keydown", (event) => {
-      if (event.code === "Space") {
+      if (event.code === "Space" && (!nativeControl(event.target) || event.target === hold)) {
         event.preventDefault();
+        this.keyboardHold = true;
         if (!event.repeat) this.press(event.timeStamp);
       } else if (event.code === "Escape") this.stopVoice(event.timeStamp);
     });
     document.addEventListener("keyup", (event) => {
-      if (event.code === "Space") { event.preventDefault(); this.release(event.timeStamp); }
+      if (event.code === "Space" && this.keyboardHold) { this.keyboardHold = false; event.preventDefault(); this.release(event.timeStamp); }
     });
   }
 

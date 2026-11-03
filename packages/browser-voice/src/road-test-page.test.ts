@@ -245,10 +245,11 @@ function pageHarness({ holdVoice = false, transcript = "final", models = [] as u
     setAttribute() {}, append(...nodes: any[]) { this.children.push(...nodes); }, replaceChildren(...nodes: any[]) { this.children = nodes; } });
   const select = (): any => Object.assign(element(), { options: [] as any[],
     replaceChildren(this: any, ...options: any[]) { this.options = options; this.value = options[0]?.value ?? ""; } });
-  const document = { getElementById(id: string) {
+  const document = { listeners: new Map<string, (event: any) => void>(), getElementById(id: string) {
     if (!elements.has(id)) elements.set(id, id.endsWith("-model") || id.endsWith("-voice") ? select() : element());
     return elements.get(id);
-  }, createElement: (tag: string) => Object.assign(tag === "select" ? select() : element(), { tag }), addEventListener() {} };
+  }, createElement: (tag: string) => Object.assign(tag === "select" ? select() : element(), { tag }),
+  addEventListener(type: string, listener: (event: any) => void) { this.listeners.set(type, listener); } };
   const spoken: any[] = [];
   const posted: string[] = [];
   const played: number[] = [];
@@ -726,6 +727,25 @@ async function pickModel(harness: ReturnType<typeof pageHarness>, id: string) {
   output.value = id;
   output.listeners.get("change")();
 }
+
+test("Space edits voice settings and the reference transcript while the page shortcut still records elsewhere", async () => {
+  const { page, document } = pageHarness({ models: QWEN_MODELS });
+  await page.start();
+  const calls: string[] = [];
+  page.press = () => calls.push("press");
+  page.release = () => calls.push("release");
+  for (const tag of ["input", "textarea", "select", "button", "summary", "[contenteditable]"]) {
+    const event = { code: "Space", timeStamp: 1, target: { closest: (selector: string) => selector.includes(tag) ? {} : null },
+      preventDefault: () => calls.push("prevent") };
+    document.listeners.get("keydown")!(event);
+    document.listeners.get("keyup")!(event);
+    assert.deepEqual(calls, [], `Space keeps its native behavior in ${tag}`);
+  }
+  const event = { code: "Space", timeStamp: 1, target: { closest: () => null }, preventDefault: () => calls.push("prevent") };
+  document.listeners.get("keydown")!(event);
+  document.listeners.get("keyup")!(event);
+  assert.deepEqual(calls, ["prevent", "press", "prevent", "release"]);
+});
 
 test("each Qwen model shows its own controls with notes: Instruction only on 1.7B, First clause split in the main row", async () => {
   const harness = pageHarness({ models: QWEN_MODELS });
