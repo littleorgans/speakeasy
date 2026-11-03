@@ -358,7 +358,7 @@
     },
     {
       "id": "nemotron/streaming",
-      "label": "NVIDIA Nemotron streaming",
+      "label": "NVIDIA Nemotron 0.6B",
       "card": {
         "runtime": "mlx-audio 0.6.3 on MLX, Metal GPU",
         "transcript": "partials",

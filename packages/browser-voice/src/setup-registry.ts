@@ -16,7 +16,7 @@ export type SetupManifest = Readonly<{
 }>;
 
 // Pins every model, runtime, control, dependency and portable artifact name.
-export const SETUP_MANIFEST_SHA256 = "ce69d573b4b24fb191e8bb863b616e8fdf6d3e859be37cb64ec706f261e72fec";
+export const SETUP_MANIFEST_SHA256 = "12a0872cb981e74bcdd154c2c50853b16811ad5e34acabea3cd8bb83a84f0174";
 
 export function assertSetupManifest(value: unknown): asserts value is SetupManifest {
   if (sha256(JSON.stringify(value) ?? "") !== SETUP_MANIFEST_SHA256) {
