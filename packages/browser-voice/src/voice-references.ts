@@ -18,8 +18,8 @@ export type StoredReference = { sha256: string; samples: Float32Array; sampleRat
 
 /**
  * The owner's voice copy recordings, in this server's memory only: never
- * written to disk, gone on Forget or restart. Identity includes the PCM and
- * its sample rate, so reuploading the same audio is one entry.
+ * written to disk, gone on Forget or restart. Keyed by the SHA256 of the PCM
+ * the worker receives, so the same recording uploaded again is one entry.
  */
 export class VoiceReferenceStore {
   readonly #entries = new Map<string, StoredReference>();
@@ -33,11 +33,10 @@ export class VoiceReferenceStore {
       throw new HttpError(400, `a reference lasts ${REFERENCE_SECONDS.min} to ${REFERENCE_SECONDS.max} seconds`);
     }
     const sha256 = pcmDigest(samples);
-    const id = createHash("sha256").update(`${sampleRate}:${sha256}`).digest("hex");
-    this.#entries.delete(id);
-    this.#entries.set(id, { sha256, samples: samples.slice(), sampleRate });
+    this.#entries.delete(sha256);
+    this.#entries.set(sha256, { sha256, samples: samples.slice(), sampleRate });
     while (this.#entries.size > MAX_REFERENCES) this.#entries.delete(this.#entries.keys().next().value!);
-    return { id, seconds };
+    return { id: sha256, seconds };
   }
 
   get(id: string): StoredReference | undefined {

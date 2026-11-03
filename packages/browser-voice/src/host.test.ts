@@ -11,7 +11,6 @@ import { createHostProviderConfig } from "./setup-routes.ts";
 import { createProviderCredentials } from "./provider-availability.ts";
 import { buildSpeechOutputCatalogue } from "./speech-output-catalog.ts";
 import { DEFAULT_LOCAL_OUTPUT, LOCAL_OUTPUT_MODELS, LOCAL_OUTPUT_REGISTRY } from "../../speech-io/src/tts/catalogue.ts";
-import { VoiceReferenceStore } from "./voice-references.ts";
 
 test("host serves the room shell and reports health", async () => {
   const host = await startBrowserVoiceServer({ port: 0 });
@@ -587,18 +586,4 @@ test("voice copy recordings upload to memory, bounded by origin, type, rate, len
   } finally {
     await host.close();
   }
-});
-
-test("reference identity includes sample rate so another upload cannot alter an existing recording", () => {
-  const store = new VoiceReferenceStore();
-  const samples = new Float32Array(48_000).fill(0.25);
-  const first = store.add(samples, 16_000);
-  const second = store.add(samples, 48_000);
-  assert.notEqual(first.id, second.id, "the same PCM at another rate is different audio");
-  assert.equal(store.get(first.id)?.sampleRate, 16_000);
-  assert.equal(store.get(second.id)?.sampleRate, 48_000);
-  assert.equal(store.get(first.id)?.sha256, store.get(second.id)?.sha256, "the transport hash still attests the PCM");
-  assert.equal(store.add(samples.slice(), 16_000).id, first.id, "identical reuploads retain their identity");
-  store.delete(second.id);
-  assert.ok(store.get(first.id), "forgetting one rate cannot forget the other");
 });
