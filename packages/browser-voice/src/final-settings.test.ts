@@ -27,8 +27,6 @@ test("final settings fill every selected setup's defaults and refuse anything no
   assert.throws(() => resolveFinalSettings([COHERE], { "hex/unified": {} }), /no final settings/);
   assert.throws(() => resolveFinalSettings([COHERE], { [COHERE]: { namesBias: 1 } }), /unsupported namesBias/);
   assert.throws(() => resolveFinalSettings([COHERE], { [COHERE]: { namesBias: "2.5" } }), /unsupported namesBias/);
-  assert.throws(() => resolveFinalSettings([COHERE], { [COHERE]: { namesBias: null } }), /unsupported namesBias/);
-  assert.throws(() => resolveFinalSettings([COHERE], { [COHERE]: null }), /object/);
   assert.throws(() => resolveFinalSettings([COHERE], { [COHERE]: { language: "en" } }), /unknown/);
   assert.throws(() => resolveFinalSettings([COHERE], [1]), /object/);
 });

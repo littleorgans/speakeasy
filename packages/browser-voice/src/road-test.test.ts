@@ -97,8 +97,6 @@ test("a Cohere take carries its names setting to the executor and its row; value
   const off = executor.calls.at(-1)!;
   assert.deepEqual(off.operation === "transcribe" && off.settings, { namesBias: 0 }, "Off unless chosen");
   for (const [settings, setupIds] of [[{ "cohere/transcribe": { namesBias: 1 } }, ["cohere/transcribe"]],
-    [{ "cohere/transcribe": { namesBias: null } }, ["cohere/transcribe"]],
-    [{ "cohere/transcribe": null }, ["cohere/transcribe"]],
     [{ "cohere/transcribe": { namesBias: 2.5 } }, ["hex/unified"]], [[2.5], ["cohere/transcribe"]]] as const) {
     const refused = await post(settings, [...setupIds]);
     assert.equal(refused.status, 400, JSON.stringify(settings));

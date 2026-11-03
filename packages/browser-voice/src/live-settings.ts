@@ -76,7 +76,7 @@ export function resolveLiveSettings(stream: LiveStream, value: unknown = {}): Li
     if (!stream.settings.some((setting) => setting.id === name)) throw new Error(`unknown live setting ${name}`);
   }
   return Object.freeze(Object.fromEntries(stream.settings.map((setting) => {
-    const chosen = given[setting.id] === undefined ? setting.default : given[setting.id];
+    const chosen = given[setting.id] ?? setting.default;
     if (!setting.options.some((option) => option.value === chosen)) throw new Error(`unsupported ${setting.id}`);
     return [setting.id, chosen as number];
   })));

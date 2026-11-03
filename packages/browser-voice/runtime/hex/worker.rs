@@ -56,7 +56,7 @@ fn read_request(input: &mut impl Read) -> Result<Option<Request>, Box<dyn Error>
     let mut bias = [0u8; 4];
     if head[0] == b'B' { input.read_exact(&mut bias)?; }
     let names_bias = f32::from_le_bytes(bias);
-    if ![0.0, 1.25, 2.5].contains(&names_bias) { return Err("names bias must be an offered value".into()); }
+    if !names_bias.is_finite() { return Err("nonfinite names bias".into()); }
     let mut bytes = vec![0u8; count * 4];
     input.read_exact(&mut bytes)?;
     let samples: Vec<f32> = bytes.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();

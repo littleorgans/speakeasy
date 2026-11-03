@@ -43,6 +43,6 @@ export function resolveFinalSettings(setupIds: readonly SetupId[], value: unknow
   }
   return Object.freeze(Object.fromEntries(setupIds.flatMap((id) => {
     const setup = finalSetup(id);
-    return setup ? [[id, resolveLiveSettings(setup, given[id])]] : [];
+    return setup ? [[id, resolveLiveSettings(setup, given[id] ?? {})]] : [];
   })));
 }
