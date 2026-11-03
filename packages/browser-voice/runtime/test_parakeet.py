@@ -21,6 +21,44 @@ ROOT = Path(__file__).resolve().parent
 SETUP_IDS = ("mlx-parakeet/v3-greedy", "mlx-parakeet/ultra-greedy")
 
 
+class FakeArray:
+    """Just enough of a NumPy vector for the adapter: values, shape, slices and length."""
+
+    def __init__(self, values):
+        self.values = list(values)
+        self.shape = (len(self.values),)
+
+    def __len__(self):
+        return len(self.values)
+
+    def __getitem__(self, index):
+        return FakeArray(self.values[index])
+
+
+class FakeStream:
+    """parakeet-mlx StreamingParakeet: entering swaps the encoder to local attention."""
+
+    def __init__(self, runtime, model, context_size, depth, decoding_config):
+        runtime.record("transcribe-stream", context_size, depth, decoding_config is runtime.configurations[0])
+        self.runtime, self.model = runtime, model
+        self.finalized_tokens, self.draft_tokens = [], []
+
+    def __enter__(self):
+        self.model.encoder.pos_enc = "local-pos"
+        for layer in self.model.encoder.layers:
+            layer.self_attn = "local-attention"
+        return self
+
+    def __exit__(self, *exc):
+        raise AssertionError("the adapter restores stock attention itself")
+
+    def add_audio(self, audio):
+        self.runtime.record("add-audio", audio.shape[0])
+        self.runtime.now += 0.04
+        self.finalized_tokens = self.finalized_tokens + self.draft_tokens
+        self.draft_tokens = [types.SimpleNamespace(text=" word%d" % len(self.finalized_tokens))]
+
+
 class FakeRuntime:
     def __init__(self):
         self.events = []
@@ -55,6 +93,8 @@ class FakeRuntime:
         self.mx.random = types.SimpleNamespace(seed=lambda seed: self.record("seed", seed))
         self.np = types.ModuleType("numpy")
         self.np.frombuffer = self.frombuffer
+        self.np.empty = lambda count, *, dtype: FakeArray([0.0] * count)
+        self.np.concatenate = lambda parts: FakeArray([value for part in parts for value in part.values])
         self.np.isfinite = lambda data: types.SimpleNamespace(
             all=lambda: all(math.isfinite(value) for value in data.values)
         )
@@ -100,8 +140,7 @@ class FakeRuntime:
         self.record("frombuffer")
         self.now += 0.5  # Transport/view work must stay outside processingMs.
         self.received_pcm = samples.tobytes()
-        values = [value for (value,) in struct.iter_unpack("<f", self.received_pcm)]
-        return types.SimpleNamespace(values=values, shape=(len(values),))
+        return FakeArray(value for (value,) in struct.iter_unpack("<f", self.received_pcm))
 
     def audio(self, data, *, dtype):
         if dtype != self.mx.float32 or not self.active_stream:
@@ -114,11 +153,19 @@ class FakeRuntime:
         self.record("from-pretrained", path)
         self.loaded_paths.append(path)
         self.now += 0.2
-        return types.SimpleNamespace(
+        self.stock_attention = ("stock-pos", [object(), object()])
+        model = types.SimpleNamespace(
             parameters=lambda: "model-parameters",
             preprocessor_config=types.SimpleNamespace(sample_rate=self.sample_rate),
             generate=self.generate,
+            encoder=types.SimpleNamespace(pos_enc="stock-pos",
+                                          layers=[types.SimpleNamespace(self_attn=attention)
+                                                  for attention in self.stock_attention[1]]),
         )
+        model.transcribe_stream = lambda context_size, depth, decoding_config: FakeStream(
+            self, model, context_size, depth, decoding_config)
+        self.model = model
+        return model
 
     def decoding_config(self, *, decoding):
         self.record("decoding-config", decoding.kind)
@@ -134,6 +181,10 @@ class FakeRuntime:
     def generate(self, mel, *, decoding_config):
         if decoding_config is not self.configurations[0]:
             raise AssertionError("stock greedy configuration must be reused")
+        encoder = self.model.encoder
+        if (encoder.pos_enc, [layer.self_attn for layer in encoder.layers]) != self.stock_attention \
+                or any(layer.self_attn is not stock for layer, stock in zip(encoder.layers, self.stock_attention[1])):
+            raise AssertionError("the final pass must run on the stock attention objects")
         self.record("generate")
         self.now += 0.005
         self.pending_gpu = True
@@ -260,6 +311,34 @@ parakeet.Backend({'setupId': 'mlx-parakeet/v3-greedy', 'modelPath': '/missing/sn
                                      "array", "get-logmel", "generate", "synchronize", "clock", "exit-stream"])
             self.assertEqual([event for event in runtime.events if event[0] == "seed"],
                              [("seed", 0), ("seed", 0)])
+
+    def test_live_words_feed_whole_stream_chunks_and_the_final_runs_on_stock_attention(self):
+        chunk = parakeet.STREAM["chunkSamples"]
+        samples = lambda count: memoryview(array.array("f", [0.25] * count)).cast("B").cast("f")
+        runtime = FakeRuntime()
+        with runtime.installed():
+            backend = self.backend()
+            self.assertEqual(backend.load()["stream"], {"chunkSamples": chunk, "contextSize": [64, 64],
+                                                         "depth": 1, "attention": "local"})
+            runtime.events.clear()
+            quiet = backend.feed(samples(chunk - 1), True)
+            self.assertEqual((quiet["stable"], quiet["tentative"]), ("", ""), "part of a chunk waits for the next feed")
+            heard = backend.feed(samples(chunk + 1), False)
+            self.assertEqual([event for event in runtime.events if event[0] in ("transcribe-stream", "add-audio")],
+                             [("transcribe-stream", (64, 64), 1, True), ("add-audio", chunk), ("add-audio", chunk)])
+            self.assertEqual((heard["stable"], heard["tentative"]), (" word0", " word1"))
+            self.assertAlmostEqual(heard["processingMs"], 80 + 7 + 4)
+            self.assertEqual(runtime.model.encoder.pos_enc, "local-pos")
+            result = backend.transcribe(samples(4))
+            self.assertEqual(result["text"], runtime.text)
+            runtime.events.clear()
+            fresh = backend.feed(samples(chunk), True)
+            self.assertEqual(fresh["stable"], "", "start opens a fresh stream")
+            self.assertEqual(sum(event[0] == "transcribe-stream" for event in runtime.events), 1)
+            backend.close()
+            self.assertIs(runtime.model.encoder.layers[0].self_attn, runtime.stock_attention[1][0])
+            with self.assertRaises(ValueError):
+                backend.feed(memoryview(array.array("f", [math.nan])), False)
 
     def test_empty_output_is_success_and_no_text_normalization(self):
         for text in ["", " \n", "{\"text\":\"été\"}\n"]:

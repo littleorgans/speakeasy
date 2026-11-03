@@ -196,11 +196,23 @@ def validate_result(result):
         raise ProtocolError("backend decodeMs must be finite")
 
 
+def validate_partial(result):
+    """Live words: settled text, then text the model may still change."""
+    if not isinstance(result, dict) or set(result) != {"stable", "tentative", "processingMs"}:
+        raise ProtocolError("partial requires stable, tentative and processingMs")
+    for name in ("stable", "tentative"):
+        if not isinstance(result[name], str) or len(result[name].encode("utf-8")) > MAX_TEXT_BYTES:
+            raise ProtocolError(f"invalid partial {name}")
+    elapsed = result["processingMs"]
+    if type(elapsed) not in (int, float) or not math.isfinite(elapsed) or elapsed < 0:
+        raise ProtocolError("partial requires finite processingMs")
+
+
 def handle_request(header, body, backend, setup_id, factory):
     operation = header.get("operation")
     cleanup = setup_id == "mlx-cleanup/qwen-targeted"
     voice = setup_id in VOICES
-    if operation != "transcribe" and body:
+    if operation not in ("transcribe", "feed") and body:
         raise ProtocolError("unexpected body")
     if operation == "load":
         if backend is not None or not isinstance(header.get("options"), dict):
@@ -216,6 +228,13 @@ def handle_request(header, body, backend, setup_id, factory):
         raise ProtocolError("backend is not ready")
     if operation == "speak" and voice:
         return backend, audio_reply(backend.speak(*speak_request(header)))
+    # Only backends whose engine truly streams answer feed; the rest give final text only.
+    if operation == "feed" and not cleanup and not voice and hasattr(backend, "feed"):
+        if type(header.get("start")) is not bool:
+            raise ProtocolError("feed requires start")
+        result = backend.feed(pcm_samples(header, body), header["start"])
+        validate_partial(result)
+        return backend, {"type": "partial", "partial": result}
     if operation == "transcribe" and not cleanup and not voice:
         result = backend.transcribe(pcm_samples(header, body))
     elif operation == "cleanup" and cleanup:

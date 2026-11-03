@@ -33,6 +33,8 @@ export type SetupExecutionResult = {
   rawText?: string; decodeMs?: number | null; diagnostics?: Record<string, unknown>;
 };
 export type SetupExecutionContext = Readonly<{ signal: AbortSignal }>;
+/** Live words while the owner speaks: settled text, then text the model may still change. */
+export type LivePartial = { stable: string; tentative: string; processingMs: number };
 
 /**
  * load and execute must settle only after a cancelled/failed generation exits.
@@ -46,6 +48,8 @@ export interface SetupExecutor {
   execute(request: SetupExecution, context: SetupExecutionContext): Promise<SetupExecutionResult>;
   release(setupId: SetupId): Promise<void>;
   close(): Promise<void>;
+  /** Live words, only for engines that truly stream; start opens a fresh stream. Requires load. */
+  feed?(setupId: SetupId, samples: Float32Array, start: boolean, context: SetupExecutionContext): Promise<LivePartial>;
 }
 
 export type SetupFailureCode = "limit" | "unavailable" | "load" | "execution" | "protocol" | "cancelled";
@@ -75,9 +79,9 @@ export type ComparisonHandle = { comparisonId: string; done: Promise<ComparisonR
 /** Binary protocol: uint32 LE header length, UTF8 JSON, then pcmBytes bytes. */
 export type SetupWorkerRequest = {
   version: 1; generation: string; requestId: string; setupId: SetupId;
-  operation: "transcribe" | "cleanup"; sampleRate: 16000; channels: 1;
+  operation: "transcribe" | "cleanup" | "feed"; sampleRate: 16000; channels: 1;
   sampleCount: number; pcmBytes: number; pcmSha256: string;
-  A?: string; B?: null; base?: PcmIdentity; baseTextSha256?: string;
+  A?: string; B?: null; base?: PcmIdentity; baseTextSha256?: string; start?: boolean;
 };
 export type SetupWorkerReply =
   | { type: "ready"; version: 1; generation: string; setupId: SetupId;
@@ -85,6 +89,7 @@ export type SetupWorkerReply =
   | { type: "result"; version: 1; generation: string; requestId: string; setupId: SetupId;
       text: string; processingMs: number | null; workerWallMs: number | null;
       rawText?: string; decodeMs?: number | null; diagnostics?: Record<string, unknown> }
+  | { type: "partial"; version: 1; generation: string; setupId: SetupId; partial: LivePartial }
   | { type: "error"; version: 1; generation: string; requestId: string; setupId: SetupId;
       error: string; rawText?: string }
   | { type: "closed"; version: 1; generation: string; setupId: SetupId };
@@ -133,6 +138,14 @@ export function isDuration(value: unknown): value is number | null {
 export function assertSetupLoadResult(value: unknown): asserts value is SetupLoadResult {
   if (!isRecord(value) || !isDuration(value.startupMs) || !isDuration(value.loadMs)
     || typeof value.firstUse !== "boolean") throw new Error("invalid setup load metadata");
+}
+
+export function assertLivePartial(value: unknown): asserts value is LivePartial {
+  if (!isRecord(value) || !isDuration(value.processingMs) || value.processingMs === null) {
+    throw new Error("invalid live partial metadata");
+  }
+  assertBoundedText(value.stable, "stable");
+  assertBoundedText(value.tentative, "tentative");
 }
 
 export function assertSetupExecutionResult(value: unknown): asserts value is SetupExecutionResult {

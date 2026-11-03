@@ -3,9 +3,9 @@ import { randomUUID } from "node:crypto";
 import { endianness } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
-  MAX_HEADER_BYTES as MAX_WORKER_HEADER_BYTES, MAX_PCM_BYTES as MAX_WORKER_PCM_BYTES,
+  assertLivePartial, MAX_HEADER_BYTES as MAX_WORKER_HEADER_BYTES, MAX_PCM_BYTES as MAX_WORKER_PCM_BYTES,
   MAX_TEXT_BYTES as MAX_WORKER_TEXT_BYTES, SETUP_PROTOCOL_VERSION, sha256 as hash,
-  type PcmIdentity, type SetupId, type SetupExecution, type SetupExecutionContext,
+  type LivePartial, type PcmIdentity, type SetupId, type SetupExecution, type SetupExecutionContext,
   type SetupExecutionResult, type SetupExecutor, type SetupLoadResult,
 } from "./setup-protocol.ts";
 import type { ChildTranscriber, CpuReady } from "./transcriber.ts";
@@ -175,6 +175,14 @@ export class PythonSetupWorker {
     return this.#run("load", {}, Buffer.alloc(0), signal);
   }
 
+  /** Live words after an explicit load; start opens a fresh stream in the worker. */
+  feed(samples: Float32Array, start: boolean, signal?: AbortSignal): Promise<LivePartial> {
+    try {
+      const { body, identity } = canonicalPcm(samples);
+      return this.#run("feed", { ...wireIdentity(identity), start }, body, signal, true);
+    } catch (error) { return Promise.reject(error); }
+  }
+
   /** Scheduler path: execute cannot load or replace a generation after load failed. */
   execute(request: SetupExecution, { signal }: SetupExecutionContext): Promise<PythonWorkerResult> {
     try {
@@ -223,8 +231,10 @@ export class PythonSetupWorker {
   #run(operation: "transcribe" | "cleanup", fields: Header, body: Buffer, signal?: AbortSignal,
     requireReady?: boolean): Promise<PythonWorkerResult>;
   #run(operation: "speak", fields: Header, body: Buffer, signal?: AbortSignal): Promise<PythonVoiceResult>;
+  #run(operation: "feed", fields: Header, body: Buffer, signal: AbortSignal | undefined,
+    requireReady: true): Promise<LivePartial>;
   async #run(operation: string, fields: Header, body: Buffer, signal?: AbortSignal,
-    requireReady = false): Promise<PythonWorkerResult | PythonVoiceResult | SetupLoadResult> {
+    requireReady = false): Promise<PythonWorkerResult | PythonVoiceResult | SetupLoadResult | LivePartial> {
     if (this.#closed) throw new SetupWorkerError("worker closed");
     if (this.#busy) throw new SetupWorkerError("worker is busy");
     if (signal?.aborted) throw new SetupWorkerError("worker cancelled");
@@ -259,6 +269,16 @@ export class PythonSetupWorker {
       if (operation === "load") return { startupMs: startupMs > 0 ? null : 0,
         loadMs: startupMs > 0 && finiteTime(session.metadata.loadMs) ? session.metadata.loadMs : startupMs > 0 ? null : 0,
         firstUse: !session.used };
+      if (operation === "feed") {
+        const reply = await this.#request(session, operation, "partial", fields, body, this.#operationTimeoutMs);
+        const partial = reply.partial;
+        try { assertLivePartial(partial); }
+        catch { throw new SetupWorkerError("invalid worker partial"); }
+        if (session.failure) throw session.failure;
+        // The final pass after live words is no longer this generation's first use.
+        session.used = true;
+        return { stable: partial.stable, tentative: partial.tentative, processingMs: partial.processingMs };
+      }
       if (operation === "speak") {
         const reply = await this.#request(session, operation, "audio", fields, body, this.#operationTimeoutMs);
         const samples = voicePcm(reply);
@@ -452,6 +472,13 @@ export class SetupWorkers implements SetupExecutor {
         workerWallMs: result.comparison.workerWallMs,
         diagnostics: { modelConstructionMs: result.comparison.modelConstructionMs } };
     });
+  }
+
+  /** Live words: only the Python setups whose backend streams answer; others reject in the worker. */
+  async feed(setupId: SetupId, samples: Float32Array, start: boolean, { signal }: SetupExecutionContext): Promise<LivePartial> {
+    this.#assertOpen();
+    if (setupId === "sweep/score-2") throw new SetupWorkerError("sweep/score-2 gives final text only");
+    return this.#worker(setupId).feed(samples, start, signal);
   }
 
   async release(setupId: SetupId): Promise<void> {

@@ -65,6 +65,11 @@ class Fake:
                 "diagnostics": {"hex": raw.hex(), "count": len(samples), "pid": os.getpid(), "calls": self.calls}}
     def cleanup(self, text):
         return {"text": text, "rawText": text, "processingMs": 0}
+    def feed(self, samples, start):
+        if mode == "badPartial":
+            return {"stable": "", "tentative": "", "processingMs": -1}
+        self.fed = (0 if start else getattr(self, "fed", 0)) + len(samples)
+        return {"stable": " heard %d" % self.fed, "tentative": " maybe", "processingMs": 2}
     def speak(self, text, voice, speed):
         if mode == "badAudio":
             return {"samples": b"\\0\\0\\xc0\\x7f", "sampleRate": 24000, "processingMs": 1}
@@ -81,6 +86,8 @@ def write(target, header, pcm=b""):
     header = dict(header)
     if header["type"] == "audio" and mode == "audioHashMismatch":
         header["audio"] = {**header["audio"], "sha256": "0" * 64}
+    if header["type"] == "partial" and mode == "badPartialReply":
+        header["partial"] = {**header["partial"], "stable": 7}
     if header["type"] == "ready" and mode == "badReady":
         header["metadata"] = {"revision": "wrong"}
     if header["type"] == "result":
@@ -516,4 +523,28 @@ test("a worker voice synth maps the pipeline's speaker to the registry voice and
   assert.equal(michael.audioDurationMs, 4 / 24);
   assert.equal((await synth.synth({ text: "Hi." })).samples[3], "af_heart".length, "speaker 0 is the default voice");
   await assert.rejects(synth.synth({ text: "Hi.", sid: 2 }), /Invalid TTS speaker/);
+});
+
+test("live words feed a loaded worker, mark it used, and reject a malformed partial", async (t) => {
+  const worker = makeWorker();
+  t.after(() => worker.close());
+  await assert.rejects(worker.feed(new Float32Array(4), true), /explicit load required/);
+  assert.equal((await worker.load()).firstUse, true);
+  assert.deepEqual(await worker.feed(new Float32Array([0.5, -0, 1]), true), { stable: " heard 3", tentative: " maybe", processingMs: 2 });
+  assert.equal((await worker.feed(new Float32Array(0), false)).stable, " heard 3", "an empty feed still answers");
+  assert.equal((await worker.feed(new Float32Array(2), false)).stable, " heard 5");
+  assert.equal((await worker.transcribe(new Float32Array(4))).firstUse, false, "the final pass after live words is warm");
+  for (const [mode, message] of [["badPartial", /finite processingMs/], ["badPartialReply", /invalid worker partial/]] as const) {
+    const bad = makeWorker({ backendOptions: { mode } });
+    t.after(() => bad.close());
+    await bad.load();
+    await assert.rejects(bad.feed(new Float32Array(2), true), message);
+  }
+  const executor = new SetupWorkers({ python: { "hex/unified": { pythonPath: PYTHON, workerPath: fixture,
+    expectedIdentity: { revision: "pinned" }, loadTimeoutMs: 3000, operationTimeoutMs: 3000 } } });
+  t.after(() => executor.close());
+  const signal = new AbortController().signal;
+  await executor.load("hex/unified", { signal });
+  assert.equal((await executor.feed("hex/unified", new Float32Array(7), true, { signal })).stable, " heard 7");
+  await assert.rejects(executor.feed("sweep/score-2", new Float32Array(1), true, { signal }), /final text only/);
 });

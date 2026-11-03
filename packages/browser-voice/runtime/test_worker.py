@@ -86,6 +86,38 @@ class WorkerTests(unittest.TestCase):
                 self.assertEqual(replies[1]["result"]["text"], "")
                 self.assertIn("backend diagnostics", diagnostic)
 
+    def test_feed_answers_live_words_only_where_the_backend_streams(self):
+        class Streaming(Backend):
+            def feed(self, samples, start):
+                self.calls.append((samples.tobytes(), start))
+                return {"stable": " heard", "tentative": " maybe", "processingMs": 4}
+
+        body = struct.pack("<2f", 0.5, -0.25)
+        fields = {k: v for k, v in identity(body).items() if k != "pcmBytes"}
+        data = (frame("load", options={}) + frame("feed", 2, body, start=True, **fields)
+                + frame("feed", 3, b"", start=False, **{k: v for k, v in identity(b"").items() if k != "pcmBytes"}))
+        code, replies, backend, _, _ = self.run_worker(data, backend=Streaming())
+        self.assertEqual(code, 0)
+        self.assertEqual([r["type"] for r in replies], ["ready", "partial", "partial"])
+        self.assertEqual(replies[1]["partial"], {"stable": " heard", "tentative": " maybe", "processingMs": 4})
+        self.assertEqual(backend.calls, [(body, True), (b"", False)])
+        refused = {
+            "final text only": (frame("load", options={}) + frame("feed", 2, body, start=True, **fields), Backend()),
+            "start must be a flag": (frame("load", options={}) + frame("feed", 2, body, start=1, **fields), Streaming()),
+            "hash checked": (frame("load", options={}) + frame("feed", 2, body, start=True, **{**fields, "sha256": "0" * 64}),
+                             Streaming()),
+        }
+        for label, (request, owner) in refused.items():
+            with self.subTest(label):
+                code, replies, owner, _, _ = self.run_worker(request, backend=owner)
+                self.assertEqual(code, 1)
+                self.assertEqual(replies[-1]["type"], "error")
+                self.assertFalse(any(isinstance(call, tuple) for call in owner.calls))
+        for bad in ({"stable": 1, "tentative": "", "processingMs": 0}, {"stable": "", "tentative": "", "processingMs": -1},
+                    {"stable": "", "tentative": "", "processingMs": 0, "extra": 1}):
+            with self.subTest(bad=bad), self.assertRaises(worker.ProtocolError):
+                worker.validate_partial(bad)
+
     def test_cleanup_exact_text_empty_and_base_identity(self):
         setup = "mlx-cleanup/qwen-targeted"
         for text in ("", "  café\n{\"A\":\"launch\"}  "):
