@@ -297,8 +297,13 @@ function pageHarness({ holdVoice = false, transcript = "final", models = [] as u
   const voices = { revision: "rev", default: { model: "piper-kristin-medium" }, models: [{ id: "piper-kristin-medium", label: "Piper Kristin medium",
     provider: { kind: "local" }, defaultVoice: "kristin", defaultSpeed: 1, voices: [{ id: "kristin", label: "Kristin" }], readiness: { state: "ready" } },
     ...models] };
-  const fetch = async (url: string) => {
+  // Like the browser's fetch, a call with any receiver but the window throws.
+  let realm: unknown;
+  async function fetch(this: unknown, url: string, init?: { method?: string }) {
+    if (this !== undefined && this !== realm) throw new TypeError("Illegal invocation");
     posted.push(url);
+    if (url.startsWith("/speech-output/picks/")) return { ok: true, arrayBuffer: async () => new ArrayBuffer(8) };
+    if (url.startsWith("/speech-output/references")) return { ok: true, json: async () => (init?.method === "POST" ? { id: "d".repeat(64) } : {}) };
     if (url === "/prompt-reader/setups") return { ok: true, json: async () => setups };
     if (url === "/speech-output/models") return { ok: true, json: async () => voices };
     const body = new ReadableStream({ start(controller) {
@@ -306,14 +311,16 @@ function pageHarness({ holdVoice = false, transcript = "final", models = [] as u
       controller.close();
     } });
     return { ok: true, status: 200, body };
-  };
+  }
   const context = vm.createContext({ document, fetch, performance, Math, Number, String, Object, setInterval, clearInterval, setTimeout, clearTimeout, URLSearchParams, TextEncoder, TextDecoder,
     JSON, Float32Array, Promise, Option: function(label: string, value: string) { return { label, value }; },
     HoldReleaseGate, MicCapture: Mic, VoiceReadback: Readback, LiveWords, TalkOverDetector, ...text, ...trail,
     AudioContext: class { currentTime = 0; sampleRate = 48_000; destination = {}; async resume() {}
       createBuffer(_channels: number, length: number) { return { length, copyToChannel() {} }; }
+      async decodeAudioData() { return { sampleRate: 24_000, getChannelData: () => new Float32Array(2_400) }; }
       createBufferSource() { const source = { buffer: { length: 0 }, connect() {}, stop() {}, start() { played.push(source.buffer.length); } }; return source; } },
     window: { setTimeout, clearTimeout } });
+  realm = vm.runInContext("globalThis", context);
   vm.runInContext(["setting-controls.js", "voice-settings.js", "voice-copy.js", "take-history.js", "road-test.js"].map(source).join("\n")
     + "\nglobalThis.Page = RoadTestPage;", context);
   return { page: new context.Page(), elements, spoken, posted, played, live, document, microphones };
@@ -948,6 +955,23 @@ test("a reading keeps its selected reference and retry transcript when the voice
   assert.equal(JSON.stringify(await spoken[0].restore()), JSON.stringify({ id: "b".repeat(64), transcript: "The original words." }));
   page.voiceCopy.recording = null;
   assert.equal(await spoken[0].restore(), null, "Forget must prevent a retry from restoring that recording");
+});
+
+test("voice copy reaches the host through the page's own fetch: Listen on a pick, upload and Forget", async () => {
+  const harness = pageHarness({ models: QWEN_MODELS });
+  await harness.page.start();
+  await pickModel(harness, "qwen3-tts-0.6b-base");
+  const copy = harness.page.voiceCopy;
+  const pick = harness.elements.get("output-voice").value;
+  await copy.hear();
+  assert.equal(copy.problem, "");
+  assert.deepEqual(harness.played, [2_400], "the pick plays");
+  copy.recording = { samples: new Float32Array(48_000), rate: 48_000, id: null };
+  assert.equal(await copy.upload(), "d".repeat(64));
+  await copy.discard();
+  assert.equal(copy.problem, "");
+  assert.deepEqual(harness.posted.filter((url) => url.startsWith("/speech-output/")).slice(-3), [
+    `/speech-output/picks/qwen3-tts-0.6b-base/${pick}`, "/speech-output/references?sampleRate=48000", `/speech-output/references/${"d".repeat(64)}`]);
 });
 
 test("Forget removes a reference even when its upload is still in flight", async () => {

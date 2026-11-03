@@ -19,9 +19,10 @@ const RAW = Object.freeze({ channelCount: 1, echoCancellation: false, noiseSuppr
 export class VoiceCopy {
   /**
    * audio() resolves the page's audio context (opened on a press); play(samples, rate)
-   * is the page's replay path; onChange re-renders the page.
+   * is the page's replay path; onChange re-renders the page. The default fetch
+   * calls the window's own: the browser refuses it detached onto the panel.
    */
-  constructor({ document, root, audio, play, onChange = () => {}, fetch = globalThis.fetch }) {
+  constructor({ document, root, audio, play, onChange = () => {}, fetch = (...args) => globalThis.fetch(...args) }) {
     Object.assign(this, { document, root, audio, play, onChange, fetch });
     this.model = null;
     this.voice = null;
