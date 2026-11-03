@@ -1,6 +1,5 @@
 import { createInterface } from "node:readline/promises";
 import { setTimeout as delay } from "node:timers/promises";
-import { nextCommit, type CommitObservation } from "../bench/commit.ts";
 import { FLUSH_FINAL_TIMEOUT_MS } from "../bench/config.ts";
 import { formatMs } from "../bench/format.ts";
 import {
@@ -24,6 +23,7 @@ import type {
   VoiceToText,
 } from "../contract.ts";
 import { saveCorpusPair, type CorpusSidecarMeta } from "../corpus/store.ts";
+import { flushCommit, type CommitObservation } from "../engines/commit.ts";
 import { createLocalSherpaEngine } from "../engines/sherpa-binding.ts";
 import { withRewrite } from "../rewrite/decorator.ts";
 import { DEFAULT_RULES } from "../rewrite/rules.ts";
@@ -297,19 +297,15 @@ class PttDemo {
     this.#clearLiveLine();
     this.#throwIfFatal();
 
-    // Register the commit waiter BEFORE flush(): the contract makes no
-    // synchrony guarantee (sherpa emits during flush, others may not).
-    const finalPromise = nextCommit(this.#session, FLUSH_FINAL_TIMEOUT_MS);
-    const releaseAt = performance.now();
-    this.#session.flush();
-    const final = await finalPromise;
+    const commit = await flushCommit(this.#session, FLUSH_FINAL_TIMEOUT_MS);
+    const final = commit.observation;
 
     if (final?.text) {
       console.log(
-        `utterance ${this.#utterance}: final=${JSON.stringify(final.text)} release->final=${formatMs(final.at - releaseAt)}`,
+        `utterance ${this.#utterance}: final=${JSON.stringify(final.text)} release->final=${formatMs(commit.releaseToCommitMs)}`,
       );
       if (this.#options.saveDir && !this.#quitting) {
-        await this.#saveUtterance(final, releaseAt);
+        await this.#saveUtterance(final, commit.releaseToCommitMs);
       }
     } else {
       console.log(
@@ -330,7 +326,7 @@ class PttDemo {
    */
   async #saveUtterance(
     final: CommitObservation,
-    releaseAt: number,
+    releaseToCommitMs: number,
   ): Promise<void> {
     const frames = this.#utteranceFrames;
     this.#utteranceFrames = [];
@@ -357,7 +353,7 @@ class PttDemo {
       expected,
       engineLabel: this.#engineLabel,
       endpoint: "manual",
-      flushToFinalMs: roundMs(final.at - releaseAt),
+      flushToFinalMs: roundMs(releaseToCommitMs),
       device: this.#deviceSpec(),
       peakLevel: Number(this.#utterancePeak.toFixed(4)),
     };

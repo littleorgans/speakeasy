@@ -1,12 +1,12 @@
 import { performance } from "node:perf_hooks";
 import type { STTSession, VoiceToText } from "../contract.ts";
+import { flushCommit } from "../engines/commit.ts";
 import { MoonshineEngine } from "../engines/moonshine.ts";
 import { createLocalOrtEngine } from "../engines/ort-local.ts";
 import { isOrtModelId } from "../engines/ort-models.ts";
 import type { SilenceGateMode } from "../engines/offline-session.ts";
 import { createLocalSherpaEngine } from "../engines/sherpa-binding.ts";
 import { StubEngine } from "../engines/stub.ts";
-import { nextCommit } from "./commit.ts";
 import { FLUSH_FINAL_TIMEOUT_MS, SESSION_TIMEOUT_MS } from "./config.ts";
 import type { BenchModelId } from "./models.ts";
 import { isWordTolerantTranscript, wordErrorCount } from "./transcript.ts";
@@ -128,19 +128,15 @@ export async function runPttOnce(input: {
     }
   }
 
-  const committed = nextCommit(session, FLUSH_FINAL_TIMEOUT_MS);
-  const flushAt = performance.now();
-  session.flush();
-  const final = await committed;
-  const flushToFinalMs = final ? final.at - flushAt : Number.NaN;
-  const finalText = final?.text ?? "";
+  const commit = await flushCommit(session, FLUSH_FINAL_TIMEOUT_MS);
+  const finalText = commit.observation?.text ?? "";
 
   await withTimeout(session.end(), SESSION_TIMEOUT_MS);
   state.throwIfError();
 
   return {
     run: input.run,
-    flushToFinalMs,
+    flushToFinalMs: commit.releaseToCommitMs,
     firstPartialMs: state.firstPartialAt
       ? state.firstPartialAt - start
       : undefined,
