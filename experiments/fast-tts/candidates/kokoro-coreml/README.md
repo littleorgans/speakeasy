@@ -6,11 +6,13 @@ Kokoro 82M v1.0 split into Core ML stages, run by FluidAudio's `KokoroAneManager
 
 The shortlist's pick, `mattmireles/kokoro-coreml@b23caa862f0585c2c65187d0fc97e0f8311041dc` with weights `034f7741`, does not build here. This Mac has Command Line Tools only (Swift 6.4, macOS SDK 27.0, no Xcode; `xcodebuild` and `xcrun --find metal` both fail), and its README asks for Xcode 26+. `swift build -c release --product kokoro-say` stops in its MisakiSwift frontend dependency (pinned `3a27756a`), which pulls in mlx-swift, whose `.metal` kernels need Xcode's Metal compiler: `error: unable to spawn process 'metal' (No such file or directory)`. Replacing MisakiSwift with the package's own `KokoroG2P` would mean patching the SDK's text processor and sourcing separate G2P assets, past a bounded probe. Installing Xcode, or `xcodebuild -downloadComponent MetalToolchain`, which itself needs Xcode, would unblock it; that is a machine change for the owner.
 
+Since Xcode 27.2 with its Metal Toolchain it builds and runs: [kokoro-ane](../../../kokoro-ane/README.md).
+
 The shortlist fallback, FluidAudio, has no package dependencies and no `.metal` sources, and builds with Command Line Tools. Its v3 route uses a CPU/GPU generator adapted from kokoro-coreml.
 
 ## v3 blocker
 
-`kokoro-coreml-v3-heart` downloads and loads (`FluidInference/kokoro-82m-coreml@6c0750dd`, base `006395f6`), then aborts the process on its first synthesis, twice of two, warm and cold: `KokoroSourceGenerator.mlmodelc/model.mil ... error: 'mps.expand_dims' op invalid axis: -1182483122` then MPSGraph `failed assertion 'shape for TensorData is not static'`, in the GPU fast generator. FluidAudio's docs record no macOS 27 report and Metal route MPSGraph aborts on iOS 27 (its issues 843 and 889). The legacy route keeps Noise and Tail off the GPU on OS 27 and runs.
+`kokoro-coreml-v3-heart` downloads and loads (`FluidInference/kokoro-82m-coreml@6c0750dd`, base `006395f6`), then aborts the process on its first synthesis, twice of two, warm and cold: `KokoroSourceGenerator.mlmodelc/model.mil ... error: 'mps.expand_dims' op invalid axis: -1182483122` then MPSGraph `failed assertion 'shape for TensorData is not static'`, in the GPU fast generator. FluidAudio's docs record no macOS 27 report and Metal route MPSGraph aborts on iOS 27 (its issues 843 and 889). The legacy route keeps Noise and Tail off the GPU on OS 27 and runs. Xcode 27.2 does not change it. Upstream FluidAudio `ee78635` (2026-11-02, issue 1103) makes v3 skip that generator on OS 27; not adopted ([kokoro-ane](../../../kokoro-ane/README.md)).
 
 ## Pins
 
