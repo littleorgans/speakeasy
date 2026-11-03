@@ -111,6 +111,22 @@ and keep a remainder for the next call (`stream_settings` in
 Never fake partials by decoding the growing take again: an engine that only
 gives final text keeps `final`.
 
+### Final settings
+
+A setting of the whole take pass, chosen per take with no model reload, gets
+an entry in `FINAL_SETUPS` in `src/final-settings.ts`, in the live settings
+shape; pin the same values under the setup's `controls`. The page shows the
+settings under Speech in only for that setup. Each take sends them as the
+comparison's `settings` (`{ "<setup id>": { "<setting>": value } }`, a query
+parameter beside `setupIds`, or a field of a saved take request); the host
+fills defaults, refuses values not offered, passes them to the worker and
+records them in the row, and the page names them with the take. The backend's
+`transcribe(samples, settings)` checks the same values. Cohere's Names (Off,
+Gentle 1.25, Strong 2.5) is the example: `runtime/native_asr.py` sends a
+nonzero bias as the worker's `B` take, Off as today's `T` take, and
+`runtime/hex/whole.rs` passes it to `runtime/hex/cohere-sequence-bias.patch`,
+which `runtime/hex/build.py` applies to transcribe.cpp.
+
 ## Speech out
 
 Every voice reads back through one sentence pipeline
@@ -170,4 +186,6 @@ returns each part whole: the worker replies once per request.
 `pnpm typecheck && pnpm test` from the repo root. The registry tests pin the
 setup ids and revisions, so update them with the new entry. Backends have
 standard library tests:
-`python3 -m unittest discover -s packages/browser-voice/runtime`.
+`python3 -m unittest discover -s packages/browser-voice/runtime`; with
+`clang++` installed, `test_cohere_bias.py` also compiles the patch's names bias
+selector and checks it.

@@ -6,6 +6,7 @@ import { HoldReleaseGate } from "../public/hold-release.js";
 import * as preRoll from "../public/pre-roll.js";
 import * as text from "../public/road-test-text.js";
 import * as trail from "../public/live-trail.js";
+import { finalSetup } from "./final-settings.ts";
 import { liveStream } from "./live-settings.ts";
 import { END_SILENCE_MS, TalkOverDetector } from "../public/talk-over.js";
 import { VoiceReadback } from "../public/voice-readback.js";
@@ -254,13 +255,15 @@ function pageHarness({ holdVoice = false, transcript = "final" } = {}, rows: unk
       this.active = this.playing = false;
       this.stopped!({ ...voice(), outcome: "stopped", totalMs: null, stopMs: 41 });
     } }
-  // The setups route's live fields, from the real registry; Hex streams too, for a pairing.
+  // The setups route's live and final fields, from the real registries; Hex streams too, for a pairing.
   const streaming = transcript === "partials";
   const setups = { setups: [
     { id: "mlx-parakeet/v3-greedy", label: "Parakeet v3 MLX", card: { runtime: "mlx", transcript }, readiness: { ready: true, sizeBytes: 1 },
       live: streaming ? liveStream("mlx-parakeet/v3-greedy") : null, liveDefault: streaming ? "mlx-parakeet/v3-greedy" : null },
     { id: "hex/unified", label: "Hex Parakeet Unified", card: { runtime: "transcribe.cpp", transcript: "partials" },
       readiness: { ready: true, sizeBytes: 1 }, live: liveStream("hex/unified"), liveDefault: "hex/unified" },
+    { id: "cohere/transcribe", label: "Cohere Transcribe", card: { runtime: "transcribe.cpp", transcript: "final" },
+      readiness: { ready: true, sizeBytes: 1 }, live: null, liveDefault: null, final: finalSetup("cohere/transcribe") },
   ] };
   const voices = { revision: "rev", default: { model: "piper-kristin-medium" }, models: [{ id: "piper-kristin-medium", label: "Piper Kristin medium",
     provider: { kind: "local" }, defaultVoice: "kristin", defaultSpeed: 1, voices: [{ id: "kristin", label: "Kristin" }], readiness: { state: "ready" } }] };
@@ -281,7 +284,7 @@ function pageHarness({ holdVoice = false, transcript = "final" } = {}, rows: unk
       createBuffer(_channels: number, length: number) { return { length, copyToChannel() {} }; }
       createBufferSource() { const source = { buffer: { length: 0 }, connect() {}, stop() {}, start() { played.push(source.buffer.length); } }; return source; } },
     window: { setTimeout, clearTimeout } });
-  vm.runInContext(source("road-test.js") + "\nglobalThis.Page = RoadTestPage;", context);
+  vm.runInContext(source("setting-controls.js") + source("road-test.js") + "\nglobalThis.Page = RoadTestPage;", context);
   return { page: new context.Page(), elements, spoken, posted, played, live };
 }
 
@@ -639,4 +642,35 @@ test("with live words off nothing streams, no first words figure shows, and the 
   assert.equal(elements.get("live-line").textContent, "Live words off.");
   assert.equal(elements.get("trail").hidden, true);
   assert.ok(!listed(elements.get("input-timings")).some((row: string) => row.startsWith("Press to first words")));
+});
+
+test("Cohere shows its Names setting under Speech in; each take sends it, and the take and earlier takes name the value used", async () => {
+  const row = (status: string, extra = {}) => ({ type: "row", row: { setupId: "cohere/transcribe", status, text: null, timings: {}, ...extra } });
+  const { page, elements, posted } = pageHarness({}, [row("processing"),
+    row("complete", { text: "Close Grok.", timings: { firstUse: false, processingMs: 90 }, settings: { namesBias: 1.25 } })]);
+  await page.start();
+  assert.equal(elements.get("final-settings").hidden, true, "Parakeet has no final settings");
+  elements.get("input-model").value = "cohere/transcribe";
+  elements.get("input-model").listeners.get("change")!();
+  assert.equal(elements.get("final-settings").hidden, false);
+  const [names, ...others] = elements.get("final-settings").children;
+  assert.equal(others.length, 0, "one setting");
+  const [label, select, note] = names.children;
+  assert.equal(label.textContent, "Names");
+  assert.equal(note.textContent, "Biases Cohere toward Grok, Claude, Codex, GPT, TM; can turn similar words into these names");
+  assert.deepEqual(select.options.map((option: any) => option.label), ["Off", "Gentle", "Strong"]);
+  assert.equal(select.value, "0", "Off by default");
+  select.value = "1.25";
+  await take(page, 1_000);
+  const url = posted.find((entry) => entry.startsWith("/prompt-reader/comparisons?"))!;
+  assert.equal(new URLSearchParams(url.split("?")[1]).get("settings"), JSON.stringify({ "cohere/transcribe": { namesBias: 1.25 } }));
+  assert.equal(elements.get("take-models").textContent, "Cohere Transcribe · Names gentle · Piper Kristin medium",
+    "the take names the value the host applied");
+  await take(page, 5_000);
+  const earlier = elements.get("history").children[0];
+  assert.equal(earlier.children[0].children.map((cell: any) => cell.textContent).join(" | "), "Cohere Transcribe | Names gentle");
+  elements.get("input-model").value = "mlx-parakeet/v3-greedy";
+  elements.get("input-model").listeners.get("change")!();
+  assert.equal(elements.get("final-settings").hidden, true);
+  assert.equal(page.finalChoice(), null, "a setup without final settings sends none");
 });

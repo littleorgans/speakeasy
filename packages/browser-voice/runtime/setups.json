@@ -336,6 +336,7 @@
       "runtime": {
         "transcribe.cpp": "7045d1c0fe7cee37747b2792977421d435e75fca",
         "worker": "runtime/hex/worker.rs --whole=cohere, built by runtime/hex/build.py",
+        "patch": "runtime/hex/cohere-sequence-bias.patch",
         "device": "Metal"
       },
       "quantization": "Q8_0 GGUF",
@@ -348,6 +349,23 @@
         "minimumSamples": 24000,
         "trailingSamples": 0,
         "vocabulary": [],
+        "namesBias": {
+          "default": 0,
+          "values": [
+            0,
+            1.25,
+            2.5
+          ],
+          "names": [
+            "Grok",
+            "Claude",
+            "Codex",
+            "GPT",
+            "TM"
+          ],
+          "method": "logit bias on every nonempty token prefix of each name, with and without the space marker",
+          "source": "ct-pbias"
+        },
         "repetition": "keep the partial text, as Hex does",
         "gate": "off",
         "rewrite": "off",

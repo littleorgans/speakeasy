@@ -2,10 +2,11 @@
 """Build the Hex Parakeet Unified worker from pinned public source.
 
 Fetches Hex and transcribe.cpp at fixed commits into a fresh directory under
-/private/tmp, extracts Hex's own pause pipeline unchanged, builds worker.rs
-against the Metal runtime with the locked dependencies, and copies the binary
-to --out. Reads no audio. Child diagnostics go to log files in the build
-directory, which is removed after a successful build.
+/private/tmp, applies cohere-sequence-bias.patch to transcribe.cpp (Cohere's
+names bias, research ct-pbias), extracts Hex's own pause pipeline unchanged,
+builds worker.rs against the Metal runtime with the locked dependencies, and
+copies the binary to --out. Reads no audio. Child diagnostics go to log files
+in the build directory, which is removed after a successful build.
 """
 import argparse
 import hashlib
@@ -43,6 +44,7 @@ def build(root, out):
     (root / "home").mkdir()
     hex_source = fetch(root, "hex", *HEX, env)
     runtime = fetch(root, "transcribe", *RUNTIME, env)
+    run(["git", "-C", str(runtime), "apply", str(HERE / "cohere-sequence-bias.patch")], root, "transcribe-patch", env)
     worker = root / "worker"
     (worker / "src/transcription").mkdir(parents=True)
     shutil.copyfile(HERE / "worker.rs", worker / "src/main.rs")

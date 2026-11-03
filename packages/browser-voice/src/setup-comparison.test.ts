@@ -462,6 +462,24 @@ test("queued comparisons release expired unused models between jobs and wait for
   assert.equal(h.executor.maxActive, 1);
 });
 
+test("final settings reach the executor with each take, defaults filled, and each row records them", async (t) => {
+  const { executor, take } = harness();
+  const cohere: SetupId = "cohere/transcribe";
+  const events: ComparisonEvent[] = [];
+  const done = await take([V3, cohere], { settings: { [cohere]: { namesBias: 2.5 } },
+    onEvent: (event: ComparisonEvent) => events.push(event) }).done;
+  t.after(() => executor.close());
+  const sent = executor.requests.map((request) => request.operation === "transcribe" ? request.settings : null);
+  assert.deepEqual(sent, [undefined, { namesBias: 2.5 }], "only the setup that offers them gets settings");
+  assert.deepEqual(done.rows.map((row) => row.settings), [undefined, { namesBias: 2.5 }]);
+  assert.ok(events.some((event) => event.type === "row" && event.row.status === "queued" && event.row.settings?.namesBias === 2.5));
+  await take([cohere]).done;
+  const last = executor.requests.at(-1)!;
+  assert.deepEqual(last.operation === "transcribe" && last.settings, { namesBias: 0 }, "Off unless chosen");
+  assert.throws(() => take([V3], { settings: { [cohere]: { namesBias: 2.5 } } }), /no final settings/);
+  assert.throws(() => take([cohere], { settings: { [cohere]: { namesBias: 5 } } }), /unsupported namesBias/);
+});
+
 test("live words load once, then feed everything queued in one slice, the first opening the stream", async () => {
   const { executor, service } = harness();
   const events: unknown[] = [];

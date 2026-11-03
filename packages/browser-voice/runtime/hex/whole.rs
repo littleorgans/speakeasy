@@ -2,15 +2,22 @@
 //! research gguf-controls runner (control.rs `Condition::options`, runner.rs
 //! `whole_take`): one `session.run` per window, no stream and no pause cap.
 //! `vocabulary` is Hex Unified with the research word list at boost 2.5;
-//! `cohere` is Cohere Transcribe in windows of at most 35 s.
+//! `cohere` is Cohere Transcribe in windows of at most 35 s, optionally with
+//! its names bias (cohere-sequence-bias.patch, research ct-pbias).
 use serde_json::{json, Value};
-use transcribe_cpp::{Error, ExtSlot, Model, ParakeetVocabularyOptions, RunExtension, RunOptions, SessionOptions,
-    TimestampKind};
+use transcribe_cpp::{CohereSequenceBiasOptions, Error, ExtSlot, Model, ParakeetVocabularyOptions, RunExtension,
+    RunOptions, SessionOptions, TimestampKind};
 
 const MINIMUM_SAMPLES: usize = 24_000;
 const TRAILING_SAMPLES: usize = 6_400;
 const COHERE_WINDOW: usize = 560_000;
 const NAMES: [&str; 6] = ["Claude", "GPT", "Grok", "Codex", "TM", "whoami"];
+/// Cohere's biased names, Grok Claude Codex GPT TM, as the pinned GGUF's SentencePiece ids
+/// without then with the leading space marker (ct-pbias tokenizations.json); the patch
+/// biases every prefix of each.
+const NAME_SEQUENCES: [&[i32]; 10] = [&[13842, 564, 13788], &[13814, 750, 1974], &[13814, 2295, 13809],
+    &[13842, 13815, 13806], &[13806, 13816], &[710, 564, 13788], &[627, 750, 1974], &[627, 2295, 13809],
+    &[710, 13815, 13806], &[598, 13816]];
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Whole { Vocabulary, Cohere }
@@ -36,9 +43,15 @@ impl Whole {
         if limit < MINIMUM_SAMPLES { Err("runtime capacity below minimum padding".into()) } else { Ok(limit) }
     }
 
-    fn options(self) -> RunOptions {
+    /// A names bias of zero leaves the run exactly as without one.
+    fn options(self, names_bias: f32) -> RunOptions {
         let timestamps = if self == Self::Cohere { TimestampKind::None } else { TimestampKind::Word };
         let mut options = RunOptions { language: Some("en".into()), timestamps, ..Default::default() };
+        if self == Self::Cohere && names_bias != 0.0 {
+            options.family = Some(RunExtension::CohereSequenceBias(CohereSequenceBiasOptions {
+                bias: names_bias, sequences: NAME_SEQUENCES.iter().map(|ids| ids.to_vec()).collect(),
+            }));
+        }
         if self == Self::Vocabulary {
             options.vocabulary = NAMES.iter().map(|name| name.to_string()).collect();
             options.family = Some(RunExtension::ParakeetVocabulary(ParakeetVocabularyOptions {
@@ -50,8 +63,9 @@ impl Whole {
 
     /// Each window padded to the minimum, plus Parakeet's trailing zeros; window texts
     /// joined. A repetition stop keeps its partial text, as Hex does.
-    pub fn run(self, model: &Model, limit: usize, samples: &[f32]) -> Result<Value, String> {
-        let options = self.options();
+    pub fn run(self, model: &Model, limit: usize, samples: &[f32], names_bias: f32) -> Result<Value, String> {
+        if self != Self::Cohere && names_bias != 0.0 { return Err("names bias is Cohere only".into()); }
+        let options = self.options(names_bias);
         let mut texts = Vec::new();
         let mut raw = Vec::new();
         let mut recovered = false;
@@ -69,7 +83,8 @@ impl Whole {
             texts.push(transcript.text.trim().to_string());
         }
         let text = texts.into_iter().filter(|text| !text.is_empty()).collect::<Vec<_>>().join(" ");
-        Ok(json!({"text":text, "rawText":raw.concat(), "windows":raw.len(), "repetitionRecovered":recovered}))
+        Ok(json!({"text":text, "rawText":raw.concat(), "windows":raw.len(), "repetitionRecovered":recovered,
+            "namesBias":names_bias}))
     }
 }
 

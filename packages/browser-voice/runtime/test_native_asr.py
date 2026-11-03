@@ -34,10 +34,11 @@ while True:
     if len(head) < 5: break
     op, count = head[:1], struct.unpack("<I", head[1:])[0]
     lookahead = struct.unpack("<ii", sys.stdin.buffer.read(8)) if op == b"S" else None
+    bias = struct.unpack("<f", sys.stdin.buffer.read(4))[0] if op == b"B" else 0
     samples = struct.unpack("<%df" % count, sys.stdin.buffer.read(count * 4))
-    if op == b"T":
-        print(json.dumps({{"kind": "result", "text": " ".join(["heard %d" % len(samples)] + mode), "rawText": " heard",
-                          "processingMs": 2.5, "pauseDroppedSamples": 0}}), flush=True)
+    if op in (b"T", b"B"):
+        print(json.dumps({{"kind": "result", "text": " ".join(["heard %d" % len(samples)] + mode + (["names %g" % bias] if op == b"B" else [])),
+                          "rawText": " heard", "processingMs": 2.5, "pauseDroppedSamples": 0, "namesBias": bias}}), flush=True)
     else:
         if lookahead: opened = "%d+%d" % lookahead
         fed = (0 if op == b"S" else fed) + len(samples)
@@ -140,6 +141,28 @@ class HexUnifiedTest(unittest.TestCase):
             self.backend(self.runner(), "cohere/transcribe").load()
         self.assertEqual(worker.BACKENDS["hex/vocabulary"], "native_asr")
         self.assertEqual(worker.BACKENDS["cohere/transcribe"], "native_asr")
+
+    def test_cohere_names_bias_travels_with_each_take_and_off_sends_todays_take(self):
+        cohere = self.backend(self.runner("cohere-transcribe-03-2026"), "cohere/transcribe")
+        with self.pinned("cohere/transcribe"):
+            cohere.load()
+        samples = memoryview(array.array("f", [0.1, -0.2]).tobytes()).cast("f")
+        self.assertEqual(cohere.transcribe(samples, {"namesBias": 2.5})["text"], "heard 2 --whole=cohere names 2.5")
+        self.assertEqual(cohere.transcribe(samples, {"namesBias": 1.25})["text"], "heard 2 --whole=cohere names 1.25",
+                         "no reload between takes")
+        for off in (None, {}, {"namesBias": 0}):
+            with self.subTest(off=off):
+                self.assertEqual(cohere.transcribe(samples, off)["text"], "heard 2 --whole=cohere", "Off is today's T take")
+        for bad in ({"namesBias": 1}, {"namesBias": True}, {"names": 2.5}, [2.5]):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                cohere.transcribe(samples, bad)
+        cohere.close()
+        hex_backend = self.backend(self.runner())
+        with self.pinned():
+            hex_backend.load()
+        with self.assertRaisesRegex(ValueError, "no final settings"):
+            hex_backend.transcribe(samples, {"namesBias": 2.5})
+        hex_backend.close()
 
     def test_apple_needs_no_model_file_and_streams_with_fast_results_on_request(self):
         runner = self.runner("speech-transcriber", "apple")

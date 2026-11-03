@@ -11,6 +11,7 @@ import type { PromptReader } from "./prompt-reader.ts";
 import { ProviderPolicy, type ProviderDispatchContext, type ProviderSource, type VerifiedOwnerReplayGrant } from "./provider-policy.ts";
 import type { ProviderCredentials } from "./provider-availability.ts";
 import type { SpeechOutputCatalogue } from "./speech-output-catalog.ts";
+import { finalSetup, resolveFinalSettings, type FinalSettings } from "./final-settings.ts";
 import { defaultLiveSetup, liveStream } from "./live-settings.ts";
 import { ComparisonBusyError, SetupComparison } from "./setup-comparison.ts";
 import { createCanonicalPcm, MAX_PCM_BYTES, pcmIdentity, type SetupId } from "./setup-protocol.ts";
@@ -128,9 +129,10 @@ export class SetupRoutes {
     const readiness = this.#options.readiness();
     return { schema: 1, manifestSha256: SETUP_MANIFEST_SHA256,
       defaultSetupId: SETUP_MANIFEST.defaultSetupId,
-      // live: the setup's own stream and settings, if it streams; liveDefault: today's live model for it.
+      // live: the setup's own stream and settings, if it streams; liveDefault: today's live model for it;
+      // final: the settings its whole take pass offers, if any.
       setups: SETUPS.map((setup) => ({ ...setup, maxAudioMs: setup.maxSamples / 16, residency: "unobserved",
-        live: liveStream(setup.id) ?? null, liveDefault: defaultLiveSetup(setup.id),
+        live: liveStream(setup.id) ?? null, liveDefault: defaultLiveSetup(setup.id), final: finalSetup(setup.id) ?? null,
         deadlines: readiness.find((entry) => entry.setupId === setup.id)?.deadlines ?? null,
         readiness: readiness.find((entry) => entry.setupId === setup.id) ??
           { setupId: setup.id, ready: false, reason: "runtime not configured" } })),
@@ -146,23 +148,26 @@ export class SetupRoutes {
     try {
       let id: string;
       let setupIds: readonly SetupId[];
+      let settings: FinalSettings;
       let samples: Float32Array;
       let source: ProviderSource;
       if (request.headers["content-type"] === "application/json") {
         boundedQuery(url, []);
         const value = await readJson(request);
-        exactFields(value, ["requestId", "setupIds", "source"]);
+        exactFields(value, ["requestId", "setupIds", "source", "settings"]);
         const saved = savedSource(value.source);
         const reader = this.#reader();
         id = requestId(value.requestId, randomUUID);
         setupIds = selection(value.setupIds);
+        settings = finalSettings(setupIds, value.settings);
         const path = await savedPath(reader, saved);
         source = { kind: "saved-take", corpusId: reader.corpusId, takeId: saved.takeName };
         samples = await readSavedSamples(path);
       } else {
-        boundedQuery(url, ["requestId", "setupIds"]);
+        boundedQuery(url, ["requestId", "setupIds", "settings"]);
         id = requestId(url.searchParams.get("requestId"), randomUUID);
         setupIds = selection(queryJson(url, "setupIds"));
+        settings = finalSettings(setupIds, queryJson(url, "settings"));
         samples = await readTakeSamples(request);
         source = { kind: "live-capture", sessionId: randomUUID(), operationId: randomUUID() };
       }
@@ -170,7 +175,7 @@ export class SetupRoutes {
       release = this.#options.lease.tryAcquire("comparison");
       if (!release) throw new HttpError(409, "Other speech work is in progress", "AUDIO_BUSY");
       let sequence = 0;
-      const handle = this.#options.comparison.compare({ samples, setupIds, signal: lifetime.signal,
+      const handle = this.#options.comparison.compare({ samples, setupIds, settings, signal: lifetime.signal,
         onEvent: (event) => {
           if (lifetime.signal.aborted) return;
           if (!response.headersSent) response.writeHead(200, {
@@ -306,6 +311,11 @@ async function readSavedSamples(path: string): Promise<Float32Array> {
 function selection(value: unknown): readonly SetupId[] {
   try { return parseSetupSelection(value); }
   catch { throw new HttpError(400, "select unique local setup ids"); }
+}
+
+function finalSettings(setupIds: readonly SetupId[], value: unknown): FinalSettings {
+  try { return resolveFinalSettings(setupIds, value); }
+  catch (error) { throw new HttpError(400, error instanceof Error ? error.message : "invalid final settings"); }
 }
 
 function boundedQuery(url: URL, fields: readonly string[]): void {

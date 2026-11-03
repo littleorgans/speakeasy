@@ -200,7 +200,8 @@ export class PythonSetupWorker {
         if (!matches(identity, { sampleRate: request.pcm.sampleRate, channels: request.pcm.channels,
           sampleCount: request.pcm.sampleCount, pcmBytes: request.pcm.pcmBytes, pcmSha256: request.pcm.pcmSha256 })
           || hash(request.pcm.bytes) !== identity.pcmSha256) throw new Error("canonical PCM identity mismatch");
-        return this.#run("transcribe", wireIdentity(identity), body, signal, true);
+        const settings = request.settings ? { settings: request.settings } : {};
+        return this.#run("transcribe", { ...wireIdentity(identity), ...settings }, body, signal, true);
       }
       validateIdentity(request.base);
       if (request.B !== null || typeof request.A !== "string"

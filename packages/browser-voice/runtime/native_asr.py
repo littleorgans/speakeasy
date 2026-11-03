@@ -8,7 +8,8 @@ in that setup's mode and waits for its ready line. For hex/unified each take
 goes through Hex's own stream pipeline inside the worker, and feed runs the
 same pipeline live, at the lookahead the page chose, answering with its
 committed and tentative words; Apple streams the same way. The whole take
-setups (Hex with its word list, Cohere) give final text only.
+setups (Hex with its word list, Cohere) give final text only; Cohere's take
+may carry its one final setting, the names bias.
 """
 
 import copy
@@ -30,6 +31,9 @@ HEX_MODEL = {"file": "parakeet-unified-en-0.6b-Q8_0.gguf", "backend": "metal",
 # Hex: transcribe.cpp's Unified (chunk, right) menu in ms; Hex ships 2080.
 HEX_LIVE = {"setting": "lookaheadMs", "default": 2080, "values": {2080: (1040, 1040), 1120: (560, 560), 480: (160, 320)}}
 APPLE_LIVE = {"setting": "fastResults", "default": 0, "values": {0: (0, 0), 1: (1, 0)}}
+# Cohere's one final setting (src/final-settings.ts): the logit bias toward its
+# five names, sent as the worker's `B` take; Off sends today's `T` take.
+COHERE_FINAL = {"setting": "namesBias", "default": 0, "values": (0, 1.25, 2.5)}
 # Every setup a native worker runs: its model pin, worker mode and pipeline.
 SETUPS = {
     "hex/unified": {**HEX_MODEL, "mode": [], "live": HEX_LIVE,
@@ -41,6 +45,7 @@ SETUPS = {
     "cohere/transcribe": {"file": "cohere-transcribe-03-2026-Q8_0.gguf",
                           "sha256": "931916663432fd895423a4291a8400221802b288967ca2d435fc5e3141c9e71e",
                           "variant": "cohere-transcribe-03-2026", "mode": ["--whole=cohere"], "live": None, "backend": "metal",
+                          "final": COHERE_FINAL,
                           "pipeline": "whole take session.run per window of at most 560000 samples, padded to 24000"},
     # SpeechAnalyzer and SpeechTranscriber, en-US; the system manages its weights.
     "apple/speech": {"file": None, "sha256": None, "variant": "speech-transcriber", "backend": "apple", "mode": [],
@@ -147,11 +152,24 @@ class Backend:
         return {"stable": reply.get("stable"), "tentative": reply.get("tentative"),
                 "processingMs": reply.get("processingMs")}
 
-    def transcribe(self, samples):
-        body = self._send(b"T", samples)
+    def transcribe(self, samples, settings=None):
+        final = self.spec.get("final")
+        if settings is not None and final is None:
+            raise ValueError(f"{self.setup_id} has no final settings")
+        bias = 0
+        if final is not None:
+            settings = {} if settings is None else settings
+            if not isinstance(settings, dict) or set(settings) - {final["setting"]}:
+                raise ValueError(f"{self.setup_id} final settings are {final['setting']}")
+            bias = settings.get(final["setting"], final["default"])
+            if isinstance(bias, bool) or bias not in final["values"]:
+                raise ValueError(f"{self.setup_id} {final['setting']} must be an offered value")
+        body = self._send(b"B", samples, struct.pack("<f", bias)) if bias else self._send(b"T", samples)
         reply = self._reply()
         if reply.get("kind") != "result" or not isinstance(reply.get("text"), str):
             raise RuntimeError("Hex worker returned no result")
+        if bias and reply.get("namesBias") != bias:
+            raise RuntimeError("Hex worker did not apply the names bias")
         return {
             "text": reply["text"], "rawText": reply.get("rawText", reply["text"]),
             "processingMs": reply["processingMs"],
