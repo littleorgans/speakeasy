@@ -31,7 +31,8 @@ const HISTORY_COLUMNS = [
   { label: "Press to first words", kind: "num", cell: (run) => [formatDuration(pressToFirstWords(run))] },
   { label: "Release to text", kind: "num", cell: (run) => [formatDuration(run.input.finalMs),
     run.input.loadMs != null ? `Model start ${formatDuration(run.input.loadMs)}` : null] },
-  { label: "Text to first audio", kind: "num", cell: (run) => [formatDuration(run.output?.firstAudioMs)] },
+  { label: "Text to first audio", kind: "num", cell: (run) => [formatDuration(run.output?.firstAudioMs),
+    run.output?.loadMs != null ? `Model start ${formatDuration(run.output.loadMs)}` : null] },
   { label: "Release to voice", kind: "num", cell: (run) => [formatDuration(releaseToVoice(run))] },
 ];
 
@@ -444,6 +445,7 @@ export class RoadTestPage {
       ["Text to end", formatDuration(output?.totalMs) ?? (output?.outcome === "stopped" ? "stopped" : null)],
       ["Output latency", formatDuration(latency?.outputMs)],
       ["Base latency", formatDuration(latency?.baseMs)],
+      ...(output?.loadMs != null ? [["Model start", formatDuration(output.loadMs)]] : []),
     ]);
     const interrupt = run?.interrupt;
     const stopMs = interrupt?.stopMs;
@@ -490,11 +492,12 @@ export class RoadTestPage {
 
 /**
  * From the press to the first words on screen: live words where the model
- * streams, else the final text. Only a streaming model's take shows it.
+ * streams, else the final text. Only a streaming model's take shows it, and
+ * a take where no words came shows none.
  */
 function pressToFirstWords(run) {
   if (run?.setup?.card?.transcript !== "partials") return null;
-  const firstWordsAt = run.live?.firstWordsAt ?? run.input?.finalAt;
+  const firstWordsAt = run.live?.firstWordsAt ?? (run.input?.text?.trim() ? run.input.finalAt : null);
   return firstWordsAt != null && run.pressedAt != null ? firstWordsAt - run.pressedAt : null;
 }
 

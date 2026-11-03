@@ -225,18 +225,19 @@ function pageHarness({ holdVoice = false, transcript = "final" } = {}, rows: unk
     end() { if (this.takeId) live.ended++; this.takeId = null; } }
   class Mic { open = true; recording = false; async start() {} beginTake() { this.recording = true; return new Float32Array(4_800); }
     async endTake() { this.recording = false; return { samples: new Float32Array(8_000 + takes++).fill(0.1), preRollSamples: 0 }; } }
-  const voice = { firstAudioMs: 120, samples: new Float32Array(4), sampleRate: 22_050 };
+  let voiceLoads = [4_900];
+  const voice = () => ({ firstAudioMs: 120, samples: new Float32Array(4), sampleRate: 22_050, loadMs: voiceLoads.shift() ?? null });
   class Readback { active = false; playing = false; hold = holdVoice; stopped?: (result: unknown) => void; async prepare() {}
     speak(request: any) {
       spoken.push(request);
-      if (!this.hold) return Promise.resolve({ ...voice, outcome: "finished", totalMs: 900 });
+      if (!this.hold) return Promise.resolve({ ...voice(), outcome: "finished", totalMs: 900 });
       this.active = this.playing = true;
       return new Promise((resolve) => { this.stopped = resolve; });
     }
     stop() {
       if (!this.active) return;
       this.active = this.playing = false;
-      this.stopped!({ ...voice, outcome: "stopped", totalMs: null, stopMs: 41 });
+      this.stopped!({ ...voice(), outcome: "stopped", totalMs: null, stopMs: 41 });
     } }
   const setups = { setups: [{ id: "mlx-parakeet/v3-greedy", label: "Parakeet v3 MLX", card: { runtime: "mlx", transcript }, readiness: { ready: true, sizeBytes: 1 } }] };
   const voices = { revision: "rev", default: { model: "piper-kristin-medium" }, models: [{ id: "piper-kristin-medium", label: "Piper Kristin medium",
@@ -464,4 +465,34 @@ test("with talk over off, loud sound during the voice records nothing and the in
   page.elements["talk-over"].checked = true;
   page.render();
   assert.deepEqual(listed(elements.get("interrupt-timings")), ["Stop to silence: 41 ms", "Voice heard after: –", "Silent after: –"]);
+});
+
+test("a take with no words shows no first words, and a voice's first use names its model start", async () => {
+  const silent = [
+    { type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status: "complete", text: "", timings: { firstUse: false, processingMs: 40 } } },
+  ];
+  const { page, elements } = pageHarness({ transcript: "partials" }, silent);
+  await page.start();
+  const quiet = async (at: number) => {
+    page.press(at);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    page.release(at + 4_000);
+    await until(() => page.run.input && page.phase === "idle");
+  };
+  await quiet(100);
+  assert.equal(elements.get("status").textContent, "Nothing heard. Try again closer to the microphone.");
+  assert.ok(listed(elements.get("input-timings")).includes("Press to first words: –"));
+  await quiet(9_000);
+  const [empty] = elements.get("history").children;
+  assert.equal(empty.children[2].children[0].textContent, "Nothing heard");
+  assert.equal(empty.children[3].children[0].textContent, "–", "Earlier takes carry no first words either");
+
+  const spoken = pageHarness();
+  await spoken.page.start();
+  await take(spoken.page, 100);
+  assert.ok(listed(spoken.elements.get("output-timings")).includes("Model start: 4.90 s"), "the voice's first use");
+  await take(spoken.page, 2_000);
+  assert.ok(!listed(spoken.elements.get("output-timings")).some((row: string) => row.startsWith("Model start")), "a warm voice");
+  const [cold] = spoken.elements.get("history").children;
+  assert.deepEqual(cold.children[5].children.map((part: any) => part.textContent), ["120 ms", "Model start 4.90 s"]);
 });
