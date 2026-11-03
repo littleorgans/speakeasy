@@ -25,5 +25,10 @@
   },
   "cpu": {
     "modelRoot": "/absolute/path/to/speak-easy/models/sherpa"
+  },
+  "voices": {
+    "kokoro-mlx-bf16": {
+      "pythonPath": "/absolute/path/to/kokoro-mlx-py3.12/bin/python"
+    }
   }
 }

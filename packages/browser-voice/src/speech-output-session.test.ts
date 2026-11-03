@@ -6,9 +6,13 @@ import type { AudioSegment } from "../../speech-io/src/tts/contract.ts";
 import { createProviderCredentials } from "./provider-availability.ts";
 import { ProviderPolicy } from "./provider-policy.ts";
 import { createHostProviderConfig } from "./setup-routes.ts";
-import { buildSpeechOutputCatalogue, type ApiOutputModel } from "./speech-output-catalog.ts";
+import { buildSpeechOutputCatalogue, type ApiOutputModel, type SpeechOutputCatalogue } from "./speech-output-catalog.ts";
 import type { SpeechOutputEvent } from "./speech-output-protocol.ts";
 import { SpeechOutputSession, type SpeechOutputContext, type SpeechOutputSessionOptions } from "./speech-output-session.ts";
+
+/** The one API voice in the harness catalogue, after however many local voices. */
+const apiOutput = (catalogue: Pick<SpeechOutputCatalogue, "output">) =>
+  catalogue.output.find((entry) => entry.config.provider.kind !== "local")!.config;
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -88,7 +92,7 @@ function harness(t: TestContext, options: {
     type: "speak-sample", requestId, selection, text: "One. Two.", catalogueRevision: serviceCatalogue().revision, ...extra,
   });
   const selectApi = () => {
-    const selection = catalogue.output[2].config;
+    const selection = apiOutput(catalogue);
     send({ type: "select-output", requestId: "choose", catalogueRevision: serviceCatalogue().revision, selection });
     const chosen = events.findLast((event) => event.type === "output-selected");
     assert.ok(chosen?.type === "output-selected");
@@ -219,7 +223,7 @@ test("close waits for a late open and closes it, then waits for native quiescenc
 
 test("API dispatch requires explicit session/config selection; client source and saved grant cannot arm it", async (t) => {
   const h = harness(t);
-  const selection = h.catalogue.output[2].config;
+  const selection = apiOutput(h.catalogue);
   h.speak("unselected", selection);
   await until(() => h.events.some((event) => event.type === "sample-error" && event.code === "SELECTION_REQUIRED"));
   await until(() => !h.state.leaseHeld);

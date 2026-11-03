@@ -47,6 +47,21 @@ export type TtsModel = {
   voices?: string;
 };
 
+/**
+ * A voice a host runs in its own worker runtime (MLX, Core ML, a native
+ * binary), never through sherpa. Its payload is pinned here like any other;
+ * the host supplies the runtime.
+ */
+export type WorkerTtsModel = {
+  name: string;
+  note: string;
+  family: "worker";
+  sampleRate: number;
+  numSpeakers: number;
+  files: readonly TtsModelFile[];
+  attribution: readonly string[];
+};
+
 /** Payload pins from the approved local research records. Explicit provisioning only. */
 export const LOCAL_TTS_MODELS = {
   "piper-kristin-medium": {
@@ -83,7 +98,21 @@ export const LOCAL_TTS_MODELS = {
     ],
     attribution: ["LICENSE", "README.md"],
   },
-} as const satisfies Record<string, TtsModel>;
+  "kokoro-mlx-bf16": {
+    name: "kokoro-82m-mlx-bf16-a71e4d38",
+    note: "Kokoro v1.0 bf16 for MLX, mlx-community/Kokoro-82M-bf16@a71e4d38, two voices, 24000 Hz",
+    family: "worker",
+    sampleRate: 24_000,
+    numSpeakers: 2,
+    files: [
+      { name: "config.json", bytes: 2_351, sha256: "5abb01e2403b072bf03d04fde160443e209d7a0dad49a423be15196b9b43c17f" },
+      { name: "kokoro-v1_0.safetensors", bytes: 327_115_152, sha256: "4e9ecdf03b8b6cf906070390237feda473dc13327cb8d56a43deaa374c02acd8" },
+      { name: "voices/af_heart.safetensors", bytes: 522_320, sha256: "2c1c733b0e6576c810e268d3e440c21dea4e0f0131a3ba4cfc98d7fe6136d094" },
+      { name: "voices/am_michael.safetensors", bytes: 522_320, sha256: "3940147ded35deba0bb52e8132f89b719298e0520258c34584358aa5a24da2ea" },
+    ],
+    attribution: ["README.md"],
+  },
+} as const satisfies Record<string, TtsModel | WorkerTtsModel>;
 
 /** Legacy CLI sweep registry, including its original iteration order. */
 export const TTS_MODELS = {
@@ -149,10 +178,12 @@ export type TtsModelId = keyof typeof TTS_MODELS;
 export type LocalTtsModelId = keyof typeof LOCAL_TTS_MODELS;
 export type SynthModelId = TtsModelId | LocalTtsModelId;
 
+/** The sherpa descriptor for a model id; worker voices never load through sherpa. */
 export function getTtsModel(id: SynthModelId): TtsModel {
-  return Object.hasOwn(LOCAL_TTS_MODELS, id)
-    ? LOCAL_TTS_MODELS[id as LocalTtsModelId]
-    : TTS_MODELS[id as TtsModelId];
+  if (!Object.hasOwn(LOCAL_TTS_MODELS, id)) return TTS_MODELS[id as TtsModelId];
+  const model: TtsModel | WorkerTtsModel = LOCAL_TTS_MODELS[id as LocalTtsModelId];
+  if (model.family === "worker") throw new Error(`${id} runs in a worker runtime, not sherpa`);
+  return model;
 }
 
 export type TtsModelPaths = {

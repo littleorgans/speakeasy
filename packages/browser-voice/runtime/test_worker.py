@@ -245,6 +245,51 @@ class WorkerTests(unittest.TestCase):
                 self.assertEqual(code, 1)
                 self.assertEqual(replies[-1]["type"], "error")
 
+    def test_voice_speak_replies_with_exact_pcm_and_never_transcribes(self):
+        voice_id = "kokoro-mlx-bf16"
+        pcm = struct.pack("<3f", 0.25, -0.0, -1.0)
+
+        class Voice(Backend):
+            def speak(self, text, voice, speed):
+                self.calls.append((text, voice, speed))
+                return {"samples": self.samples, "sampleRate": 24_000, "processingMs": 4}
+
+        backend = Voice()
+        backend.samples = pcm
+        data = (frame("load", setup_id=voice_id, options={})
+                + frame("speak", 2, setup_id=voice_id, text="Clear the screen.", voice="af_heart", speed=1)
+                + frame("close", 3, setup_id=voice_id))
+        target = io.BytesIO()
+        with contextlib.redirect_stderr(io.StringIO()):
+            code = worker.serve(io.BytesIO(data), target, voice_id, GENERATION, lambda selected, options: backend)
+        target.seek(0)
+        replies = []
+        while (reply := worker.read_frame(target)) is not None:
+            replies.append(reply)
+        self.assertEqual(code, 0)
+        self.assertEqual([header["type"] for header, _ in replies], ["ready", "audio", "closed"])
+        audio, body = replies[1]
+        self.assertEqual(body, pcm)
+        self.assertEqual(audio["audio"], {"sampleRate": 24_000, "sampleCount": 3,
+                                          "sha256": hashlib.sha256(pcm).hexdigest()})
+        self.assertEqual(backend.calls, [("Clear the screen.", "af_heart", 1.0)])
+        cases = [(voice_id, frame("transcribe", 2, setup_id=voice_id,
+                                  **{k: v for k, v in identity(b"").items() if k != "pcmBytes"}), pcm),
+                 (SETUP, frame("speak", 2, text="Hi.", voice="af_heart", speed=1), pcm),
+                 (voice_id, frame("speak", 2, setup_id=voice_id, text=" ", voice="af_heart", speed=1), pcm),
+                 (voice_id, frame("speak", 2, setup_id=voice_id, text="Hi.", voice="af_heart", speed=3), pcm),
+                 (voice_id, frame("speak", 2, setup_id=voice_id, text="Hi.", voice="af_heart", speed=1),
+                  struct.pack("<f", math.nan)),
+                 (voice_id, frame("speak", 2, setup_id=voice_id, text="Hi.", voice="af_heart", speed=1), b"\0" * 3)]
+        for setup_id, request, samples in cases:
+            with self.subTest(setup=setup_id, request=request[-60:]):
+                failing = Voice()
+                failing.samples = samples
+                code, replies, _, _, _ = self.run_worker(frame("load", setup_id=setup_id, options={}) + request,
+                                                         setup_id=setup_id, backend=failing)
+                self.assertEqual(code, 1)
+                self.assertEqual(replies[-1]["type"], "error")
+
     def test_imports_are_lazy_and_backend_options_have_fixed_setup(self):
         from unittest.mock import patch
         module = type("Module", (), {"Backend": lambda options: options})

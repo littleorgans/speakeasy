@@ -37,6 +37,11 @@ package shows every entry. Omit a setup to leave it unavailable.
   default 120000.
 - `cpu.modelRoot`: the directory holding `parakeet-ultra-sherpa-onnx-int8`;
   defaults to `models/sherpa`.
+- `voices.<voice id>`: `pythonPath` for a worker voice (Speech out below),
+  plus `runnerPath` where its backend drives a native binary. Optional
+  `loadTimeoutMs` and `operationTimeoutMs` as above. Its weights come from the
+  output root, so no model path. Without an entry the voice shows
+  "needs setup: Voice runtime is not configured".
 
 Unknown setups or fields are refused at startup.
 
@@ -63,17 +68,43 @@ Unknown setups or fields are refused at startup.
 
 ## Speech out
 
-1. Pin the payload files (name, bytes, SHA256) in `LOCAL_TTS_MODELS` in
-   `packages/speech-io/src/tts/models.ts`.
+Every voice reads back through one sentence pipeline
+(`packages/speech-io/src/tts/stream.ts`): it plans a short first part, then
+whole sentences, and asks the voice to synthesize one part at a time, so
+every voice streams by sentence. A sherpa-onnx `vits` or `kokoro` voice runs
+in process on the CPU. Any other runtime (MLX, Core ML, a native binary) is a
+worker voice: the same Python worker as speech in, answering `speak`.
+
+1. Pin the payload files (name, bytes, SHA256; names may include a
+   subdirectory) in `LOCAL_TTS_MODELS` in `packages/speech-io/src/tts/models.ts`.
+   A worker voice uses `family: "worker"` with its `sampleRate`, `numSpeakers`
+   and `attribution`.
 2. Add the browser choice to `LOCAL_OUTPUT_MODELS` in
    `packages/speech-io/src/tts/catalogue.ts`: `id`, `label`, `runtime` (the
    card's runtime line), voices, sample rate and licence. The card's size is
-   the sum of the pinned file bytes.
-3. Put the payload under the output root and restart. A family other than
-   sherpa-onnx `vits` or `kokoro` also needs synthesis support in
-   `packages/speech-io/src/tts/synth.ts`.
+   the sum of the pinned file bytes. A worker voice numbers its `speakerId`s
+   from 0 in list order; the worker receives the voice `id`.
+3. Put the payload under the output root and restart.
+
+A worker voice also needs:
+
+4. A backend in `runtime/<name>.py`: a `Backend` with `load` and
+   `speak(text, voice, speed)`, returning little endian Float32 `samples`
+   bytes, `sampleRate` and `processingMs` for one part. Register it in
+   `BACKENDS` and `VOICES` in `runtime/worker.py`; `runtime/kokoro_mlx.py`
+   is the example. A native binary goes behind such a backend.
+5. A pinned environment: freeze it to `runtime/requirements-<name>.txt` and
+   build it under `~/Library/Caches/speakeasy/browser-voice-switch/environments/`
+   with `uv`, then run `python -m compileall` on its site packages once; the
+   worker starts Python with `-B`, so without compiled bytecode every start
+   recompiles the libraries (30 s instead of 3 s for Kokoro MLX).
+6. Its interpreter under `voices` in `models/road-test-runtime.json` and in
+   `road-test-runtime.example.json`; a native runner also needs its id in
+   `VOICE_EXTRA_LOCATIONS` in `src/server-options.ts`.
 
 ## Check
 
 `pnpm typecheck && pnpm test` from the repo root. The registry tests pin the
-setup ids and revisions, so update them with the new entry.
+setup ids and revisions, so update them with the new entry. Backends have
+standard library tests:
+`python3 -m unittest discover -s packages/browser-voice/runtime`.

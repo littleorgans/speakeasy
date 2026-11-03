@@ -1,6 +1,7 @@
 import { parseSpeechOutputConfig, type SpeechOutputConfig, type SpeechOutputRegistry } from "../provider-config.ts";
 import { CMU_DICT, resolveTtsFrontendAssets } from "./frontend.ts";
-import { resolveTtsModelPaths, LOCAL_TTS_MODELS, TTS_ROOT, verifyTtsFiles } from "./models.ts";
+import { join } from "node:path";
+import { LOCAL_TTS_MODELS, TTS_ROOT, verifyTtsFiles } from "./models.ts";
 
 /** Only owner approved browser choices. The legacy sweep registry stays separate. */
 export const LOCAL_OUTPUT_MODELS = [
@@ -30,12 +31,26 @@ export const LOCAL_OUTPUT_MODELS = [
       { id: "am_michael", label: "Michael", languages: ["en-US"], speakerId: 16 },
     ],
   },
+  {
+    id: "kokoro-mlx-bf16",
+    label: "Kokoro v1.0 MLX bf16",
+    provider: { kind: "local" },
+    runtime: "mlx-audio 0.6.3 on MLX, Metal GPU",
+    defaultVoice: "af_heart",
+    sampleRate: 24_000,
+    streaming: "sentence",
+    licence: "Apache 2.0 weights and code. misaki's espeak-ng fallback is GPL 3.0. Per voice training provenance and generated audio rights unverified.",
+    voices: [
+      { id: "af_heart", label: "Heart", languages: ["en-US"], speakerId: 0 },
+      { id: "am_michael", label: "Michael", languages: ["en-US"], speakerId: 1 },
+    ],
+  },
 ] as const;
 
 export type LocalOutputModel = typeof LOCAL_OUTPUT_MODELS[number];
 export type LocalOutputModelId = LocalOutputModel["id"];
 export type LocalOutputReadiness = {
-  state: "ready" | "assets-missing" | "failed";
+  state: "ready" | "assets-missing" | "runtime-missing" | "failed";
   /** Safe category only. No paths, source locations or native error text. */
   reason: string | null;
 };
@@ -66,14 +81,27 @@ export function localOutputSizeBytes(modelId: LocalOutputModelId): number {
   return LOCAL_TTS_MODELS[modelId].files.reduce((sum, file) => sum + file.bytes, 0);
 }
 
-/** Reads and hashes current bytes. Does not prepare, load, download or synthesize. */
+/** True for a voice the host runs in its own worker runtime, never sherpa. */
+export function isWorkerOutput(modelId: LocalOutputModelId): boolean {
+  return LOCAL_TTS_MODELS[modelId].family === "worker";
+}
+
+/**
+ * Reads and hashes current bytes. Does not prepare, load, download or synthesize.
+ * A worker voice is ready only when the host has configured its runtime.
+ */
 export async function getLocalOutputReadiness(
   modelId: LocalOutputModelId,
   root: string = TTS_ROOT,
+  workerConfigured: (modelId: LocalOutputModelId) => boolean = () => false,
 ): Promise<LocalOutputReadiness> {
-  const paths = resolveTtsModelPaths(LOCAL_TTS_MODELS[modelId], root);
+  const model = LOCAL_TTS_MODELS[modelId];
+  if (model.family === "worker" && !workerConfigured(modelId)) {
+    return { state: "runtime-missing", reason: "Voice runtime is not configured" };
+  }
   try {
-    await verifyTtsFiles(paths.dir, paths.files!, paths.attribution);
+    await verifyTtsFiles(join(root, model.name), model.files, model.attribution);
+    if (model.family === "worker") return { state: "ready", reason: null };
     const frontend = resolveTtsFrontendAssets(root);
     await verifyTtsFiles(frontend.dir, [{ name: "cmudict_data.json", sha256: CMU_DICT.sha256, bytes: CMU_DICT.bytes }]);
     return { state: "ready", reason: null };
@@ -86,9 +114,12 @@ export async function getLocalOutputReadiness(
   }
 }
 
-export async function getLocalOutputCatalogue(root: string = TTS_ROOT) {
+export async function getLocalOutputCatalogue(
+  root: string = TTS_ROOT,
+  workerConfigured?: (modelId: LocalOutputModelId) => boolean,
+) {
   const models = await Promise.all(LOCAL_OUTPUT_MODELS.map(async (model) => ({
-    ...model, readiness: await getLocalOutputReadiness(model.id, root),
+    ...model, readiness: await getLocalOutputReadiness(model.id, root, workerConfigured),
   })));
   return { default: { ...DEFAULT_LOCAL_OUTPUT, provider: { ...DEFAULT_LOCAL_OUTPUT.provider } }, models };
 }

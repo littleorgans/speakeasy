@@ -1,6 +1,6 @@
 import type { SpeechOutputConfig } from "../provider-config.ts";
 import type { TextToSpeech, TTSSession } from "./contract.ts";
-import { DEFAULT_LOCAL_OUTPUT, resolveLocalOutput, type LocalOutputModelId } from "./catalogue.ts";
+import { DEFAULT_LOCAL_OUTPUT, isWorkerOutput, resolveLocalOutput, type LocalOutputModelId } from "./catalogue.ts";
 import { LOCAL_TTS_MODELS } from "./models.ts";
 import type { LoadedTtsSynth } from "./sherpa-tts.ts";
 
@@ -10,11 +10,19 @@ export type LocalSpeechOutputOptions = {
   numThreads?: number;
   /** Test seam. Production uses TtsSynth with downloads disabled. */
   createSynth?: (model: LocalOutputModelId) => Promise<LoadedTtsSynth>;
+  /** Host runtime for worker voices; without it they stay unavailable. */
+  createWorkerSynth?: (model: LocalOutputModelId) => Promise<WorkerTtsSynth>;
 };
 
-type SharedTtsSynth = LoadedTtsSynth & { quiesce(): Promise<void> };
+/** A worker voice's synth owns a process, so it closes with the factory. */
+export type WorkerTtsSynth = LoadedTtsSynth & { close(): Promise<void> };
+type SharedTtsSynth = LoadedTtsSynth & { quiesce(): Promise<void>; close?(): Promise<void> };
 
-/** At most the two approved models. Voice changes share a graph and serialize native calls. */
+/**
+ * One graph per approved model, loaded on first use. Voice changes share a
+ * graph and serialize native calls. Worker voices run the same sentence
+ * pipeline; only their synth comes from the host.
+ */
 export class LocalSpeechOutputFactory {
   readonly #models = new Map<LocalOutputModelId, Promise<SharedTtsSynth>>();
   readonly #options: LocalSpeechOutputOptions;
@@ -63,7 +71,8 @@ export class LocalSpeechOutputFactory {
       this.#closing = (async () => {
         const synths = await Promise.all([...this.#models.values()].map((pending) => pending.catch(() => undefined)));
         await Promise.all(synths.map((synth) => synth?.quiesce()));
-        // The native binding offers no explicit free or abort.
+        // The native binding offers no explicit free or abort; worker processes close.
+        await Promise.all(synths.map((synth) => synth?.close?.()));
         this.#models.clear();
       })();
     }
@@ -74,8 +83,13 @@ export class LocalSpeechOutputFactory {
     let pending = this.#models.get(modelId);
     if (!pending) {
       pending = (async () => {
-        const synth = this.#options.createSynth
+        const worker = isWorkerOutput(modelId);
+        if (worker && !this.#options.createWorkerSynth && !this.#options.createSynth) {
+          throw new Error("Voice runtime is not configured");
+        }
+        const synth: LoadedTtsSynth & { close?(): Promise<void> } = this.#options.createSynth
           ? await this.#options.createSynth(modelId)
+          : worker ? await this.#options.createWorkerSynth!(modelId)
           : await (await import("./synth.ts")).TtsSynth.create(modelId, this.#options.numThreads, {
             root: this.#options.root, allowDownload: false,
           });
@@ -94,6 +108,7 @@ export class LocalSpeechOutputFactory {
             return result;
           },
           quiesce: () => tail,
+          ...(synth.close ? { close: () => synth.close!() } : {}),
         };
         return serialized;
       })().catch((error: unknown) => {

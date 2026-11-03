@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { createSetupRuntime, DEFAULT_OUTPUT_ROOT, DEFAULT_SETUP_RUNTIME, parseSetupRuntimeLocations,
   readBrowserVoiceOptions } from "./server-options.ts";
 import { SETUPS } from "./setup-registry.ts";
+import { isWorkerOutput, LOCAL_OUTPUT_MODELS } from "../../speech-io/src/tts/catalogue.ts";
 
 test("server options keep the model and use the cascade TTS voice", () => {
   assert.deepEqual(
@@ -112,11 +113,31 @@ test("a missing default runtime file still serves and names the file; a missing 
   await assert.rejects(createSetupRuntime(missing), { code: "ENOENT" });
 });
 
-test("the committed example runtime file parses and names every Python setup", async () => {
+test("the committed example runtime file parses and names every Python setup and worker voice", async () => {
   const example = JSON.parse(await readFile(new URL("../road-test-runtime.example.json", import.meta.url), "utf8"));
   const parsed = parseSetupRuntimeLocations(example);
   assert.deepEqual(Object.keys(parsed.python!).sort(),
     SETUPS.map((setup) => setup.id).filter((id) => id !== "sweep/score-2").sort());
+  assert.deepEqual(Object.keys(parsed.voices!).sort(),
+    LOCAL_OUTPUT_MODELS.map((model) => model.id).filter(isWorkerOutput).sort());
+});
+
+test("worker voices take an interpreter from the runtime file; only an existing one makes them configured", async (t) => {
+  const python = { pythonPath: process.execPath };
+  assert.throws(() => parseSetupRuntimeLocations({ voices: { "kokoro-v1.0": python } }), /unknown worker voice/,
+    "a sherpa voice has no worker runtime");
+  assert.throws(() => parseSetupRuntimeLocations({ voices: { "kokoro-mlx-bf16": { ...python, modelPath: "/m" } } }));
+  assert.throws(() => parseSetupRuntimeLocations({ voices: { "kokoro-mlx-bf16": { pythonPath: "relative/python" } } }));
+  const root = await mkdtemp(join(tmpdir(), "speakeasy-voice-runtime-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  for (const [pythonPath, configured] of [[process.execPath, true], [join(root, "missing-python"), false]] as const) {
+    const file = join(root, `runtime-${configured}.json`);
+    await writeFile(file, JSON.stringify({ voices: { "kokoro-mlx-bf16": { pythonPath, loadTimeoutMs: 5000 } } }));
+    const runtime = await createSetupRuntime(file);
+    t.after(() => runtime.executor.close());
+    assert.equal(runtime.voices.configured("kokoro-mlx-bf16"), configured);
+    if (!configured) await assert.rejects(runtime.voices.createSynth("kokoro-mlx-bf16", root), /not configured/);
+  }
 });
 
 test("a composite setup needs its base setup and its card counts both models", async (t) => {

@@ -64,6 +64,11 @@ class Fake:
                 "diagnostics": {"hex": raw.hex(), "count": len(samples), "pid": os.getpid(), "calls": self.calls}}
     def cleanup(self, text):
         return {"text": text, "rawText": text, "processingMs": 0}
+    def speak(self, text, voice, speed):
+        if mode == "badAudio":
+            return {"samples": b"\\0\\0\\xc0\\x7f", "sampleRate": 24000, "processingMs": 1}
+        pcm = struct.pack("<3f", len(text), speed, -0.0)
+        return {"samples": pcm, "sampleRate": 24000, "processingMs": 2}
     def close(self):
         path = self.options.get("closeMarker")
         if path:
@@ -71,8 +76,10 @@ class Fake:
                 target.write("closed")
 def factory(setup, options):
     return Fake(options)
-def write(target, header):
+def write(target, header, pcm=b""):
     header = dict(header)
+    if header["type"] == "audio" and mode == "audioHashMismatch":
+        header["audio"] = {**header["audio"], "sha256": "0" * 64}
     if header["type"] == "ready" and mode == "badReady":
         header["metadata"] = {"revision": "wrong"}
     if header["type"] == "result":
@@ -108,7 +115,7 @@ def write(target, header):
         target.write(packet + packet)
         target.flush()
     else:
-        original_write(target, header)
+        original_write(target, header, pcm)
     if header["type"] == "ready" and mode == "exitAfterReady":
         os._exit(12)
     if header["type"] == "ready" and mode == "sendRace":
@@ -473,4 +480,27 @@ test("close awaits a CPU preparation already in flight before its final child re
   await pending;
   await closing;
   assert.ok(closes >= 2);
+});
+
+test("a worker voice speaks one segment and returns its exact PCM, checked against its identity", async (t) => {
+  const voice = (mode = "") => new PythonSetupWorker({ setupId: "kokoro-mlx-bf16", pythonPath: PYTHON, workerPath: fixture,
+    backendOptions: { mode }, expectedIdentity: { revision: "pinned" }, loadTimeoutMs: 3000, operationTimeoutMs: 3000 });
+  const worker = voice();
+  t.after(() => worker.close());
+  const first = await worker.speak("Hi.", "af_heart", 1.5);
+  assert.deepEqual([...first.samples], [3, 1.5, -0]);
+  assert.ok(Object.is(first.samples[2], -0));
+  assert.equal(first.sampleRate, 24000);
+  assert.equal(first.processingMs, 2);
+  assert.equal(first.firstUse, true);
+  assert.ok(first.startupLoadWallMs > 0, "the first segment carries the load");
+  const second = await worker.speak("Again.", "af_heart", 1);
+  assert.equal(second.firstUse, false);
+  assert.equal(second.startupLoadWallMs, 0);
+  await assert.rejects(worker.speak(" ", "af_heart", 1), /empty/);
+  for (const mode of ["badAudio", "audioHashMismatch"]) {
+    const failing = voice(mode);
+    t.after(() => failing.close());
+    await assert.rejects(failing.speak("Hi.", "af_heart", 1), mode === "badAudio" ? /finite/ : /invalid voice audio/);
+  }
 });
