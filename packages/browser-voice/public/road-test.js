@@ -1,6 +1,6 @@
 import { HoldReleaseGate } from "/hold-release.js";
 import { MicCapture } from "/mic-capture.js";
-import { formatDuration, inputCard, outputCard, outputLatency, readEvents, transcriptMode } from "/road-test-text.js";
+import { formatDuration, inputCard, outputCard, outputLatency, readEvents } from "/road-test-text.js";
 import { TalkOverDetector } from "/talk-over.js";
 import { VoiceReadback } from "/voice-readback.js";
 
@@ -17,14 +17,25 @@ const CUT_IN_MAX_MS = 15_000;
 const BUSY_RETRY_MS = 150;
 const BUSY_RETRY_LIMIT = 80;
 const HISTORY_LIMIT = 20;
-const PLACEHOLDER = "Hold Space, speak, release. The transcript appears here and the voice reads it back.";
+const PLACEHOLDER = "The transcript appears here, and the voice reads it back.";
+const DONE = "Done";
+/** Earlier takes columns; narrow screens stack each row and label its cells with these. */
+const HISTORY_COLUMNS = [
+  { label: "Speech in", cell: (run) => [run.setup.label] },
+  { label: "Voice", cell: (run) => [run.output ? run.voiceLabel : null] },
+  { label: "Transcript", kind: "said-cell", cell: (run) => [run.input.error || run.input.text || "Nothing heard"] },
+  { label: "Release to text", kind: "num", cell: (run) => [formatDuration(run.input.finalMs),
+    run.input.loadMs != null ? `Model start ${formatDuration(run.input.loadMs)}` : null] },
+  { label: "Text to first audio", kind: "num", cell: (run) => [formatDuration(run.output?.firstAudioMs)] },
+  { label: "Release to voice", kind: "num", cell: (run) => [formatDuration(releaseToVoice(run))] },
+];
 
 export class RoadTestPage {
   constructor() {
     this.elements = Object.fromEntries([
       "status", "input-model", "input-card", "output-model", "output-voice", "output-card", "hold", "stop", "level",
-      "transcript", "transcript-mode", "input-timings", "output-timings", "interrupt-timings", "replay-take",
-      "replay-voice", "echo", "talk-over", "history", "history-section", "level-track",
+      "transcript", "take-models", "input-timings", "output-timings", "interrupt-timings", "replay-take",
+      "replay-talk-over", "replay-voice", "echo", "talk-over", "history", "history-head", "history-section", "level-track",
     ].map((id) => [id, document.getElementById(id)]));
     this.setups = [];
     this.voices = [];
@@ -43,6 +54,13 @@ export class RoadTestPage {
 
   async start() {
     this.bind();
+    this.elements["history-head"].replaceChildren(...HISTORY_COLUMNS.map(({ label, kind }) => {
+      const head = document.createElement("th");
+      head.scope = "col";
+      head.textContent = label;
+      if (kind === "num") head.className = kind;
+      return head;
+    }));
     try {
       const [setups, voices] = await Promise.all([json("/prompt-reader/setups"), json("/speech-output/models")]);
       this.setups = setups.setups;
@@ -70,7 +88,7 @@ export class RoadTestPage {
     this.elements["output-model"].addEventListener("change", () => { this.fillVoices(); this.render(); });
     for (const id of ["input-model", "output-voice"]) this.elements[id].addEventListener("change", () => this.render());
     this.elements.echo.addEventListener("change", () => void this.reopenMic());
-    this.elements["replay-take"].addEventListener("click", () => this.replay("take"));
+    for (const which of ["take", "talk-over"]) this.elements[`replay-${which}`].addEventListener("click", () => this.replay(which));
     this.elements["replay-voice"].addEventListener("click", () => this.replay("voice"));
     document.addEventListener("keydown", (event) => {
       if (event.code === "Space") {
@@ -124,9 +142,11 @@ export class RoadTestPage {
   press(at) {
     if (!this.setup()?.readiness?.ready || this.phase === "cut-in" || !this.gate.press()) return;
     this.stopReplay();
-    if (this.readback?.active) this.stopVoice(at);
+    // A press over the voice stops it like Esc; the new take shows that stop.
+    const interrupt = this.stopVoice(at);
     this.phase = "recording";
-    this.run = { setup: this.setup(), selection: this.selection(), voiceLabel: this.voiceLabel(), pressedAt: at };
+    this.run = { setup: this.setup(), selection: this.selection(), voiceLabel: this.voiceLabel(), pressedAt: at,
+      ...(interrupt ? { interrupt } : {}) };
     this.status("Listening. Release when you finish.");
     this.render();
     void this.openAudio().then(() => {
@@ -150,7 +170,7 @@ export class RoadTestPage {
     if (this.run !== run) return;
     if (!take || (take.samples.length - take.preRollSamples) / SAMPLE_RATE * 1_000 < MIN_TAKE_MS) {
       this.phase = "idle";
-      this.status("Too short. Hold Space for the whole phrase.");
+      this.status("Too short. Hold for the whole phrase.");
       this.render();
       return;
     }
@@ -234,19 +254,22 @@ export class RoadTestPage {
     this.render();
     const output = await speaking;
     run.output = output;
+    if (run.interrupt) run.interrupt.stopMs = output.stopMs;
     run.outputLatency = outputLatency(this.context);
     if (this.run !== run && this.phase !== "cut-in") return;
     if (output.outcome === "error") this.status(`Voice failed: ${output.message}`);
-    else if (output.outcome === "finished") this.status("Done. Hold Space for the next take.");
+    else if (output.outcome === "finished") this.status(DONE);
     if (this.phase === "speaking") this.phase = "idle";
   }
 
   /** Stop key, button, or a new press: timed from the press to silence at the output. */
   stopVoice(at) {
-    if (!this.readback?.active || !this.run) return;
-    this.run.interrupt = { kind: "stop", from: at };
+    if (!this.readback?.active || !this.run) return undefined;
+    const interrupt = { kind: "stop", from: at };
+    this.run.interrupt = interrupt;
     this.readback.stop(at);
     this.status("Voice stopped.");
+    return interrupt;
   }
 
   frame(frame) {
@@ -286,14 +309,15 @@ export class RoadTestPage {
     const result = await this.transcribe(run, take.samples, endedAt, () => {});
     run.interrupt.text = result.error || result.text || "Nothing heard";
     this.phase = "idle";
-    this.status("Done. Hold Space for the next take.");
+    this.status(DONE);
     this.render();
   }
 
+  /** Replays the latest take, what was said over the voice, or the voice. */
   replay(which) {
     const run = this.run;
-    const samples = which === "take" ? run?.cutInTake ?? run?.take : run?.output?.samples;
-    const rate = which === "take" ? SAMPLE_RATE : run?.output?.sampleRate;
+    const [samples, rate] = { take: [run?.take, SAMPLE_RATE], "talk-over": [run?.cutInTake, SAMPLE_RATE],
+      voice: [run?.output?.samples, run?.output?.sampleRate] }[which];
     if (!samples?.length || !rate || !this.context) return;
     this.stopReplay();
     const buffer = this.context.createBuffer(1, samples.length, rate);
@@ -349,8 +373,10 @@ export class RoadTestPage {
       this.elements.transcript.textContent = run ? "" : PLACEHOLDER;
       this.elements.transcript.classList.toggle("placeholder", !run);
     }
-    this.elements["transcript-mode"].textContent = transcriptMode(run?.setup ?? setup);
-    this.elements["replay-take"].disabled = !(run?.cutInTake ?? run?.take);
+    // Names the models that produced the latest take, so changed selects never claim its figures.
+    this.elements["take-models"].textContent = run ? [run.setup.label, run.selection && run.voiceLabel].filter(Boolean).join(" · ") : "";
+    this.elements["replay-take"].disabled = !run?.take;
+    this.elements["replay-talk-over"].hidden = !run?.cutInTake;
     this.elements["replay-voice"].disabled = !run?.output?.samples?.length;
     this.renderTimings(run);
     this.renderHistory();
@@ -374,7 +400,7 @@ export class RoadTestPage {
       ["Base latency", formatDuration(latency?.baseMs)],
     ]);
     const interrupt = run?.interrupt;
-    const stopMs = output?.stopMs;
+    const stopMs = interrupt?.stopMs;
     const said = interrupt?.text ?? (this.phase === "cut-in" ? "Listening" : this.phase === "cut-in-transcribing" ? "Transcribing" : null);
     describe(this.elements["interrupt-timings"], interrupt?.kind === "talk-over" ? [
       ["Voice heard after", formatDuration(interrupt.detectMs)],
@@ -387,18 +413,26 @@ export class RoadTestPage {
     ]);
   }
 
-  /** Earlier takes only; the latest is already shown above. */
+  /** Earlier takes only; the latest is already shown above. A cold row names its model start. */
   renderHistory() {
     const earlier = this.history.filter((run) => run !== this.run);
     const rows = earlier.map((run) => {
       const row = document.createElement("tr");
-      for (const [text, kind] of [[run.setup.label], [run.output ? run.voiceLabel : "–"], [run.input.error || run.input.text || "Nothing heard", "said-cell"],
-        [formatDuration(run.input.finalMs) ?? "–", "num"], [formatDuration(run.output?.firstAudioMs) ?? "–", "num"],
-        [formatDuration(releaseToVoice(run)) ?? "–", "num"]]) {
-        const cell = document.createElement("td");
-        cell.textContent = text;
-        if (kind) cell.className = kind;
-        row.append(cell);
+      for (const { label, kind, cell } of HISTORY_COLUMNS) {
+        const [value, note] = cell(run);
+        const data = document.createElement("td");
+        data.dataset.label = label;
+        if (kind) data.className = kind;
+        const text = document.createElement("span");
+        text.textContent = value ?? "–";
+        data.append(text);
+        if (note) {
+          const quiet = document.createElement("span");
+          quiet.className = "note";
+          quiet.textContent = note;
+          data.append(quiet);
+        }
+        row.append(data);
       }
       return row;
     });

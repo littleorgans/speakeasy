@@ -39,8 +39,8 @@
 
       <section class="take" aria-label="Latest take">
         <div class="transcript">
-          <h2 class="label"><span>Transcript</span><span class="quiet" id="transcript-mode"></span></h2>
-          <p class="said" id="transcript">Hold Space, speak, release. The transcript appears here and the voice reads it back.</p>
+          <h2 class="label"><span>Transcript</span><span class="quiet" id="take-models"></span></h2>
+          <p class="said" id="transcript">The transcript appears here, and the voice reads it back.</p>
         </div>
         <div class="timings">
           <div class="group"><h2 class="label" id="input-heading">Speech in</h2><dl id="input-timings" aria-labelledby="input-heading"></dl></div>
@@ -48,7 +48,8 @@
           <div class="group"><h2 class="label" id="interrupt-heading">Interrupt</h2><dl id="interrupt-timings" aria-labelledby="interrupt-heading"></dl></div>
         </div>
         <p class="replay">
-          <button id="replay-take" type="button" disabled>Replay my recording</button>
+          <button id="replay-take" type="button" disabled>Replay my take</button>
+          <button id="replay-talk-over" type="button" hidden>Replay my talk over</button>
           <button id="replay-voice" type="button" disabled>Replay voice</button>
         </p>
       </section>
@@ -62,10 +63,7 @@
       <section class="history" aria-labelledby="history-heading" hidden id="history-section">
         <h2 class="label" id="history-heading">Earlier takes</h2>
         <table>
-          <thead>
-            <tr><th scope="col">Speech in</th><th scope="col">Voice</th><th scope="col">Transcript</th>
-              <th scope="col" class="num">Release to text</th><th scope="col" class="num">Text to first audio</th><th scope="col" class="num">Release to voice</th></tr>
-          </thead>
+          <thead><tr id="history-head"></tr></thead>
           <tbody id="history"></tbody>
         </table>
       </section>

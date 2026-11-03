@@ -41,14 +41,14 @@ test("talk over tracks the noise floor, so steady echo below three times it neve
 });
 
 test("model cards are plain text: where it runs, size and runtime", () => {
-  assert.equal(text.inputCard({ readiness: { ready: true, sizeBytes: 2_509_042_622 }, card: { runtime: "parakeet-mlx 0.5.3 on MLX, Metal GPU" } }),
-    "Local · 2.5 GB · parakeet-mlx 0.5.3 on MLX, Metal GPU");
-  assert.equal(text.inputCard({ readiness: { ready: false, reason: "runtime or model files need setup" }, card: { runtime: "speech.cpp" } }),
-    "Local · size unknown · speech.cpp · needs setup: runtime or model files need setup");
+  assert.equal(text.inputCard({ readiness: { ready: true, sizeBytes: 2_509_042_622 },
+    card: { runtime: "parakeet-mlx 0.5.3 on MLX, Metal GPU", transcript: "final" } }),
+    "Local · 2.5 GB · parakeet-mlx 0.5.3 on MLX, Metal GPU · final text only");
+  assert.equal(text.inputCard({ readiness: { ready: false, reason: "runtime or model files need setup" },
+    card: { runtime: "speech.cpp", transcript: "partials" } }),
+    "Local · size unknown · speech.cpp · partials while you speak · needs setup: runtime or model files need setup");
   assert.equal(text.outputCard({ provider: { kind: "local" }, sizeBytes: 63_537_415, runtime: "sherpa-onnx VITS, CPU",
     streaming: "sentence", readiness: { state: "ready" } }), "Local · 64 MB · sherpa-onnx VITS, CPU · streams by sentence");
-  assert.equal(text.transcriptMode({ card: { transcript: "final" } }), "Final text only");
-  assert.equal(text.transcriptMode({ card: { transcript: "partials" } }), "Partials while you speak");
   assert.equal(text.formatDuration(312.4), "312 ms");
   assert.equal(text.formatDuration(1_234), "1.23 s");
   assert.equal(text.formatDuration(null), null);
@@ -190,8 +190,13 @@ test("mic capture leads a take with pre roll and ends it at the worklet's flush 
   assert.equal(mic.ring.samples, 320, "frames after the flush reply feed the next pre roll");
 });
 
-/** The page with real gate and text helpers; the mic and voice are scripted fakes. */
-function pageHarness(rows: unknown[] = [
+/**
+ * The page with real gate, detector and text helpers; the mic and voice are
+ * scripted fakes. With holdVoice the voice plays until stopped, then reports
+ * a 41 ms stop. Each mic take is one sample longer than the last, so replays
+ * show which take they play.
+ */
+function pageHarness({ holdVoice = false } = {}, rows: unknown[] = [
   { type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status: "processing", text: null, timings: {} } },
   { type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status: "complete", text: "Clear the screen.", timings: { firstUse: false, processingMs: 90 } } },
 ]) {
@@ -199,6 +204,7 @@ function pageHarness(rows: unknown[] = [
   (globalThis as any).window ??= { setTimeout, clearTimeout };
   const elements = new Map<string, any>();
   const element = () => ({ textContent: "", value: "", disabled: false, hidden: false, checked: true, className: "", style: {} as Record<string, string>,
+    dataset: {} as Record<string, string>,
     children: [] as any[], listeners: new Map<string, (event?: any) => void>(), classList: { toggle() {} },
     addEventListener(type: string, listener: (event?: any) => void) { this.listeners.set(type, listener); },
     setAttribute() {}, append(...nodes: any[]) { this.children.push(...nodes); }, replaceChildren(...nodes: any[]) { this.children = nodes; } });
@@ -210,11 +216,23 @@ function pageHarness(rows: unknown[] = [
   }, createElement: element, addEventListener() {} };
   const spoken: any[] = [];
   const posted: string[] = [];
+  const played: number[] = [];
+  let takes = 0;
   class Mic { open = true; recording = false; async start() {} beginTake() { this.recording = true; return 0; }
-    async endTake() { this.recording = false; return { samples: new Float32Array(8_000).fill(0.1), preRollSamples: 0 }; } }
-  class Readback { active = false; playing = false; async prepare() {}
-    async speak(request: any) { spoken.push(request); return { outcome: "finished", firstAudioMs: 120, totalMs: 900, samples: new Float32Array(4), sampleRate: 22_050 }; }
-    stop() {} }
+    async endTake() { this.recording = false; return { samples: new Float32Array(8_000 + takes++).fill(0.1), preRollSamples: 0 }; } }
+  const voice = { firstAudioMs: 120, samples: new Float32Array(4), sampleRate: 22_050 };
+  class Readback { active = false; playing = false; stopped?: (result: unknown) => void; async prepare() {}
+    speak(request: any) {
+      spoken.push(request);
+      if (!holdVoice) return Promise.resolve({ ...voice, outcome: "finished", totalMs: 900 });
+      this.active = this.playing = true;
+      return new Promise((resolve) => { this.stopped = resolve; });
+    }
+    stop() {
+      if (!this.active) return;
+      this.active = this.playing = false;
+      this.stopped!({ ...voice, outcome: "stopped", totalMs: null, stopMs: 41 });
+    } }
   const setups = { setups: [{ id: "mlx-parakeet/v3-greedy", label: "Parakeet v3 MLX", card: { runtime: "mlx", transcript: "final" }, readiness: { ready: true, sizeBytes: 1 } }] };
   const voices = { revision: "rev", default: { model: "piper-kristin-medium" }, models: [{ id: "piper-kristin-medium", label: "Piper Kristin medium",
     provider: { kind: "local" }, defaultVoice: "kristin", defaultSpeed: 1, voices: [{ id: "kristin", label: "Kristin" }], readiness: { state: "ready" } }] };
@@ -231,15 +249,34 @@ function pageHarness(rows: unknown[] = [
   const context = vm.createContext({ document, fetch, performance, setTimeout, clearTimeout, URLSearchParams, TextEncoder, TextDecoder,
     JSON, Float32Array, Promise, Option: function(label: string, value: string) { return { label, value }; },
     HoldReleaseGate, MicCapture: Mic, VoiceReadback: Readback, TalkOverDetector, ...text,
-    AudioContext: class { async resume() {} }, window: { setTimeout, clearTimeout } });
+    AudioContext: class { currentTime = 0; destination = {}; async resume() {}
+      createBuffer(_channels: number, length: number) { return { length, copyToChannel() {} }; }
+      createBufferSource() { const source = { buffer: { length: 0 }, connect() {}, stop() {}, start() { played.push(source.buffer.length); } }; return source; } },
+    window: { setTimeout, clearTimeout } });
   vm.runInContext(source("road-test.js") + "\nglobalThis.Page = RoadTestPage;", context);
-  return { page: new context.Page(), elements, spoken, posted };
+  return { page: new context.Page(), elements, spoken, posted, played };
+}
+
+const until = async (done: () => unknown) => {
+  for (let tries = 0; !done(); tries++) {
+    if (tries > 200) throw new Error("timed out");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+};
+const listed = (list: any) => list.children.map((row: any) => row.children.map((cell: any) => cell.textContent).join(": "));
+
+/** Holds and releases one take, then waits for the voice to start or finish. */
+async function take(page: any, pressAt: number) {
+  page.press(pressAt);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  page.release(pressAt + 400);
+  await until(() => page.phase === "speaking" || page.run?.output);
 }
 
 test("the page loop: hold, release, final text, then the chosen voice reads it back", async () => {
   const { page, elements, spoken, posted } = pageHarness();
   await page.start();
-  assert.equal(elements.get("input-card").textContent, "Local · 1 MB · mlx");
+  assert.equal(elements.get("input-card").textContent, "Local · 1 MB · mlx · final text only");
   page.press(100);
   await new Promise((resolve) => setTimeout(resolve, 0));
   page.release(500);
@@ -249,7 +286,11 @@ test("the page loop: hold, release, final text, then the chosen voice reads it b
   assert.equal(spoken.length, 1);
   assert.equal(spoken[0].text, "Clear the screen.");
   assert.equal(JSON.stringify(spoken[0].selection), JSON.stringify({ schema: 1, provider: { kind: "local" }, model: "piper-kristin-medium", voice: "kristin", speed: 1 }));
-  assert.equal(elements.get("transcript-mode").textContent, "Final text only");
+  assert.equal(elements.get("take-models").textContent, "Parakeet v3 MLX · Piper Kristin medium");
+  elements.get("output-model").value = "another-voice";
+  page.render();
+  assert.equal(elements.get("take-models").textContent, "Parakeet v3 MLX · Piper Kristin medium",
+    "the latest take keeps naming the models that produced it after the selects change");
   const timings = elements.get("output-timings").children.map((row: any) => row.children.map((cell: any) => cell.textContent).join(": "));
   assert.ok(timings.includes("Text to first audio: 120 ms"), timings.join(" | "));
   assert.ok(timings.includes("Text to end: 900 ms"));
@@ -258,7 +299,7 @@ test("the page loop: hold, release, final text, then the chosen voice reads it b
 
 test("model start sums every load phase, so a cleanup row counts its own model after Ultra", async () => {
   const row = (status: string, extra = {}) => ({ type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status, text: null, timings: {}, ...extra } });
-  const { page } = pageHarness([row("loading"), row("processing"), row("loading"), row("processing"),
+  const { page } = pageHarness({}, [row("loading"), row("processing"), row("loading"), row("processing"),
     row("complete", { text: "Clear the screen.", timings: { firstUse: true, processingMs: 90 } })]);
   await page.start();
   let now = 0;
@@ -269,4 +310,52 @@ test("model start sums every load phase, so a cleanup row counts its own model a
     const result = await page.transcribe({ setup: page.setups[0] }, new Float32Array(16), 0, () => {});
     assert.equal(result.loadMs, 100 + 1_000);
   } finally { performance.now = clock; }
+});
+
+test("Space over the voice stops it like Esc, and the new take shows the stop time", async () => {
+  const { page, elements } = pageHarness({ holdVoice: true });
+  await page.start();
+  await take(page, 100);
+  const first = page.run;
+  page.press(3_000);
+  assert.notEqual(page.run, first, "the press starts a new take");
+  assert.equal(first.interrupt.kind, "stop");
+  await until(() => page.history.includes(first));
+  assert.ok(listed(elements.get("interrupt-timings")).includes("Stop to silence: 41 ms"));
+});
+
+test("after a talk over both recordings replay, each under its own button", async () => {
+  const { page, elements, played } = pageHarness({ holdVoice: true });
+  await page.start();
+  await take(page, 100);
+  let time = 1;
+  const frame = (level: number) => page.frame({ level, audioTime: time += 0.02 });
+  for (let index = 0; index < 10; index++) frame(0.002);
+  for (let index = 0; index < 3; index++) frame(0.2);
+  assert.equal(page.phase, "cut-in");
+  while (page.phase === "cut-in") frame(0.002);
+  await until(() => page.phase === "idle");
+  assert.equal(page.run.interrupt.text, "Clear the screen.");
+  assert.equal(elements.get("replay-take").disabled, false);
+  assert.equal(elements.get("replay-talk-over").hidden, false);
+  page.replay("take");
+  page.replay("talk-over");
+  assert.deepEqual(played, [8_000, 8_001], "the main take, then the talk over");
+});
+
+test("earlier takes label every cell and name a cold row's model start", async () => {
+  const row = (status: string, extra = {}) => ({ type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status, text: null, timings: {}, ...extra } });
+  const { page, elements } = pageHarness({}, [row("loading"), row("processing"),
+    row("complete", { text: "Clear the screen.", timings: { firstUse: true, processingMs: 90 } })]);
+  await page.start();
+  assert.deepEqual(elements.get("history-head").children.map((cell: any) => cell.textContent),
+    ["Speech in", "Voice", "Transcript", "Release to text", "Text to first audio", "Release to voice"]);
+  await take(page, 100);
+  await take(page, 2_000);
+  const [cold] = elements.get("history").children;
+  assert.deepEqual(cold.children.map((cell: any) => cell.dataset.label),
+    ["Speech in", "Voice", "Transcript", "Release to text", "Text to first audio", "Release to voice"]);
+  const releaseToText = cold.children[3].children.map((part: any) => part.textContent);
+  assert.equal(releaseToText.length, 2);
+  assert.match(releaseToText[1], /^Model start \d/);
 });

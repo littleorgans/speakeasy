@@ -48,9 +48,8 @@ h1 { flex: none; font-size: var(--text); font-weight: 600; }
 
 .choices { display: grid; gap: 24px; }
 
-.choice { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px 16px; align-items: center; }
-
-.choice .card { grid-column: 2; }
+/* Labels sit above their controls, so the page keeps one left edge. */
+.choice { display: grid; gap: 8px; }
 
 .pair { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 8px; }
 
@@ -124,9 +123,7 @@ dd.missing { color: var(--ink-3); }
 
 .page > * { min-width: 0; }
 
-.history { display: grid; gap: 8px; overflow-x: auto; }
-
-.history table { min-width: 640px; }
+.history { display: grid; gap: 8px; }
 
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 
@@ -140,13 +137,23 @@ th:last-child, td:last-child { padding-right: 0; }
 
 .num { text-align: right; white-space: nowrap; }
 
+.note { display: block; color: var(--ink-3); }
+
 footer { padding-top: 24px; border-top: 1px solid var(--rule); }
 
 @media (max-width: 640px) {
-  .choice { grid-template-columns: 1fr; }
-  .choice .card { grid-column: 1; }
   .pair { grid-template-columns: 1fr; }
   .timings { grid-template-columns: 1fr; }
+  /* Two equal buttons on one line, the level line under both. */
+  .talk { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 8px; }
+  .talk button { min-height: 48px; padding: 0 8px; white-space: nowrap; }
+  .level { grid-column: 1 / -1; }
+  /* Each earlier take stacks into labelled lines, so every timing stays on screen. */
+  .history thead { display: none; }
+  .history table, .history tbody { display: block; }
+  .history tr { display: grid; gap: 8px; padding: 16px 0; border-bottom: 1px solid var(--rule); }
+  .history td { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 16px; padding: 0; border: 0; text-align: right; }
+  .history td::before { content: attr(data-label); grid-row: span 2; text-align: left; color: var(--ink-3); }
 }
 
 @media (prefers-reduced-motion: reduce) {

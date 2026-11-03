@@ -10,13 +10,14 @@ export function formatBytes(bytes) {
   return bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1e6))} MB`;
 }
 
-/** Name · where it runs · size · runtime. The name is the list entry itself. */
+/** Name · where it runs · size · runtime · transcript mode. The name is the list entry itself. */
 export function inputCard(setup) {
   const ready = setup.readiness?.ready === true;
   return [
     "Local",
     formatBytes(setup.readiness?.sizeBytes) ?? "size unknown",
     setup.card?.runtime ?? "runtime unknown",
+    setup.card?.transcript === "partials" ? "partials while you speak" : "final text only",
     ready ? "" : `needs setup: ${setup.readiness?.reason ?? "not configured"}`,
   ].filter(Boolean).join(" · ");
 }
@@ -29,10 +30,6 @@ export function outputCard(model) {
     model.streaming === "sentence" ? "streams by sentence" : model.streaming === "pcm" ? "streams audio" : "",
     model.readiness?.state === "ready" ? "" : `needs setup: ${model.readiness?.reason ?? model.readiness?.state}`,
   ].filter(Boolean).join(" · ");
-}
-
-export function transcriptMode(setup) {
-  return setup?.card?.transcript === "partials" ? "Partials while you speak" : "Final text only";
 }
 
 /** The browser's reported output path delays in ms; null where it reports none. */
