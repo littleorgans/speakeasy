@@ -53,9 +53,13 @@ test("model cards are plain text: where it runs, size, runtime and terms", () =>
     streaming: "sentence", readiness: { state: "ready" } }), "Local · 64 MB · sherpa-onnx VITS, CPU · streams by sentence");
   assert.equal(text.inputCard({ readiness: { ready: true, sizeBytes: 731_357_568 },
     card: { runtime: "transcribe.cpp", transcript: "final", terms: "NVIDIA Open Model License" } }),
-  "Local · 731 MB · transcribe.cpp · Terms: NVIDIA Open Model License", "a terms line where not permissive");
+  "Local · 731 MB · transcribe.cpp · Terms:\u00a0NVIDIA\u00a0Open\u00a0Model\u00a0License",
+  "a terms line where not permissive, never split across lines");
   assert.equal(text.outputCard({ provider: { kind: "local" }, sizeBytes: 1, runtime: "libpiper", streaming: "sentence",
-    terms: "GPL 3.0 runtime", readiness: { state: "ready" } }), "Local · 1 MB · libpiper · streams by sentence · Terms: GPL 3.0 runtime");
+    terms: "GPL 3.0 runtime", readiness: { state: "ready" } }), "Local · 1 MB · libpiper · streams by sentence · Terms:\u00a0GPL\u00a03.0\u00a0runtime");
+  assert.equal(text.outputCard({ provider: { kind: "local" }, sizeBytes: 1, runtime: "pocket", terms: "CC BY 4.0, credit required",
+    readiness: { state: "ready" } }), "Local · 1 MB · pocket · Terms:\u00a0CC\u00a0BY\u00a04.0, credit\u00a0required",
+  "long terms break only after their punctuation");
   assert.equal(text.formatDuration(312.4), "312 ms");
   assert.equal(text.formatDuration(1_234), "1.23 s");
   assert.equal(text.formatDuration(null), null);

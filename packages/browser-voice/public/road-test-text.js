@@ -10,6 +10,11 @@ export function formatBytes(bytes) {
   return bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1e6))} MB`;
 }
 
+/** A card's terms; a wrapping card breaks them only after a comma or semicolon, never inside a licence name. */
+function termsLine(terms) {
+  return terms ? `Terms: ${terms}`.replaceAll(" ", "\u00a0").replace(/([,;])\u00a0/g, "$1 ") : "";
+}
+
 /**
  * Where it runs · size · runtime · terms where not permissive. The name is the
  * list entry itself; whether words show while you speak is the Live words
@@ -21,7 +26,7 @@ export function inputCard(setup) {
     "Local",
     formatBytes(setup.readiness?.sizeBytes) ?? setup.card?.size ?? "size unknown",
     setup.card?.runtime ?? "runtime unknown",
-    setup.card?.terms ? `Terms: ${setup.card.terms}` : "",
+    termsLine(setup.card?.terms),
     ready ? "" : `needs setup: ${setup.readiness?.reason ?? "not configured"}`,
   ].filter(Boolean).join(" · ");
 }
@@ -32,7 +37,7 @@ export function outputCard(model) {
     formatBytes(model.sizeBytes) ?? "size unknown",
     model.runtime ?? "runtime unknown",
     model.streaming === "sentence" ? "streams by sentence" : model.streaming === "pcm" ? "streams audio" : "",
-    model.terms ? `Terms: ${model.terms}` : "",
+    termsLine(model.terms),
     model.readiness?.state === "ready" ? "" : `needs setup: ${model.readiness?.reason ?? model.readiness?.state}`,
   ].filter(Boolean).join(" · ");
 }
