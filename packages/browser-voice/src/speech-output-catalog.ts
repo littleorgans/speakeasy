@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { CatalogueEntry, OutputApiKind, SpeechOutputConfig, SpeechOutputRegistry } from "@speakeasy/speech-io/providers";
-import type { getLocalOutputCatalogue } from "../../speech-io/src/tts/catalogue.ts";
+import { localOutputSizeBytes, type getLocalOutputCatalogue } from "../../speech-io/src/tts/catalogue.ts";
 import { MAX_SAMPLE_TEXT_LENGTH } from "./speech-output-protocol.ts";
 
 type LocalCatalogue = Awaited<ReturnType<typeof getLocalOutputCatalogue>>;
@@ -8,6 +8,9 @@ export type SpeechOutputModel = {
   id: string;
   label: string;
   provider: SpeechOutputConfig["provider"];
+  /** Plain text model card facts; absent for providers that publish neither. */
+  runtime?: string;
+  sizeBytes?: number;
   voices: { id: string | number; label: string; languages: readonly string[] }[];
   defaultVoice: string | number;
   defaultSpeed: number;
@@ -47,6 +50,8 @@ export function buildSpeechOutputCatalogue(options: {
     id: model.id,
     label: model.label,
     provider: { kind: "local" },
+    runtime: model.runtime,
+    sizeBytes: localOutputSizeBytes(model.id),
     voices: model.voices.map(({ id, label, languages }) => ({ id, label, languages: [...languages] })),
     defaultVoice: model.defaultVoice,
     defaultSpeed: options.local.default.speed,

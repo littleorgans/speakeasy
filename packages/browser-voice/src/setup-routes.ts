@@ -17,7 +17,7 @@ import { parseSetupSelection, SETUPS, SETUP_MANIFEST, SETUP_MANIFEST_SHA256 } fr
 import { CartesiaBatchTranscriber, CARTESIA_STT_MODEL } from "../../speech-io/src/engines/cartesia-stt.ts";
 import { OpenAIFileTranscriber, OPENAI_FILE_MODEL } from "../../speech-io/src/engines/openai-file.ts";
 
-export type SetupReadiness = { setupId: SetupId; ready: boolean; reason?: string;
+export type SetupReadiness = { setupId: SetupId; ready: boolean; reason?: string; sizeBytes?: number;
   deadlines?: { loadMs: number; operationMs: number } };
 export type InputApiAdapter = {
   kind: "cartesia" | "openai";
@@ -137,7 +137,6 @@ export class SetupRoutes {
   }
 
   async #compare(request: IncomingMessage, response: ServerResponse, url: URL): Promise<void> {
-    const reader = this.#reader();
     const lifetime = requestLifetime(request, response);
     this.#lifetimes.add(lifetime);
     let release: (() => void) | undefined;
@@ -151,6 +150,7 @@ export class SetupRoutes {
         const value = await readJson(request);
         exactFields(value, ["requestId", "setupIds", "source"]);
         const saved = savedSource(value.source);
+        const reader = this.#reader();
         id = requestId(value.requestId, randomUUID);
         setupIds = selection(value.setupIds);
         const path = await savedPath(reader, saved);

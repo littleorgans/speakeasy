@@ -65,14 +65,14 @@ function harness(options: { now?(): number; idleReleaseMs?: number } = {}) {
   return { executor, service, take };
 }
 
-test("registry pins five exact immutable identities and rejects arbitrary ids or control edits", () => {
+test("registry pins six exact immutable identities and rejects arbitrary ids or control edits", () => {
   assert.deepEqual(SETUPS.map((s) => s.id), SETUP_IDS);
   assert.equal(SETUP_MANIFEST.defaultSetupId, "mlx-parakeet/v3-greedy");
   assert.equal(SETUP_MANIFEST.idleReleaseMs, 300000);
   assert.deepEqual(SETUPS.map((s) => s.revision), [
     "ed2b7e8c15f9aaa0b5772e2efb986255eaef7e15", "b554592c50b2a48471add2daa3d46fa9f00fef5e",
     "ee78f8709547f39bea3b924a16c72403826cac92", "b86784a3a5356cbd126f710b61cd90c5fe5898f1",
-    "8b403126fc14f14cfc99bb4cfa72ecbc129ea677",
+    "826bdbc44c8806630a45c08ed8cef35a36817a17", "8b403126fc14f14cfc99bb4cfa72ecbc129ea677",
   ]);
   assert.equal(getSetup(QWEN).controls.prompt, "launch, claude, grok");
   assert.equal(getSetup(CPU).controls.hotwordsScore, 2);
@@ -153,7 +153,7 @@ test("all selected rows run serially in manifest order and reuse one Ultra decod
   assert.deepEqual(h.executor.requests.map((r) => r.setupId), SETUP_IDS);
   assert.equal(h.executor.maxActive, 1);
   const acoustic = h.executor.requests.filter((r) => r.operation === "transcribe");
-  assert.equal(acoustic.length, 4);
+  assert.equal(acoustic.length, SETUP_IDS.length - 1);
   assert.ok(acoustic.every((r) => r.pcm === acoustic[0].pcm));
   const cleanup = h.executor.requests.at(-1)!;
   assert.equal(cleanup.operation, "cleanup");

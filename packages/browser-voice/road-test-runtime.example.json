@@ -1,0 +1,29 @@
+{
+  "python": {
+    "mlx-parakeet/v3-greedy": {
+      "pythonPath": "/absolute/path/to/parakeet-py3.12.5/bin/python",
+      "modelPath": "/absolute/path/to/hf/models--mlx-community--parakeet-tdt-0.6b-v3/snapshots/ed2b7e8c15f9aaa0b5772e2efb986255eaef7e15"
+    },
+    "mlx-parakeet/ultra-greedy": {
+      "pythonPath": "/absolute/path/to/parakeet-py3.12.5/bin/python",
+      "modelPath": "/absolute/path/to/hf/models--selcukkubur--parakeet-ultra-mlx/snapshots/b554592c50b2a48471add2daa3d46fa9f00fef5e"
+    },
+    "qwen/context": {
+      "pythonPath": "/absolute/path/to/cleanup-py3.13.2/bin/python",
+      "modelPath": "/absolute/path/to/Qwen3-ASR-0.6B-Q8_0.gguf",
+      "libraryPath": "/absolute/path/to/speech.cpp-0.10.0/libspeech.4.dylib"
+    },
+    "hex/unified": {
+      "pythonPath": "/absolute/path/to/any/python3",
+      "modelPath": "/absolute/path/to/parakeet-unified-en-0.6b-Q8_0.gguf",
+      "runnerPath": "/absolute/path/to/hex-unified-worker"
+    },
+    "mlx-cleanup/qwen-targeted": {
+      "pythonPath": "/absolute/path/to/cleanup-py3.13.2/bin/python",
+      "modelPath": "/absolute/path/to/hf/models--mlx-community--Qwen2.5-1.5B-Instruct-4bit/snapshots/8b403126fc14f14cfc99bb4cfa72ecbc129ea677"
+    }
+  },
+  "cpu": {
+    "modelRoot": "/absolute/path/to/speak-easy/models/sherpa"
+  }
+}

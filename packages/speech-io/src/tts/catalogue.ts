@@ -8,6 +8,7 @@ export const LOCAL_OUTPUT_MODELS = [
     id: "piper-kristin-medium",
     label: "Piper Kristin medium",
     provider: { kind: "local" },
+    runtime: "sherpa-onnx VITS, CPU",
     defaultVoice: "kristin",
     sampleRate: 22_050,
     streaming: "sentence",
@@ -18,6 +19,7 @@ export const LOCAL_OUTPUT_MODELS = [
     id: "kokoro-v1.0",
     label: "Kokoro v1.0 fp32",
     provider: { kind: "local" },
+    runtime: "sherpa-onnx Kokoro, CPU",
     defaultVoice: "af_heart",
     sampleRate: 24_000,
     streaming: "sentence",
@@ -57,6 +59,11 @@ export function resolveLocalOutput(config: SpeechOutputConfig = DEFAULT_LOCAL_OU
   const model = LOCAL_OUTPUT_MODELS.find((entry) => entry.id === config.model)!;
   const voice = model.voices.find((entry) => entry.id === config.voice || entry.speakerId === config.voice)!;
   return { model, voice, speed: config.speed };
+}
+
+/** Pinned payload bytes, for the plain text model card. */
+export function localOutputSizeBytes(modelId: LocalOutputModelId): number {
+  return LOCAL_TTS_MODELS[modelId].files.reduce((sum, file) => sum + file.bytes, 0);
 }
 
 /** Reads and hashes current bytes. Does not prepare, load, download or synthesize. */

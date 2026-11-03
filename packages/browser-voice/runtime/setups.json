@@ -6,6 +6,10 @@
     {
       "id": "mlx-parakeet/v3-greedy",
       "label": "Parakeet v3 MLX",
+      "card": {
+        "runtime": "parakeet-mlx 0.5.3 on MLX, Metal GPU",
+        "transcript": "final"
+      },
       "model": "mlx-community/parakeet-tdt-0.6b-v3",
       "revision": "ed2b7e8c15f9aaa0b5772e2efb986255eaef7e15",
       "runtime": {
@@ -36,7 +40,11 @@
     },
     {
       "id": "mlx-parakeet/ultra-greedy",
-      "label": "Ultra MLX",
+      "label": "Parakeet Ultra MLX",
+      "card": {
+        "runtime": "parakeet-mlx 0.5.3 on MLX, Metal GPU",
+        "transcript": "final"
+      },
       "model": "selcukkubur/parakeet-ultra-mlx",
       "revision": "b554592c50b2a48471add2daa3d46fa9f00fef5e",
       "runtime": {
@@ -67,7 +75,11 @@
     },
     {
       "id": "qwen/context",
-      "label": "Qwen3 context",
+      "label": "Qwen3 ASR with known words",
+      "card": {
+        "runtime": "speech.cpp 0.10.0, Metal GPU",
+        "transcript": "final"
+      },
       "model": "sakasegawa/Qwen3-ASR-0.6B-GGUF",
       "revision": "ee78f8709547f39bea3b924a16c72403826cac92",
       "file": "Qwen3-ASR-0.6B-Q8_0.gguf",
@@ -105,7 +117,11 @@
     },
     {
       "id": "sweep/score-2",
-      "label": "CPU shipped strength 2",
+      "label": "Parakeet Ultra sherpa CPU",
+      "card": {
+        "runtime": "sherpa-onnx 2.0.1, CPU, known words",
+        "transcript": "final"
+      },
       "model": "en-parakeet-ultra-int8",
       "revision": "b86784a3a5356cbd126f710b61cd90c5fe5898f1",
       "artifactRepository": "tpmaerk/parakeet-ultra-sherpa-onnx-int8",
@@ -162,8 +178,46 @@
       "maxSamples": 960000
     },
     {
+      "id": "hex/unified",
+      "label": "Hex Parakeet Unified",
+      "card": {
+        "runtime": "transcribe.cpp 7045d1c, Metal GPU, Hex stream pipeline",
+        "transcript": "final"
+      },
+      "model": "parakeet-unified-en-0.6b",
+      "revision": "826bdbc44c8806630a45c08ed8cef35a36817a17",
+      "file": "parakeet-unified-en-0.6b-Q8_0.gguf",
+      "fileBytes": 731357568,
+      "sha256": "4b50b6dd862bf6e346929aaf4f5eaacec003bfa3f56462d6c874b41ef2f38795",
+      "runtime": {
+        "transcribe.cpp": "7045d1c0fe7cee37747b2792977421d435e75fca",
+        "hex": "826bdbc44c8806630a45c08ed8cef35a36817a17",
+        "worker": "runtime/hex/worker.rs built by runtime/hex/build.py",
+        "device": "Metal"
+      },
+      "quantization": "Q8_0 GGUF",
+      "controls": {
+        "language": "en",
+        "threads": 1,
+        "feedSamples": 2560,
+        "pauseCap": "Hex PauseCap and SpeechFrames, unchanged",
+        "trailingSamples": 6400,
+        "timestamps": "segment",
+        "session": "fresh per take",
+        "gate": "off",
+        "rewrite": "off",
+        "hotwords": null
+      },
+      "operation": "transcribe",
+      "maxSamples": 1920000
+    },
+    {
       "id": "mlx-cleanup/qwen-targeted",
-      "label": "Ultra plus Qwen 1.5B cleanup",
+      "label": "Ultra plus Qwen cleanup",
+      "card": {
+        "runtime": "Ultra MLX, then mlx-lm 0.32.2 on Metal GPU",
+        "transcript": "final"
+      },
       "model": "mlx-community/Qwen2.5-1.5B-Instruct-4bit",
       "revision": "8b403126fc14f14cfc99bb4cfa72ecbc129ea677",
       "runtime": {

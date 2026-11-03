@@ -15,7 +15,7 @@ export { MAX_WORKER_HEADER_BYTES, MAX_WORKER_PCM_BYTES, MAX_WORKER_TEXT_BYTES };
 const WORKER_PATH = fileURLToPath(new URL("../runtime/worker.py", import.meta.url));
 const PYTHON_SETUPS = new Set([
   "mlx-parakeet/v3-greedy", "mlx-parakeet/ultra-greedy",
-  "mlx-cleanup/qwen-targeted", "qwen/context",
+  "mlx-cleanup/qwen-targeted", "qwen/context", "hex/unified",
 ]);
 
 export type PythonWorkerResult = {

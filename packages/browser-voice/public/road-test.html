@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#111213" />
+    <title>Speak Easy · Road test</title>
+    <link rel="stylesheet" href="/road-test.css" />
+    <script src="/road-test.js" type="module"></script>
+  </head>
+  <body>
+    <main class="page">
+      <header class="head">
+        <h1>Road test</h1>
+        <p class="quiet" id="status" role="status" aria-live="polite">Loading models</p>
+      </header>
+
+      <section class="choices" aria-label="Models">
+        <label class="choice">
+          <span class="label">Speech in</span>
+          <select id="input-model"></select>
+          <span class="quiet card" id="input-card"></span>
+        </label>
+        <div class="choice">
+          <label class="label" for="output-model">Speech out</label>
+          <span class="pair">
+            <select id="output-model"></select>
+            <select id="output-voice" aria-label="Voice"></select>
+          </span>
+          <span class="quiet card" id="output-card"></span>
+        </div>
+      </section>
+
+      <section class="talk" aria-label="Speak">
+        <button class="hold" id="hold" type="button">Hold to speak <kbd>Space</kbd></button>
+        <button id="stop" type="button" disabled>Stop voice <kbd>Esc</kbd></button>
+        <span class="level" id="level-track" aria-hidden="true" hidden><span id="level"></span></span>
+      </section>
+
+      <section class="take" aria-label="Latest take">
+        <div class="transcript">
+          <h2 class="label"><span>Transcript</span><span class="quiet" id="take-models"></span></h2>
+          <p class="said" id="transcript">The transcript appears here, and the voice reads it back.</p>
+        </div>
+        <div class="timings">
+          <div class="group"><h2 class="label" id="input-heading">Speech in</h2><dl id="input-timings" aria-labelledby="input-heading"></dl></div>
+          <div class="group"><h2 class="label" id="output-heading">Voice</h2><dl id="output-timings" aria-labelledby="output-heading"></dl></div>
+          <div class="group"><h2 class="label" id="interrupt-heading">Interrupt</h2><dl id="interrupt-timings" aria-labelledby="interrupt-heading"></dl></div>
+        </div>
+        <p class="replay">
+          <button id="replay-take" type="button" disabled>Replay my take</button>
+          <button id="replay-talk-over" type="button" hidden>Replay my talk over</button>
+          <button id="replay-voice" type="button" disabled>Replay voice</button>
+        </p>
+      </section>
+
+      <section class="settings" aria-label="Interrupt settings">
+        <label class="switch"><input type="checkbox" id="echo" checked /> Echo cancellation</label>
+        <label class="switch"><input type="checkbox" id="talk-over" checked /> Talking over the voice stops it</label>
+        <p class="quiet">On speakers the voice reaches the microphone and can stop itself; keep echo cancellation on. Headphones avoid the echo.</p>
+      </section>
+
+      <section class="history" aria-labelledby="history-heading" hidden id="history-section">
+        <h2 class="label" id="history-heading">Earlier takes</h2>
+        <table>
+          <thead><tr id="history-head"></tr></thead>
+          <tbody id="history"></tbody>
+        </table>
+      </section>
+
+      <footer class="quiet">Local models only. No audio or text leaves this Mac. Times are browser estimates; microphone input latency is not measured.</footer>
+    </main>
+  </body>
+</html>
