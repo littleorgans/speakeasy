@@ -57,6 +57,7 @@ const STATIC_FILES = new Map([
   ["/live-trail.js", "live-trail.js"],
   ["/talk-over.js", "talk-over.js"],
   ["/road-test-text.js", "road-test-text.js"],
+  ["/take-history.js", "take-history.js"],
   ["/setting-controls.js", "setting-controls.js"],
   ["/voice-settings.js", "voice-settings.js"],
   ["/voice-copy.js", "voice-copy.js"],

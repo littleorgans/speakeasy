@@ -314,7 +314,7 @@ function pageHarness({ holdVoice = false, transcript = "final", models = [] as u
       createBuffer(_channels: number, length: number) { return { length, copyToChannel() {} }; }
       createBufferSource() { const source = { buffer: { length: 0 }, connect() {}, stop() {}, start() { played.push(source.buffer.length); } }; return source; } },
     window: { setTimeout, clearTimeout } });
-  vm.runInContext(["setting-controls.js", "voice-settings.js", "voice-copy.js", "road-test.js"].map(source).join("\n")
+  vm.runInContext(["setting-controls.js", "voice-settings.js", "voice-copy.js", "take-history.js", "road-test.js"].map(source).join("\n")
     + "\nglobalThis.Page = RoadTestPage;", context);
   return { page: new context.Page(), elements, spoken, posted, played, live, document, microphones };
 }

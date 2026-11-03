@@ -61,4 +61,3 @@ function accepts(setting: VoiceSetting, value: unknown): boolean {
     case "integer": return Number.isSafeInteger(value) && (value as number) >= setting.min && (value as number) <= setting.max;
   }
 }
-
