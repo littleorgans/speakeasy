@@ -732,23 +732,24 @@ async function pickModel(harness: ReturnType<typeof pageHarness>, id: string) {
   output.listeners.get("change")();
 }
 
-test("Space edits voice settings and the reference transcript while the page shortcut still records elsewhere", async () => {
+test("Space types in voice settings and the reference transcript; on any other control it still records", async () => {
   const { page, document } = pageHarness({ models: QWEN_MODELS });
   await page.start();
   const calls: string[] = [];
   page.press = () => calls.push("press");
   page.release = () => calls.push("release");
-  for (const tag of ["input", "textarea", "select", "button", "summary", "[contenteditable]"]) {
-    const event = { code: "Space", timeStamp: 1, target: { closest: (selector: string) => selector.includes(tag) ? {} : null },
+  const space = (tag: string | null) => {
+    calls.length = 0;
+    const event = { code: "Space", timeStamp: 1, target: { closest: (selector: string) => tag && selector.includes(tag) ? {} : null },
       preventDefault: () => calls.push("prevent") };
     document.listeners.get("keydown")!(event);
     document.listeners.get("keyup")!(event);
-    assert.deepEqual(calls, [], `Space keeps its native behavior in ${tag}`);
+    return [...calls];
+  };
+  for (const tag of ["input", "textarea"]) assert.deepEqual(space(tag), [], `Space types in ${tag}`);
+  for (const tag of ["select", "button", null]) {
+    assert.deepEqual(space(tag), ["prevent", "press", "prevent", "release"], `Space records from ${tag ?? "the page"}`);
   }
-  const event = { code: "Space", timeStamp: 1, target: { closest: () => null }, preventDefault: () => calls.push("prevent") };
-  document.listeners.get("keydown")!(event);
-  document.listeners.get("keyup")!(event);
-  assert.deepEqual(calls, ["prevent", "press", "prevent", "release"]);
 });
 
 test("each Qwen model shows its own controls with notes: Instruction only on 1.7B, First clause split in the main row", async () => {

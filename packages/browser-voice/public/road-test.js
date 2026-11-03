@@ -116,9 +116,9 @@ export class RoadTestPage {
     for (const which of ["take", "talk-over"]) this.elements[`replay-${which}`].addEventListener("click", () => this.replay(which));
     this.elements["replay-voice"].addEventListener("click", () => this.replay("voice"));
     this.elements["read-again"].addEventListener("click", () => void this.readAgain());
-    const nativeControl = (target) => target?.closest?.("input, select, textarea, button, a, summary, [contenteditable]:not([contenteditable=false]), [role=button]");
+    const typing = (target) => target?.closest?.("textarea, input:not([type=checkbox])");
     document.addEventListener("keydown", (event) => {
-      if (event.code === "Space" && (!nativeControl(event.target) || event.target === hold)) {
+      if (event.code === "Space" && !typing(event.target)) {
         event.preventDefault();
         this.keyboardHold = true;
         if (!event.repeat) this.press(event.timeStamp);
