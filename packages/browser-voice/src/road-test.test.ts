@@ -42,24 +42,26 @@ test("the road test flag serves the road test page at the root; the room keeps t
   assert.match(await (await fetch(room.url + "/")).text(), /<title>[^<]*<\/title>/);
   assert.doesNotMatch(await (await fetch(room.url + "/")).text(), /Road test/);
   assert.match(await (await fetch(room.url + "/road-test")).text(), /Road test/, "the road test stays reachable on any host");
-  for (const asset of ["/road-test.css", "/road-test.js", "/road-test-text.js", "/mic-capture.js", "/voice-readback.js", "/talk-over.js"]) {
+  for (const asset of ["/road-test.css", "/road-test.js", "/road-test-text.js", "/capture-session.js", "/voice-readback.js", "/talk-over.js"]) {
     assert.equal((await fetch(road.url + asset)).status, 200, asset);
   }
 });
 
-test("the host serves every module the road test page imports", async (t) => {
-  const { server } = await host(t, { home: "road-test" });
-  const seen = new Set<string>();
-  const visit = async (path: string): Promise<void> => {
-    if (seen.has(path)) return;
-    seen.add(path);
-    const response = await fetch(server.url + path);
-    assert.equal(response.status, 200, path);
-    for (const [, child] of (await response.text()).matchAll(/^import .* from "(\/[^"]+)";$/gm)) await visit(child!);
-  };
-  await visit("/road-test.js");
-  assert.ok(seen.has("/live-trail.js") && seen.size > 5, [...seen].join(" "));
-});
+// Each page script, with a module only its nested imports reach.
+for (const [page, nested] of [["/road-test.js", "/live-trail.js"], ["/app.js", "/speech-observations.js"], ["/prompt-reader.js", "/speech-observations.js"]])
+  test(`the host serves every module ${page} imports`, async (t) => {
+    const { server } = await host(t, { home: "road-test" });
+    const seen = new Set<string>();
+    const visit = async (path: string): Promise<void> => {
+      if (seen.has(path)) return;
+      seen.add(path);
+      const response = await fetch(server.url + path);
+      assert.equal(response.status, 200, path);
+      for (const [, child] of (await response.text()).matchAll(/^import .* from "(\/[^"]+)";$/gm)) await visit(child!);
+    };
+    await visit(page);
+    assert.ok(seen.has(nested) && seen.size > 3, [...seen].join(" "));
+  });
 
 test("a live take transcribes without a prompt reader; saved takes still need one", async (t) => {
   const { server, executor } = await host(t, { home: "road-test" });

@@ -25,16 +25,16 @@ test("a late mic acquisition cannot attach to a later take", async () => {
 });
 
 test("review keeps worklet frame values and shared mic constraints", async () => {
-  const { reader, pending, constraints, expectedConstraints } = pageHarness();
+  const { reader, frame, pending, constraints, expectedConstraints } = pageHarness();
   const opening = reader.press();
   await waitForRequests(pending, 1);
   pending[0]!(mic());
   await opening;
   assert.equal(JSON.stringify(constraints), JSON.stringify([{ audio: expectedConstraints }]));
   const frames = [new Float32Array(3_200).fill(0.123456), new Float32Array(3_200).fill(-0.654321)];
-  for (const samples of frames) reader.onFrame({ kind: "frame", samples, level: 0.2 });
+  for (const samples of frames) frame(samples, 0.2);
   reader.gate.cancel();
-  reader.finishTake();
+  await reader.finishTake();
   assert.equal(reader.take.samples.length, 6_400);
   assert.equal(reader.take.samples[0], frames[0]![0]);
   assert.equal(reader.take.samples[3_200], frames[1]![0]);
@@ -60,7 +60,7 @@ test("each take drains its worklet tail, so the next take holds none of it", asy
     await waitForRequests(pending, 1);
     if (!takes.length) pending[0]!(mic());
     await opening;
-    page = reader.capture.port;
+    page = reader.mic.node.port;
     feed(context, processor, block, (block += 55), value);
     await settle();
     reader.gate.release();
@@ -102,14 +102,14 @@ test("a stale mic denial cannot cancel the current take", async () => {
 });
 
 test("play replays the unsaved take without opening the mic or changing it", async () => {
-  const { reader, pending, played, fetched } = pageHarness();
+  const { reader, frame, pending, played, fetched } = pageHarness();
   const opening = reader.press();
   await waitForRequests(pending, 1);
   pending[0]!(mic());
   await opening;
-  reader.onFrame({ kind: "frame", samples: new Float32Array(6_400).fill(0.3), level: 0.2 });
+  frame(new Float32Array(6_400).fill(0.3), 0.2);
   reader.gate.cancel();
-  reader.finishTake();
+  await reader.finishTake();
   const take = reader.take;
   const before = Array.from(take.samples);
   await reader.play();
@@ -278,7 +278,7 @@ test("a take starts with the 300 ms before its press", async () => {
       return okReply({ audio: "utt-a.wav" });
     },
   });
-  const { reader, pending } = harness;
+  const { reader, frame, pending } = harness;
   reader.prompts = [
     { id: "p001", stratum: "short", text: "read this", recorded: false, takes: [] },
     { id: "p002", stratum: "short", text: "read that", recorded: false, takes: [] },
@@ -288,20 +288,20 @@ test("a take starts with the 300 ms before its press", async () => {
   const device = mic();
   pending[0]!(device);
   await opening;
-  reader.onFrame({ kind: "frame", samples: new Float32Array(6_400).fill(1), level: 0.2 });
+  frame(new Float32Array(6_400).fill(1), 0.2);
   reader.gate.cancel();
-  reader.finishTake();
+  await reader.finishTake();
   assert.equal(device.track.stopped, false, "the mic stays open after commit");
   assert.equal(reader.take.preRollMs, 0, "the page's first take opens a cold mic");
   await reader.save();
   // Idle frames older than 300 ms fall out of the ring; the idle level stays hidden.
-  for (const samples of [...idleFrames(10, 9), ...idleFrames(15, 2)]) reader.onFrame({ kind: "frame", samples, level: 0.4 });
+  for (const samples of [...idleFrames(10, 9), ...idleFrames(15, 2)]) frame(samples, 0.4);
   assert.equal(reader.elements.level.value, 0);
   const second = reader.press();
   await second;
-  reader.onFrame({ kind: "frame", samples: new Float32Array(6_400).fill(3), level: 0.2 });
+  frame(new Float32Array(6_400).fill(3), 0.2);
   reader.gate.cancel();
-  reader.finishTake();
+  await reader.finishTake();
   assert.equal(pending.length, 1, "one getUserMedia across both takes");
   const { samples } = reader.take;
   assert.equal(samples.length, 4_800 + 6_400);
@@ -315,10 +315,10 @@ test("a take starts with the 300 ms before its press", async () => {
 for (const [event, hide] of [["document:visibilitychange", true], ["window:pagehide", false]] as const) {
   test(`${event.split(":")[1]} stops the warm mic and the next press reopens it cold`, async () => {
     const harness = pageHarness();
-    const { reader, pending, document, dispatch } = harness;
+    const { reader, frame, pending, document, dispatch } = harness;
     await readyTake(harness);
-    const device = reader.stream.getAudioTracks()[0];
-    for (const samples of idleFrames(15, 2)) reader.onFrame({ kind: "frame", samples, level: 0.4 });
+    const device = reader.mic.stream.getAudioTracks()[0];
+    for (const samples of idleFrames(15, 2)) frame(samples, 0.4);
     document.hidden = hide;
     dispatch(event);
     assert.equal(device.stopped, true);
@@ -332,13 +332,13 @@ for (const [event, hide] of [["document:visibilitychange", true], ["window:pageh
 
 test("a tap on a warm mic stays too short despite its pre roll", async () => {
   const harness = pageHarness();
-  const { reader } = harness;
+  const { reader, frame } = harness;
   await readyTake(harness);
-  for (const samples of idleFrames(15, 2)) reader.onFrame({ kind: "frame", samples, level: 0.4 });
+  for (const samples of idleFrames(15, 2)) frame(samples, 0.4);
   await reader.press();
-  reader.onFrame({ kind: "frame", samples: new Float32Array(3_200).fill(3), level: 0.2 });
+  frame(new Float32Array(3_200).fill(3), 0.2);
   reader.gate.cancel();
-  reader.finishTake();
+  await reader.finishTake();
   assert.equal(reader.take, null);
   assert.match(reader.elements.status.textContent, /too short/);
 });

@@ -1,4 +1,4 @@
-import { MicCapture } from "/mic-capture.js";
+import { CaptureSession } from "/capture-session.js";
 
 /**
  * The voice copy panel, shown for a model whose voices copy a reference:
@@ -90,7 +90,7 @@ export class VoiceCopy {
     this.refresh();
     try {
       const context = await this.audio();
-      const capture = this.microphone ??= new MicCapture({ context, rate: context.sampleRate, constraints: RAW });
+      const capture = this.microphone ??= new CaptureSession({ context, rate: context.sampleRate, constraints: RAW });
       this.capture = capture;
       await capture.start(false);
       if (this.capture !== capture) { capture.stop(); return; }

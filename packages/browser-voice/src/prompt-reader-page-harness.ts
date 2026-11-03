@@ -102,6 +102,7 @@ export function pageHarness({
     window: { setTimeout, clearTimeout, addEventListener: listen("window") },
   });
   vm.runInContext(readFileSync(new URL("../public/capture-constraints.js", import.meta.url), "utf8").replace(/^export /gm, ""), context);
+  vm.runInContext(readFileSync(new URL("../public/capture-session.js", import.meta.url), "utf8").replace(/^import .*;$/gm, "").replace(/^export /gm, ""), context);
   vm.runInContext(readFileSync(new URL("../public/speech-observations.js", import.meta.url), "utf8").replace(/^export /gm, ""), context);
   vm.runInContext(readFileSync(new URL("../public/setup-results.js", import.meta.url), "utf8").replace(/^import .*;$/gm, "").replace(/^export /gm, ""), context);
   vm.runInContext(source, context);
@@ -109,7 +110,9 @@ export function pageHarness({
   reader.comparison.mode = "current-list";
   reader.bind();
   reader.prompts = [{ id: "p001", stratum: "short", text: "read this" }];
-  return { reader, document, dispatch, pending, denied, connected, constraints, played, fetched, posted, expectedConstraints: vm.runInContext("CAPTURE_AUDIO_CONSTRAINTS", context) };
+  /** Deliver one frame through the capture node's port, as the worklet does. */
+  const frame = (samples: Float32Array, level = 0.2) => reader.mic.node.port.onmessage({ data: { kind: "frame", samples, level } });
+  return { reader, document, dispatch, frame, pending, denied, connected, constraints, played, fetched, posted, expectedConstraints: vm.runInContext("CAPTURE_AUDIO_CONSTRAINTS", context) };
 }
 
 export function mic() {
@@ -125,17 +128,17 @@ export async function waitForRequests(pending: unknown[], count: number) {
 
 /** Record one ready take of 0.4 s through the page's capture path. */
 export async function readyTake(harness: ReturnType<typeof pageHarness>) {
-  const { reader, pending } = harness;
-  const cold = !reader.stream;
+  const { reader, pending, frame } = harness;
+  const cold = !reader.mic?.open;
   const opening = reader.press();
   if (cold) {
     await waitForRequests(pending, pending.length + 1);
     pending[pending.length - 1]!(mic());
   }
   await opening;
-  reader.onFrame({ kind: "frame", samples: new Float32Array(6_400).fill(0.3), level: 0.2 });
+  frame(new Float32Array(6_400).fill(0.3));
   reader.gate.cancel();
-  reader.finishTake();
+  await reader.finishTake();
   return reader.take;
 }
 
