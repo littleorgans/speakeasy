@@ -52,7 +52,7 @@ const LANGUAGES = [
 const stock = (value: number) => ({ value, label: `${value} (stock)` });
 const values = (...list: number[]) => list.map((value) => ({ value, label: String(value) }));
 const sorted = <T extends { value: number }>(options: T[]) => options.sort((a, b) => a.value - b.value);
-const onOff = (stockValue: boolean) => [false, true].map((value) =>
+const onOff = (stockValue?: boolean) => [false, true].map((value) =>
   ({ value, label: `${value ? "On" : "Off"}${value === stockValue ? " (stock)" : ""}` }));
 
 /** Copy runs only tried stock sampling on official PyTorch. */
@@ -71,9 +71,9 @@ function qwenSettings({ instructions, copy }: { instructions: boolean; copy: boo
       note: "The language of the text. Each speaker sounds best in its own; only English was tried here." },
     { id: "seed", label: "Seed", kind: "integer", default: 1, min: 0, max: Number.MAX_SAFE_INTEGER,
       note: "Same seed and settings give the same audio; another seed gives another take." },
-    // D1 (owner pending): Off for Qwen. Flip this default to true to restore today's split.
-    { id: "firstClause", label: "First clause split", kind: "choice", default: false, pipeline: true, options: onOff(true),
-      note: "On sends the opening words alone for sooner sound; off keeps the first sentence whole. Ryan: 7.2 s split, 3.1 s whole." },
+    // D1, owner 2026-11-03: Off for Qwen, a main row control so Read again can compare both ways.
+    { id: "firstClause", label: "First clause split", kind: "choice", default: false, pipeline: true, options: onOff(),
+      note: "On sends the opening words alone so sound starts sooner; Off keeps the first sentence whole." },
     // D8: voice copy caps each part at 20 s; 0 means no cap.
     { id: "maxSeconds", label: "Longest part", kind: "choice", default: copy ? 20 : 0,
       options: [{ value: 0, label: copy ? "Off" : "Off (stock)" }, ...[5, 10, 20].map((value) =>
