@@ -1,9 +1,9 @@
 import { join } from "node:path";
+import { assertSampleRate, SPEECH_SAMPLE_RATE } from "../audio/pcm.js";
 import type { STTConfig, STTSession, VoiceToText } from "../contract.ts";
 import { ensureAsset, type FileSetSpec } from "./assets.ts";
 import { BufferedOfflineSession, type SilenceGate } from "./offline-session.ts";
 import { resultText, type ResultDetail } from "./result.ts";
-import { assertSampleRate, SHERPA_SAMPLE_RATE } from "./sherpa.ts";
 import {
   resolveWhistleFiles,
   resolveWhistleModel,
@@ -84,7 +84,7 @@ export class OrtWhistleEngine implements VoiceToText {
     assertSampleRate("OrtWhistleEngine", config);
     const recognizer = await this.#load();
     const language = supportedLanguage(this.model, config?.language);
-    const maxSamples = (this.model.maxAudioMs * SHERPA_SAMPLE_RATE) / 1_000;
+    const maxSamples = (this.model.maxAudioMs * SPEECH_SAMPLE_RATE) / 1_000;
     return new BufferedOfflineSession(
       maxSamples,
       (audio) =>

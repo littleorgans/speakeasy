@@ -2,12 +2,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { assertSampleRate } from "../audio/pcm.js";
 import type { STTConfig, STTSession, VoiceToText } from "../contract.ts";
 import { prepareOfflineHotwords, snapshotHotwords, type OfflineHotwords } from "./offline-hotwords.ts";
 import { BufferedOfflineSession, type SilenceGate } from "./offline-session.ts";
 import { resultDetail } from "./result.ts";
 import {
-  assertSampleRate,
   SHERPA_FEATURE_DIM,
   SHERPA_NUM_THREADS,
   SHERPA_SAMPLE_RATE,

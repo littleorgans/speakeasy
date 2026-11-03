@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { concatFrames } from "../audio/pcm.js";
 import {
   frontendChunks,
   logMel,
@@ -189,7 +190,8 @@ async function loadSplitGraphs(
       const data = hidden.data as Float32Array;
       parts.push(data.subarray(chunk.skip * dim, (chunk.skip + chunk.count) * dim));
     }
-    return { hidden: concat(parts), dim };
+    // A single chunk is returned as its own view, without a copy.
+    return { hidden: parts.length === 1 ? parts[0]! : concatFrames(parts), dim };
   }
 
   return {
@@ -260,19 +262,6 @@ function transpose(data: Float32Array, dim: number, total: number, count: number
     for (let frame = 0; frame < count; frame += 1) {
       out[frame * dim + channel] = data[channel * total + frame]!;
     }
-  }
-  return out;
-}
-
-function concat(parts: readonly Float32Array[]): Float32Array {
-  if (parts.length === 1) {
-    return parts[0]!;
-  }
-  const out = new Float32Array(parts.reduce((total, part) => total + part.length, 0));
-  let offset = 0;
-  for (const part of parts) {
-    out.set(part, offset);
-    offset += part.length;
   }
   return out;
 }

@@ -16,6 +16,8 @@
  * pairs of frames stacked into one 320 wide feature frame.
  */
 
+import { fftPlan } from "./fft.ts";
+
 const SAMPLE_RATE = 16_000;
 const N_FFT = 512;
 const WIN_LENGTH = 400;
@@ -154,49 +156,4 @@ const MEL_FILTERS: MelFilter[] = (() => {
   });
 })();
 
-const TWIDDLE_COS = Float64Array.from({ length: N_FFT / 2 }, (_, index) =>
-  Math.cos((-2 * Math.PI * index) / N_FFT),
-);
-const TWIDDLE_SIN = Float64Array.from({ length: N_FFT / 2 }, (_, index) =>
-  Math.sin((-2 * Math.PI * index) / N_FFT),
-);
-
-const BIT_REVERSED = (() => {
-  const bits = Math.log2(N_FFT);
-  return Uint16Array.from({ length: N_FFT }, (_, index) => {
-    let reversed = 0;
-    for (let bit = 0; bit < bits; bit += 1) {
-      reversed = (reversed << 1) | ((index >> bit) & 1);
-    }
-    return reversed;
-  });
-})();
-
-/** In place iterative radix 2 FFT of length N_FFT. */
-function fft(real: Float64Array, imag: Float64Array): void {
-  for (let index = 0; index < N_FFT; index += 1) {
-    const swap = BIT_REVERSED[index]!;
-    if (swap > index) {
-      [real[index], real[swap]] = [real[swap]!, real[index]!];
-      [imag[index], imag[swap]] = [imag[swap]!, imag[index]!];
-    }
-  }
-  for (let size = 2; size <= N_FFT; size *= 2) {
-    const half = size / 2;
-    const stride = N_FFT / size;
-    for (let start = 0; start < N_FFT; start += size) {
-      for (let offset = 0; offset < half; offset += 1) {
-        const cos = TWIDDLE_COS[offset * stride]!;
-        const sin = TWIDDLE_SIN[offset * stride]!;
-        const even = start + offset;
-        const odd = even + half;
-        const oddReal = real[odd]! * cos - imag[odd]! * sin;
-        const oddImag = real[odd]! * sin + imag[odd]! * cos;
-        real[odd] = real[even]! - oddReal;
-        imag[odd] = imag[even]! - oddImag;
-        real[even] = real[even]! + oddReal;
-        imag[even] = imag[even]! + oddImag;
-      }
-    }
-  }
-}
+const fft = fftPlan(N_FFT);

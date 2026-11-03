@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -26,7 +26,11 @@ function importClosure(entry: string): { files: string[]; packages: string[] } {
     for (const [, specifier] of readFileSync(path, "utf8").matchAll(SPECIFIER)) {
       if (!specifier) continue;
       if (specifier.startsWith(".")) {
-        pending.push(join(dirname(path), specifier));
+        const target = join(dirname(path), specifier);
+        pending.push(target);
+        // Plain JS modules carry their types in a sibling declaration file.
+        const declaration = target.replace(/\.js$/, ".d.ts");
+        if (declaration !== target && existsSync(declaration)) pending.push(declaration);
       } else {
         packages.add(specifier);
       }
@@ -38,6 +42,8 @@ function importClosure(entry: string): { files: string[]; packages: string[] } {
 test("stt closure holds the engines and contract only", () => {
   const { files } = importClosure("stt.ts");
   assert.deepEqual(files, [
+    "audio/pcm.d.ts",
+    "audio/pcm.js",
     "contract.ts",
     "engines/assets.ts",
     "engines/offline-hotwords.ts",

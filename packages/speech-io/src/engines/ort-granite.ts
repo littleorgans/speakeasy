@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { assertSampleRate, SPEECH_SAMPLE_RATE } from "../audio/pcm.js";
 import type { STTConfig, STTSession, VoiceToText } from "../contract.ts";
 import { ensureAsset, type FetchArchive, type FileSetSpec } from "./assets.ts";
 import { ByteLevelVocab, greedyCtc } from "./ctc-decode.ts";
@@ -20,7 +21,6 @@ import {
 } from "./ort-granite-models.ts";
 import { ortThreads } from "./ort-models.ts";
 import { resultDetail, type ResultDetail } from "./result.ts";
-import { assertSampleRate, SHERPA_SAMPLE_RATE } from "./sherpa.ts";
 
 /**
  * OrtGraniteEngine: push to talk STT for Granite Speech CTC exports on
@@ -82,7 +82,7 @@ export class OrtGraniteEngine implements VoiceToText {
   async open(config?: STTConfig): Promise<STTSession> {
     assertSampleRate("OrtGraniteEngine", config);
     const loaded = await this.#load();
-    const maxSamples = (this.model.maxAudioMs * SHERPA_SAMPLE_RATE) / 1_000;
+    const maxSamples = (this.model.maxAudioMs * SPEECH_SAMPLE_RATE) / 1_000;
     return new BufferedOfflineSession(
       maxSamples,
       (audio) => transcribe(loaded, audio),

@@ -1,3 +1,4 @@
+import { assertSampleRate, SPEECH_SAMPLE_RATE } from "../audio/pcm.js";
 import type { STTConfig, STTSession, VoiceToText } from "../contract.ts";
 import { ensureAsset, type FileSetSpec } from "./assets.ts";
 import { BufferedOfflineSession, type SilenceGate } from "./offline-session.ts";
@@ -11,7 +12,6 @@ import {
 } from "./ort-tdt-models.ts";
 import { ortThreads } from "./ort-models.ts";
 import { resultDetail, type ResultDetail } from "./result.ts";
-import { assertSampleRate, SHERPA_SAMPLE_RATE } from "./sherpa.ts";
 
 /**
  * OrtTdtEngine: push to talk STT for Parakeet TDT exports on onnxruntime-node
@@ -62,7 +62,7 @@ export class OrtTdtEngine implements VoiceToText {
   async open(config?: STTConfig): Promise<STTSession> {
     assertSampleRate("OrtTdtEngine", config);
     const graphs = await this.#load();
-    const maxSamples = (this.model.maxAudioMs * SHERPA_SAMPLE_RATE) / 1_000;
+    const maxSamples = (this.model.maxAudioMs * SPEECH_SAMPLE_RATE) / 1_000;
     return new BufferedOfflineSession(
       maxSamples,
       (audio) => this.#decode(graphs, audio),

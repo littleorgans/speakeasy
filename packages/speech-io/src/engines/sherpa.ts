@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import { access, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
+import { assertSampleRate, samplesToMs, SPEECH_SAMPLE_RATE } from "../audio/pcm.js";
 import type {
   EmptyEvent,
   EndpointConfig,
@@ -39,7 +40,7 @@ import {
  * endpoint detector, and keeps all inference in-process.
  */
 
-export const SHERPA_SAMPLE_RATE = 16_000;
+export const SHERPA_SAMPLE_RATE = SPEECH_SAMPLE_RATE;
 export const SHERPA_FEATURE_DIM = 80;
 /** CPU threads per sherpa recognizer; onnxruntime engines match it. */
 export const SHERPA_NUM_THREADS = 2;
@@ -154,18 +155,6 @@ function requiredModelInputs(model: SherpaModel): { files: string[]; directories
     case "qwen3-asr":
       return { files: [model.convFrontend, model.encoder, model.decoder], directories: [model.tokenizer] };
   }
-}
-
-export function assertSampleRate(engine: string, config?: STTConfig): void {
-  if (config?.sampleRate && config.sampleRate !== SHERPA_SAMPLE_RATE) {
-    throw new Error(
-      `${engine} expects ${SHERPA_SAMPLE_RATE} Hz frames, received ${config.sampleRate} Hz`,
-    );
-  }
-}
-
-export function samplesToMs(samples: number): number {
-  return (samples * 1_000) / SHERPA_SAMPLE_RATE;
 }
 
 export class SherpaEngine implements VoiceToText {
