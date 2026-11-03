@@ -36,17 +36,18 @@ test("catalogue projects only actual approved local identities and preserves rea
 });
 
 test("API eligibility uses injected presence only and never exposes unconfigured or deferred choices as ready", () => {
+  const locals = LOCAL_OUTPUT_MODELS.length;
   const absent = buildSpeechOutputCatalogue({ local: local(), apiModels: [api], configured: () => false });
-  assert.equal(absent.models.length, 2);
+  assert.equal(absent.models.length, locals);
   const present = buildSpeechOutputCatalogue({ local: local(), apiModels: [api], configured: (kind) => kind === "cartesia" });
-  assert.equal(present.models.length, 3);
-  assert.equal(present.output[2].transfer, "text-to-api-audio-returned");
-  assert.equal(present.output[2].selectable, true);
+  assert.equal(present.models.length, locals + 1);
+  assert.equal(present.output[locals].transfer, "text-to-api-audio-returned");
+  assert.equal(present.output[locals].selectable, true);
   const deferred = buildSpeechOutputCatalogue({ local: local(), apiModels: [{ ...api,
     readiness: { state: "adapter-deferred", reason: "Adapter deferred" },
   }], configured: () => true });
-  assert.equal(deferred.output[2].selectable, false);
-  assert.equal(deferred.output[2].reason, "adapter-deferred");
+  assert.equal(deferred.output[locals].selectable, false);
+  assert.equal(deferred.output[locals].reason, "adapter-deferred");
   assert.notEqual(absent.revision, present.revision);
   assert.equal(present.revision, buildSpeechOutputCatalogue({ local: local(), apiModels: [api], configured: () => true }).revision);
 });

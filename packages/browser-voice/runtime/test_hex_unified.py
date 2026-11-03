@@ -17,14 +17,18 @@ import worker
 FAKE_WORKER = """#!{python}
 import json, struct, sys
 print(json.dumps({{"kind": "ready", "backend": "metal", "device": "MTL0", "variant": "{variant}", "loadMs": 5}}), flush=True)
+fed = 0
 while True:
-    head = sys.stdin.buffer.read(4)
-    if len(head) < 4: break
-    count = struct.unpack("<I", head)[0]
-    if count == 0: break
+    head = sys.stdin.buffer.read(5)
+    if len(head) < 5: break
+    op, count = head[:1], struct.unpack("<I", head[1:])[0]
     samples = struct.unpack("<%df" % count, sys.stdin.buffer.read(count * 4))
-    print(json.dumps({{"kind": "result", "text": "heard %d" % len(samples), "rawText": " heard", "processingMs": 2.5,
-                      "pauseDroppedSamples": 0}}), flush=True)
+    if op == b"T":
+        print(json.dumps({{"kind": "result", "text": "heard %d" % len(samples), "rawText": " heard", "processingMs": 2.5,
+                          "pauseDroppedSamples": 0}}), flush=True)
+    else:
+        fed = (0 if op == b"S" else fed) + len(samples)
+        print(json.dumps({{"kind": "partial", "stable": "fed %d" % fed, "tentative": " so far", "processingMs": 1.5}}), flush=True)
 """
 
 
@@ -77,6 +81,21 @@ class HexUnifiedTest(unittest.TestCase):
         backend.close()
         self.assertEqual(process.returncode, 0)
         self.assertIsNone(backend.process)
+
+    def test_feed_streams_live_words_and_start_opens_a_fresh_stream(self):
+        backend = self.backend(self.runner())
+        with patch.object(hexu, "MODEL_SHA256", hashlib.sha256(b"fake gguf").hexdigest()):
+            backend.load()
+        samples = lambda count: memoryview(array.array("f", [0.1] * count).tobytes()).cast("f")
+        first = backend.feed(samples(3), True)
+        self.assertEqual(first, {"stable": "fed 3", "tentative": " so far", "processingMs": 1.5})
+        worker.validate_partial(first)
+        self.assertEqual(backend.feed(samples(2), False)["stable"], "fed 5")
+        self.assertEqual(backend.transcribe(samples(4))["text"], "heard 4", "a take follows a live stream")
+        self.assertEqual(backend.feed(samples(1), True)["stable"], "fed 1")
+        process = backend.process
+        backend.close()
+        self.assertEqual(process.returncode, 0)
 
     def test_identity_mismatch_retires_the_worker(self):
         backend = self.backend(self.runner(variant="other"))

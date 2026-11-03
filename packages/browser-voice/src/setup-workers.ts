@@ -3,19 +3,22 @@ import { randomUUID } from "node:crypto";
 import { endianness } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
-  MAX_HEADER_BYTES as MAX_WORKER_HEADER_BYTES, MAX_PCM_BYTES as MAX_WORKER_PCM_BYTES,
+  assertLivePartial, MAX_HEADER_BYTES as MAX_WORKER_HEADER_BYTES, MAX_PCM_BYTES as MAX_WORKER_PCM_BYTES,
   MAX_TEXT_BYTES as MAX_WORKER_TEXT_BYTES, SETUP_PROTOCOL_VERSION, sha256 as hash,
-  type PcmIdentity, type SetupId, type SetupExecution, type SetupExecutionContext,
+  type LivePartial, type PcmIdentity, type SetupId, type SetupExecution, type SetupExecutionContext,
   type SetupExecutionResult, type SetupExecutor, type SetupLoadResult,
 } from "./setup-protocol.ts";
 import type { ChildTranscriber, CpuReady } from "./transcriber.ts";
+import { isWorkerOutput, LOCAL_OUTPUT_MODELS, type LocalOutputModelId } from "../../speech-io/src/tts/catalogue.ts";
 
 export { MAX_WORKER_HEADER_BYTES, MAX_WORKER_PCM_BYTES, MAX_WORKER_TEXT_BYTES };
 
 const WORKER_PATH = fileURLToPath(new URL("../runtime/worker.py", import.meta.url));
-const PYTHON_SETUPS = new Set([
+/** Speech in setups and speech out worker voices share this one Python worker. */
+const PYTHON_WORKERS = new Set<string>([
   "mlx-parakeet/v3-greedy", "mlx-parakeet/ultra-greedy",
   "mlx-cleanup/qwen-targeted", "qwen/context", "hex/unified",
+  ...LOCAL_OUTPUT_MODELS.map((model) => model.id).filter(isWorkerOutput),
 ]);
 
 export type PythonWorkerResult = {
@@ -23,8 +26,13 @@ export type PythonWorkerResult = {
   metadata: Record<string, unknown>; firstUse: boolean;
   startupLoadWallMs: number; workerWallMs: number;
 };
+export type PythonVoiceResult = {
+  samples: Float32Array; sampleRate: number; processingMs: number; firstUse: boolean;
+  startupLoadWallMs: number; workerWallMs: number;
+};
 export type PythonWorkerOptions = {
-  setupId: Exclude<SetupId, "sweep/score-2">;
+  /** A Python speech in setup or a worker voice; the wire field keeps its setupId name. */
+  setupId: Exclude<SetupId, "sweep/score-2"> | LocalOutputModelId;
   pythonPath: string;
   workerPath?: string;
   backendOptions?: Record<string, unknown>;
@@ -91,6 +99,21 @@ function matches(actual: unknown, expected: unknown): boolean {
     && Object.entries(expected).every(([key, value]) => Object.hasOwn(actual, key) && matches(actual[key], value));
   return actual === expected;
 }
+/** The audio reply's PCM, checked against its stated identity. */
+function voicePcm(reply: Header): Float32Array {
+  const audio = reply.audio;
+  const pcm = reply.pcm;
+  if (!record(audio) || !(pcm instanceof Buffer) || !finiteTime(reply.processingMs)
+    || !Number.isInteger(audio.sampleRate) || (audio.sampleRate as number) < 8_000 || (audio.sampleRate as number) > 192_000
+    || audio.sampleCount !== pcm.length / 4 || audio.sha256 !== hash(pcm)) throw new SetupWorkerError("invalid voice audio");
+  // A fresh, aligned copy: the caller owns it, and pooled buffers may sit at any offset.
+  const bytes = new Uint8Array(pcm.length);
+  bytes.set(pcm);
+  if (endianness() === "BE") Buffer.from(bytes.buffer).swap32();
+  const samples = new Float32Array(bytes.buffer);
+  if (!samples.every(Number.isFinite)) throw new SetupWorkerError("voice audio must be finite");
+  return samples;
+}
 function positiveOption(value: number | undefined, fallback: number): number {
   if (value === undefined) return fallback;
   if (!Number.isFinite(value) || value <= 0) throw new Error("worker deadlines must be positive");
@@ -109,7 +132,7 @@ export class PythonSetupWorker {
   #stderr = Buffer.alloc(0);
 
   constructor(options: PythonWorkerOptions) {
-    if (!PYTHON_SETUPS.has(options.setupId)) throw new Error("unsupported Python setup");
+    if (!PYTHON_WORKERS.has(options.setupId)) throw new Error("unsupported Python setup");
     this.#options = options;
     this.#loadTimeoutMs = positiveOption(options.loadTimeoutMs, 120_000);
     this.#operationTimeoutMs = positiveOption(options.operationTimeoutMs, 120_000);
@@ -140,8 +163,24 @@ export class PythonSetupWorker {
     } catch (error) { return Promise.reject(error); }
   }
 
+  /** One planned segment of speech out; the worker loads on first use. */
+  speak(text: string, voice: string, speed: number, signal?: AbortSignal): Promise<PythonVoiceResult> {
+    if (typeof text !== "string" || !text.trim() || Buffer.byteLength(text, "utf8") > MAX_WORKER_TEXT_BYTES) {
+      return Promise.reject(new SetupWorkerError("speak text is empty or exceeds limit"));
+    }
+    return this.#run("speak", { text, voice, speed }, Buffer.alloc(0), signal);
+  }
+
   load(signal?: AbortSignal): Promise<SetupLoadResult> {
     return this.#run("load", {}, Buffer.alloc(0), signal);
+  }
+
+  /** Live words after an explicit load; start opens a fresh stream in the worker. */
+  feed(samples: Float32Array, start: boolean, signal?: AbortSignal): Promise<LivePartial> {
+    try {
+      const { body, identity } = canonicalPcm(samples);
+      return this.#run("feed", { ...wireIdentity(identity), start }, body, signal, true);
+    } catch (error) { return Promise.reject(error); }
   }
 
   /** Scheduler path: execute cannot load or replace a generation after load failed. */
@@ -191,8 +230,11 @@ export class PythonSetupWorker {
   #run(operation: "load", fields: Header, body: Buffer, signal?: AbortSignal): Promise<SetupLoadResult>;
   #run(operation: "transcribe" | "cleanup", fields: Header, body: Buffer, signal?: AbortSignal,
     requireReady?: boolean): Promise<PythonWorkerResult>;
+  #run(operation: "speak", fields: Header, body: Buffer, signal?: AbortSignal): Promise<PythonVoiceResult>;
+  #run(operation: "feed", fields: Header, body: Buffer, signal: AbortSignal | undefined,
+    requireReady: true): Promise<LivePartial>;
   async #run(operation: string, fields: Header, body: Buffer, signal?: AbortSignal,
-    requireReady = false): Promise<PythonWorkerResult | SetupLoadResult> {
+    requireReady = false): Promise<PythonWorkerResult | PythonVoiceResult | SetupLoadResult | LivePartial> {
     if (this.#closed) throw new SetupWorkerError("worker closed");
     if (this.#busy) throw new SetupWorkerError("worker is busy");
     if (signal?.aborted) throw new SetupWorkerError("worker cancelled");
@@ -227,6 +269,25 @@ export class PythonSetupWorker {
       if (operation === "load") return { startupMs: startupMs > 0 ? null : 0,
         loadMs: startupMs > 0 && finiteTime(session.metadata.loadMs) ? session.metadata.loadMs : startupMs > 0 ? null : 0,
         firstUse: !session.used };
+      if (operation === "feed") {
+        const reply = await this.#request(session, operation, "partial", fields, body, this.#operationTimeoutMs);
+        const partial = reply.partial;
+        try { assertLivePartial(partial); }
+        catch { throw new SetupWorkerError("invalid worker partial"); }
+        if (session.failure) throw session.failure;
+        // The final pass after live words is no longer this generation's first use.
+        session.used = true;
+        return { stable: partial.stable, tentative: partial.tentative, processingMs: partial.processingMs };
+      }
+      if (operation === "speak") {
+        const reply = await this.#request(session, operation, "audio", fields, body, this.#operationTimeoutMs);
+        const samples = voicePcm(reply);
+        if (session.failure) throw session.failure;
+        const firstUse = !session.used;
+        session.used = true;
+        return { samples, sampleRate: (reply.audio as Header).sampleRate as number, processingMs: reply.processingMs as number,
+          firstUse, startupLoadWallMs: startupMs, workerWallMs: performance.now() - started };
+      }
       const reply = await this.#request(session, operation, "result", fields, body, this.#operationTimeoutMs);
       const result = reply.result;
       if (!record(result) || typeof result.text !== "string" || !finiteTime(result.processingMs)
@@ -318,11 +379,18 @@ export class PythonSetupWorker {
         if (session.buffer.length < length + 4) return;
         const json = new TextDecoder("utf-8", { fatal: true }).decode(session.buffer.subarray(4, length + 4));
         const reply: unknown = JSON.parse(json);
-        session.buffer = session.buffer.subarray(length + 4);
+        // Only a voice's audio reply carries PCM after its header.
+        const pcmBytes = record(reply) && reply.type === "audio" ? reply.pcmBytes : 0;
+        if (!Number.isSafeInteger(pcmBytes) || (pcmBytes as number) < 0 || (pcmBytes as number) > MAX_WORKER_PCM_BYTES) {
+          throw new Error("invalid reply PCM length");
+        }
+        if (session.buffer.length < length + 4 + (pcmBytes as number)) return;
+        const pcm = Buffer.from(session.buffer.subarray(length + 4, length + 4 + (pcmBytes as number)));
+        session.buffer = session.buffer.subarray(length + 4 + (pcmBytes as number));
         const pending = session.pending;
         if (!record(reply) || !pending || reply.version !== SETUP_PROTOCOL_VERSION || reply.generation !== session.generation
           || reply.id !== pending.id || reply.setupId !== this.#options.setupId
-          || reply.operation !== pending.operation || reply.pcmBytes !== 0) throw new Error("reply envelope mismatch");
+          || reply.operation !== pending.operation || reply.pcmBytes !== pcmBytes) throw new Error("reply envelope mismatch");
         if (reply.type === "error") {
           if (typeof reply.error !== "string" || (reply.rawText !== undefined && typeof reply.rawText !== "string")) {
             throw new Error("invalid worker error");
@@ -333,7 +401,7 @@ export class PythonSetupWorker {
         if (reply.type !== pending.type) throw new Error("unexpected reply type");
         session.pending = undefined;
         clearTimeout(pending.timer);
-        pending.resolve(reply);
+        pending.resolve(pending.type === "audio" ? { ...reply, pcm } : reply);
         if (session.buffer.length) throw new Error("unsolicited reply bytes");
       }
     } catch (error) {
@@ -404,6 +472,13 @@ export class SetupWorkers implements SetupExecutor {
         workerWallMs: result.comparison.workerWallMs,
         diagnostics: { modelConstructionMs: result.comparison.modelConstructionMs } };
     });
+  }
+
+  /** Live words: only the Python setups whose backend streams answer; others reject in the worker. */
+  async feed(setupId: SetupId, samples: Float32Array, start: boolean, { signal }: SetupExecutionContext): Promise<LivePartial> {
+    this.#assertOpen();
+    if (setupId === "sweep/score-2") throw new SetupWorkerError("sweep/score-2 gives final text only");
+    return this.#worker(setupId).feed(samples, start, signal);
   }
 
   async release(setupId: SetupId): Promise<void> {

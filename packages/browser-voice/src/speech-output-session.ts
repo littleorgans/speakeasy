@@ -162,7 +162,11 @@ export class SpeechOutputSession {
           recheck();
           job.session = await output.open();
           recheck();
-          this.#phase(job, "producing");
+          const loadMs = job.session.loadMs;
+          if (typeof loadMs === "number") {
+            job.timing.loadMs = measured(loadMs, "Voice load inside TTS session opening, on the voice's first use.");
+          }
+          this.#phase(job, "producing", typeof loadMs === "number" ? loadMs : undefined);
           job.iterator = job.session.speak(command.text)[Symbol.asyncIterator]();
           while (true) {
             recheck();
@@ -292,8 +296,9 @@ export class SpeechOutputSession {
     if (!this.#current(job) || job.produced) throw new SpeechOutputError("SESSION_CLOSED");
   }
 
-  #phase(job: Trial, phase: "opening" | "producing"): void {
-    this.#emit({ type: "sample-phase", requestId: job.command.requestId, playbackId: job.playbackId, phase });
+  #phase(job: Trial, phase: "opening" | "producing", loadMs?: number): void {
+    this.#emit({ type: "sample-phase", requestId: job.command.requestId, playbackId: job.playbackId, phase,
+      ...(loadMs === undefined ? {} : { loadMs }) });
   }
 
   #clear(job: Trial): void {

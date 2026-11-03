@@ -144,6 +144,17 @@ export function parseClientCommand(raw: string, outputRegistry: SpeechOutputRegi
   }
 }
 
+/** One WebSocket message's bytes, whatever form ws delivered them in. */
+export function rawBytes(data: Buffer | ArrayBuffer | Buffer[]): Uint8Array {
+  if (Array.isArray(data)) {
+    return Buffer.concat(data);
+  }
+  if (data instanceof ArrayBuffer) {
+    return new Uint8Array(data);
+  }
+  return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+}
+
 /** Raw browser Float32 PCM becomes one owned 16 kHz frame. */
 export function decodeMicFrame(bytes: Uint8Array): Float32Array {
   if (bytes.byteLength === 0 || bytes.byteLength % Float32Array.BYTES_PER_ELEMENT !== 0) {

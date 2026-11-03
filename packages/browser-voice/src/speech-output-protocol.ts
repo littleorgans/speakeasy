@@ -36,7 +36,8 @@ export type SpeechOutputEvent =
       selectionRevision: number; selection: SpeechOutputConfig }
   | { type: "sample-accepted"; requestId: string; playbackId: number; generation: number;
       selection: SpeechOutputConfig; text: string; textId: string }
-  | { type: "sample-phase"; requestId: string; playbackId: number; phase: "opening" | "producing" }
+  /** producing carries loadMs when opening loaded the voice. */
+  | { type: "sample-phase"; requestId: string; playbackId: number; phase: "opening" | "producing"; loadMs?: number }
   | { type: "sample-complete"; requestId: string; playbackId: number;
       outcome: "produced" | "drained" | "cancelled"; selection: SpeechOutputConfig;
       textId: string; timing: SpeechTiming; segments: SampleSegment[]; requests: SampleProviderObservation[] }

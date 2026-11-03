@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { LiveTake, type LiveTakeEvent } from "./live-take.ts";
 import { getSetup, parseSetupSelection } from "./setup-registry.ts";
 import {
   assertBoundedText, assertSetupExecutionResult, assertSetupLoadResult, CLEANUP_SETUP_ID,
@@ -19,6 +20,8 @@ export type ComparisonRequest = {
 type Job = {
   id: string; pcm: CanonicalPcm; ids: readonly SetupId[]; admitted: number;
   controller: AbortController; rows: Map<SetupId, SetupRow>; onEvent?: ComparisonRequest["onEvent"];
+  /** Live takes this comparison stopped; it runs after their last calls settle. */
+  live: Promise<unknown>;
   resolve(result: ComparisonResult): void; done: boolean; detach(): void;
 };
 type Outcome =
@@ -51,6 +54,7 @@ export class SetupComparison {
   readonly #now: () => number;
   readonly #idleReleaseMs: number;
   readonly #resident = new Map<SetupId, number>();
+  readonly #takes = new Set<LiveTake>();
   #active: Job | undefined;
   #queued: Job | undefined;
   #pump: Promise<void> | undefined;
@@ -73,10 +77,12 @@ export class SetupComparison {
     if (typeof id !== "string" || !/^[a-zA-Z0-9_.:-]{1,128}$/.test(id)) throw new Error("invalid comparison id");
     if (this.#active?.id === id || this.#queued?.id === id) throw new Error("comparison id already admitted");
     const pcm = createCanonicalPcm(request.samples);
+    // The final pass supersedes live words: a held take stops feeding once its comparison arrives.
+    const live = Promise.all([...this.#takes].map((take) => take.stop()));
     let resolve!: Job["resolve"];
     const done = new Promise<ComparisonResult>((r) => { resolve = r; });
     const job: Job = { id, pcm, ids, admitted: this.#now(), controller: new AbortController(),
-      rows: new Map(), onEvent: request.onEvent, resolve, done: false, detach() {} };
+      rows: new Map(), onEvent: request.onEvent, live, resolve, done: false, detach() {} };
     const queued = this.#active !== undefined;
     if (queued) this.#queued = job;
     else this.#active = job;
@@ -93,6 +99,30 @@ export class SetupComparison {
     if (request.signal?.aborted || job.controller.signal.aborted) cancel();
     this.#schedule();
     return { comparisonId: id, done, cancel };
+  }
+
+  /**
+   * Live words for a held take. It shares this service's executor: it feeds
+   * only while no comparison runs and no earlier take is settling, and a
+   * comparison waits for its last call. `acquire` is the host's audio lease.
+   */
+  live(setupId: SetupId, options: { onEvent(event: LiveTakeEvent): void; acquire(): (() => void) | undefined }): LiveTake {
+    if (this.#closed) throw new Error("comparison service is closed");
+    const earlier = [...this.#takes];
+    for (const take of earlier) void take.stop();
+    let release: (() => void) | undefined;
+    const take: LiveTake = new LiveTake({ setupId, executor: this.#executor, maxSamples: getSetup(setupId).maxSamples,
+      onEvent: options.onEvent,
+      admit: () => !this.#active && !this.#closed && earlier.every((other) => !this.#takes.has(other))
+        && (release ??= options.acquire()) !== undefined,
+      touch: () => { this.#resident.set(setupId, this.#now()); },
+      finished: () => {
+        release?.();
+        this.#takes.delete(take);
+        if (!this.#pump) this.#armIdle();
+      } });
+    this.#takes.add(take);
+    return take;
   }
 
   cancel(comparisonId: string): void {
@@ -113,6 +143,7 @@ export class SetupComparison {
     if (this.#queued) this.cancel(this.#queued.id);
     if (this.#active) this.cancel(this.#active.id);
     this.#closing = (async () => {
+      await Promise.all([...this.#takes].map((take) => take.cancel()));
       await this.#pump;
       await this.#executor.close();
       this.#resident.clear();
@@ -156,6 +187,7 @@ export class SetupComparison {
   }
 
   async #run(job: Job): Promise<void> {
+    await job.live;
     if (job.controller.signal.aborted) return;
     const queueMs = this.#now() - job.admitted;
     this.#emit(job, { type: "started", comparisonId: job.id, queueMs });

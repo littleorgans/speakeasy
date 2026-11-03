@@ -3,7 +3,8 @@
 Backend options contain absolute runnerPath and modelPath, plus an optional
 setupId fixed to hex/unified. Construction starts nothing; load verifies the
 model hash, starts the worker and waits for its ready line. Each take goes
-through Hex's own stream pipeline inside the worker.
+through Hex's own stream pipeline inside the worker; feed runs the same
+pipeline live and answers with its committed and tentative words.
 """
 
 import copy
@@ -84,14 +85,27 @@ class Backend:
             self.close()
             raise
 
-    def transcribe(self, samples):
+    def _send(self, op, samples):
         if self.process is None or self.metadata is None:
             raise RuntimeError("Hex backend is not loaded")
-        body = samples.tobytes() if sys.byteorder == "little" else None
-        if body is None:
+        if sys.byteorder != "little":
             raise RuntimeError("Hex worker requires a little endian host")
-        self.process.stdin.write(struct.pack("<I", len(body) // 4) + body)
+        body = samples.tobytes()
+        self.process.stdin.write(op + struct.pack("<I", len(body) // 4) + body)
         self.process.stdin.flush()
+        return body
+
+    def feed(self, samples, start):
+        """Live words: start opens a fresh stream, as Hex does per dictation."""
+        self._send(b"S" if start else b"F", samples)
+        reply = self._reply()
+        if reply.get("kind") != "partial":
+            raise RuntimeError("Hex worker returned no partial")
+        return {"stable": reply.get("stable"), "tentative": reply.get("tentative"),
+                "processingMs": reply.get("processingMs")}
+
+    def transcribe(self, samples):
+        body = self._send(b"T", samples)
         reply = self._reply()
         if reply.get("kind") != "result" or not isinstance(reply.get("text"), str):
             raise RuntimeError("Hex worker returned no result")
@@ -108,7 +122,6 @@ class Backend:
         if process is None:
             return
         try:
-            process.stdin.write(struct.pack("<I", 0))
             process.stdin.close()
             process.wait(timeout=5)
         except Exception:

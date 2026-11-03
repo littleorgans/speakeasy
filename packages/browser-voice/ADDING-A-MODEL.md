@@ -23,7 +23,8 @@ It serves `http://127.0.0.1:4870/` with no further setup:
 
 Flags after `pnpm road-test --` or environment values override either default:
 `--setup-runtime` / `SPEAKEASY_SETUP_RUNTIME` and `--output-root` /
-`SPEAKEASY_OUTPUT_ROOT`.
+`SPEAKEASY_OUTPUT_ROOT`. The port works the same way, `pnpm road-test -- --port 4873`:
+a flag given twice takes its last value.
 
 ### The setup runtime file
 
@@ -37,6 +38,11 @@ package shows every entry. Omit a setup to leave it unavailable.
   default 120000.
 - `cpu.modelRoot`: the directory holding `parakeet-ultra-sherpa-onnx-int8`;
   defaults to `models/sherpa`.
+- `voices.<voice id>`: `pythonPath` for a worker voice (Speech out below),
+  plus `runnerPath` where its backend drives a native binary. Optional
+  `loadTimeoutMs` and `operationTimeoutMs` as above. Its weights come from the
+  output root, so no model path. Without an entry the voice shows
+  "needs setup: Voice runtime is not configured".
 
 Unknown setups or fields are refused at startup.
 
@@ -45,7 +51,7 @@ Unknown setups or fields are refused at startup.
 1. Add an entry to `runtime/setups.json`. Required: `id`, `label`, `card`,
    `model`, `revision`, `runtime`, `controls`, `operation` (`transcribe`) and
    `maxSamples`. `card.runtime` is the plain text runtime line on the model
-   card; `card.transcript` is `final` or `partials`. The card's size is
+   card; `card.transcript` is `final` or `partials` (Live words below). The card's size is
    measured from the configured model files. A setup with `baseSetup` also
    loads that setup: it is ready only when its base is, and its size counts both.
 2. Add the id to `SETUP_IDS` in `src/setup-protocol.ts`, in manifest order.
@@ -53,27 +59,85 @@ Unknown setups or fields are refused at startup.
    (`SETUP_MANIFEST_SHA256`, the SHA256 of `JSON.stringify` of the parsed file).
 4. Give it a backend. Python backends live in `runtime/<name>.py` with a
    `Backend` class (`load`, `transcribe`, `close`); register it in `BACKENDS` in
-   `runtime/worker.py` and `PYTHON_SETUPS` in `src/setup-workers.ts`. A native
+   `runtime/worker.py` and `PYTHON_WORKERS` in `src/setup-workers.ts`. A native
    binary goes behind a Python backend; `runtime/hex_unified.py` is the
-   example.
+   example. Its build script builds into a directory of its own under
+   `~/Library/Caches/speakeasy/`; after a change to `runtime/hex/worker.rs`,
+   rebuild to a new directory and point `runnerPath` at it, so a running
+   server keeps the binary it started with.
 5. Teach `src/server-options.ts` its files: a native path beyond the model goes
    in `EXTRA_LOCATIONS`, and `inspectSetupReadiness` checks the files exist.
 6. Add its paths to `models/road-test-runtime.json` and to
    `road-test-runtime.example.json`, restart, and try it in the page.
 
+### Live words
+
+A setup whose engine truly streams sets `card.transcript` to `partials`. While
+the owner holds the key, the page streams the take's mic frames over the
+`/live-words` socket; the host feeds them to the worker whenever it is free,
+and the page shows the words one tone quieter until the final text replaces
+them. The final is still the setup's full pass on the whole take, after the
+live stream stops. The backend adds `feed(samples, start)`: `start` opens a
+fresh stream, and it returns `stable` (settled text), `tentative` (text the
+model may still change) and `processingMs`. Feed whole engine chunks and keep
+a remainder for the next call (`STREAM` in `runtime/parakeet.py`, the 2,560
+sample feeds in `runtime/hex/worker.rs`). A setup with `baseSetup` shows its
+base's words. Never fake partials by decoding the growing take again: an
+engine that only gives final text keeps `final`.
+
 ## Speech out
 
-1. Pin the payload files (name, bytes, SHA256) in `LOCAL_TTS_MODELS` in
-   `packages/speech-io/src/tts/models.ts`.
+Every voice reads back through one sentence pipeline
+(`packages/speech-io/src/tts/stream.ts`): it plans a short first part, then
+whole sentences, and asks the voice to synthesize one part at a time, so
+every voice streams by sentence. A sherpa-onnx `vits` or `kokoro` voice runs
+in process on the CPU. Any other runtime (MLX, Core ML, a native binary) is a
+worker voice: the same Python worker as speech in, answering `speak`.
+
+1. Pin the payload files (name, bytes, SHA256; names may include a
+   subdirectory) in `LOCAL_TTS_MODELS` in `packages/speech-io/src/tts/models.ts`.
+   A worker voice uses `family: "worker"` with its `sampleRate`, `numSpeakers`
+   and `attribution`; these pins are the only ones, as the worker receives
+   them to attest the files before loading. A runtime that takes phonemes
+   names the sherpa voice whose Piper Plus frontend the host borrows in
+   `phonemesFrom`; readiness then checks that voice's files too.
 2. Add the browser choice to `LOCAL_OUTPUT_MODELS` in
    `packages/speech-io/src/tts/catalogue.ts`: `id`, `label`, `runtime` (the
    card's runtime line), voices, sample rate and licence. The card's size is
-   the sum of the pinned file bytes.
-3. Put the payload under the output root and restart. A family other than
-   sherpa-onnx `vits` or `kokoro` also needs synthesis support in
-   `packages/speech-io/src/tts/synth.ts`.
+   the sum of the pinned file bytes. A worker voice numbers its `speakerId`s
+   from 0 in list order; the worker receives the voice `id`.
+3. Put the payload under the output root and restart.
+
+A worker voice also needs:
+
+4. A backend: a `Backend` taking `setupId`, `modelPath` and `files`, with
+   `load` (attest with `runtime/pins.py`, then load) and
+   `speak(text, voice, speed)`, returning little endian Float32 `samples`
+   bytes, `sampleRate` and `processingMs` for one part. Register it in
+   `BACKENDS` and `VOICES` in `runtime/worker.py`. A Python runtime gets its
+   own `runtime/<name>.py` (`runtime/kokoro_mlx.py` is the example). A native
+   runner that speaks the fast-tts frame protocol needs only a `spec` line in
+   `runtime/native_voice.py`, its source and a `build.py` under
+   `runtime/<name>/` that builds into `~/Library/Caches/speakeasy/<name>/`,
+   and `runnerPath` in the runtime file.
+5. For a Python runtime, a pinned environment: freeze it to
+   `runtime/requirements-<name>.txt`, build it under
+   `~/Library/Caches/speakeasy/browser-voice-switch/environments/` with `uv`,
+   then run `python -m compileall` on its site packages once; the worker
+   starts Python with `-B`, so without compiled bytecode every start
+   recompiles the libraries (30 s instead of 3 s for Kokoro MLX).
+6. Its interpreter under `voices` in `models/road-test-runtime.json` and in
+   `road-test-runtime.example.json`; a native runner also needs its id in
+   `VOICE_EXTRA_LOCATIONS` in `src/server-options.ts`. The bridge needs only
+   the standard library of Python 3.11 or later.
+
+Every voice streams by sentence, as the pipeline does. A runtime that could
+stream within a sentence (Pocket's frames, libpiper's decoder chunks) still
+returns each part whole: the worker replies once per request.
 
 ## Check
 
 `pnpm typecheck && pnpm test` from the repo root. The registry tests pin the
-setup ids and revisions, so update them with the new entry.
+setup ids and revisions, so update them with the new entry. Backends have
+standard library tests:
+`python3 -m unittest discover -s packages/browser-voice/runtime`.

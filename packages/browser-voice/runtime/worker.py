@@ -21,7 +21,14 @@ BACKENDS = {
     "mlx-cleanup/qwen-targeted": "cleanup",
     "qwen/context": "qwen_asr",
     "hex/unified": "hex_unified",
+    "kokoro-mlx-bf16": "kokoro_mlx",
+    "pocket-18m": "pocket_18m",
+    "piper-kristin-split": "native_voice",
+    "kokoro-coreml": "native_voice",
 }
+# Speech out voices answer speak with PCM; they never transcribe.
+VOICES = {"kokoro-mlx-bf16", "pocket-18m", "piper-kristin-split", "kokoro-coreml"}
+MIN_SPEED, MAX_SPEED = 0.5, 2.0
 
 
 class ProtocolError(ValueError):
@@ -74,12 +81,12 @@ def read_frame(stream):
     return header, read_exact(stream, length)
 
 
-def write_frame(stream, header):
+def write_frame(stream, header, pcm=b""):
     body = json.dumps(header, ensure_ascii=False, separators=(",", ":"),
                       allow_nan=False).encode("utf-8")
     if not 0 < len(body) <= MAX_HEADER_BYTES:
         raise ProtocolError("reply exceeds header limit")
-    stream.write(struct.pack("<I", len(body)) + body)
+    stream.write(struct.pack("<I", len(body)) + body + pcm)
     stream.flush()
 
 
@@ -138,6 +145,38 @@ def cleanup_text(header):
     return text
 
 
+def speak_request(header):
+    text, voice, speed = header.get("text"), header.get("voice"), header.get("speed")
+    if not isinstance(text, str) or not text.strip() or len(text.encode("utf-8")) > MAX_TEXT_BYTES:
+        raise ProtocolError("invalid speak text")
+    if not isinstance(voice, str) or not 0 < len(voice) <= 128:
+        raise ProtocolError("invalid speak voice")
+    if type(speed) not in (int, float) or not math.isfinite(speed) or not MIN_SPEED <= speed <= MAX_SPEED:
+        raise ProtocolError("invalid speak speed")
+    return text, voice, float(speed)
+
+
+def audio_reply(result):
+    """Validates a voice backend's PCM and returns the reply outcome with its body."""
+    if not isinstance(result, dict) or not isinstance(result.get("samples"), bytes):
+        raise ProtocolError("voice result requires little endian Float32 samples")
+    pcm, rate, elapsed = result["samples"], result.get("sampleRate"), result.get("processingMs")
+    if len(pcm) % 4 or len(pcm) > MAX_PCM_BYTES:
+        raise ProtocolError("invalid voice PCM length")
+    if type(rate) is not int or not 8_000 <= rate <= 192_000:
+        raise ProtocolError("invalid voice sample rate")
+    if type(elapsed) not in (int, float) or not math.isfinite(elapsed) or elapsed < 0:
+        raise ProtocolError("voice result requires finite processingMs")
+    samples = array("f")
+    samples.frombytes(pcm)
+    if sys.byteorder != "little":
+        samples.byteswap()
+    if any(not math.isfinite(value) for value in samples):
+        raise ProtocolError("voice PCM must be finite")
+    return {"type": "audio", "processingMs": elapsed, "audio": {"sampleRate": rate,
+            "sampleCount": len(pcm) // 4, "sha256": hashlib.sha256(pcm).hexdigest()}, "pcm": pcm}
+
+
 def backend_factory(setup_id, options):
     module = importlib.import_module(BACKENDS[setup_id])
     return module.Backend({**options, "setupId": setup_id})
@@ -157,10 +196,23 @@ def validate_result(result):
         raise ProtocolError("backend decodeMs must be finite")
 
 
+def validate_partial(result):
+    """Live words: settled text, then text the model may still change."""
+    if not isinstance(result, dict) or set(result) != {"stable", "tentative", "processingMs"}:
+        raise ProtocolError("partial requires stable, tentative and processingMs")
+    for name in ("stable", "tentative"):
+        if not isinstance(result[name], str) or len(result[name].encode("utf-8")) > MAX_TEXT_BYTES:
+            raise ProtocolError(f"invalid partial {name}")
+    elapsed = result["processingMs"]
+    if type(elapsed) not in (int, float) or not math.isfinite(elapsed) or elapsed < 0:
+        raise ProtocolError("partial requires finite processingMs")
+
+
 def handle_request(header, body, backend, setup_id, factory):
     operation = header.get("operation")
     cleanup = setup_id == "mlx-cleanup/qwen-targeted"
-    if operation != "transcribe" and body:
+    voice = setup_id in VOICES
+    if operation not in ("transcribe", "feed") and body:
         raise ProtocolError("unexpected body")
     if operation == "load":
         if backend is not None or not isinstance(header.get("options"), dict):
@@ -174,7 +226,16 @@ def handle_request(header, body, backend, setup_id, factory):
         return backend, {"type": "closed"}
     if backend is None:
         raise ProtocolError("backend is not ready")
-    if operation == "transcribe" and not cleanup:
+    if operation == "speak" and voice:
+        return backend, audio_reply(backend.speak(*speak_request(header)))
+    # Only backends whose engine truly streams answer feed; the rest give final text only.
+    if operation == "feed" and not cleanup and not voice and hasattr(backend, "feed"):
+        if type(header.get("start")) is not bool:
+            raise ProtocolError("feed requires start")
+        result = backend.feed(pcm_samples(header, body), header["start"])
+        validate_partial(result)
+        return backend, {"type": "partial", "partial": result}
+    if operation == "transcribe" and not cleanup and not voice:
         result = backend.transcribe(pcm_samples(header, body))
     elif operation == "cleanup" and cleanup:
         result = backend.cleanup(cleanup_text(header))
@@ -219,7 +280,8 @@ def serve(source, target, setup_id, generation, factory=backend_factory):
                     backend, outcome = handle_request(header, body, backend, setup_id, create_backend)
                 if outcome["type"] == "closed":
                     close_backend()
-                write_frame(target, {**reply, **outcome, "pcmBytes": 0})
+                pcm = outcome.pop("pcm", b"")
+                write_frame(target, {**reply, **outcome, "pcmBytes": len(pcm)}, pcm)
                 if outcome["type"] == "closed":
                     return 0
             except Exception as error:

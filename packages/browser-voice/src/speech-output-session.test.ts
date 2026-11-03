@@ -6,9 +6,13 @@ import type { AudioSegment } from "../../speech-io/src/tts/contract.ts";
 import { createProviderCredentials } from "./provider-availability.ts";
 import { ProviderPolicy } from "./provider-policy.ts";
 import { createHostProviderConfig } from "./setup-routes.ts";
-import { buildSpeechOutputCatalogue, type ApiOutputModel } from "./speech-output-catalog.ts";
+import { buildSpeechOutputCatalogue, type ApiOutputModel, type SpeechOutputCatalogue } from "./speech-output-catalog.ts";
 import type { SpeechOutputEvent } from "./speech-output-protocol.ts";
 import { SpeechOutputSession, type SpeechOutputContext, type SpeechOutputSessionOptions } from "./speech-output-session.ts";
+
+/** The one API voice in the harness catalogue, after however many local voices. */
+const apiOutput = (catalogue: Pick<SpeechOutputCatalogue, "output">) =>
+  catalogue.output.find((entry) => entry.config.provider.kind !== "local")!.config;
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -88,7 +92,7 @@ function harness(t: TestContext, options: {
     type: "speak-sample", requestId, selection, text: "One. Two.", catalogueRevision: serviceCatalogue().revision, ...extra,
   });
   const selectApi = () => {
-    const selection = catalogue.output[2].config;
+    const selection = apiOutput(catalogue);
     send({ type: "select-output", requestId: "choose", catalogueRevision: serviceCatalogue().revision, selection });
     const chosen = events.findLast((event) => event.type === "output-selected");
     assert.ok(chosen?.type === "output-selected");
@@ -219,7 +223,7 @@ test("close waits for a late open and closes it, then waits for native quiescenc
 
 test("API dispatch requires explicit session/config selection; client source and saved grant cannot arm it", async (t) => {
   const h = harness(t);
-  const selection = h.catalogue.output[2].config;
+  const selection = apiOutput(h.catalogue);
   h.speak("unselected", selection);
   await until(() => h.events.some((event) => event.type === "sample-error" && event.code === "SELECTION_REQUIRED"));
   await until(() => !h.state.leaseHeld);
@@ -434,4 +438,21 @@ test("actual combined policy rejects split catalogue revisions and permits selec
   assert.equal(h.completions().at(-1)?.outcome, "drained");
   h.send({ type: "select-output", requestId: "old", catalogueRevision: h.catalogue.revision, selection: h.catalogue.default });
   assert.ok(h.events.at(-1)?.type === "sample-error");
+});
+
+test("a voice's load on opening is reported as it starts producing and in the completion timing", async (t) => {
+  const h = harness(t, { createOutput: () => ({ open: async () => ({ loadMs: 4_200,
+    speak: async function* () { yield audio(); }, close: async () => {} }) }) });
+  h.speak();
+  await until(() => h.completions().length === 1);
+  const phases = h.events.filter((event) => event.type === "sample-phase");
+  assert.deepEqual(phases.map((event) => [event.phase, event.loadMs]), [["opening", undefined], ["producing", 4_200]]);
+  assert.deepEqual(h.completions()[0].timing.loadMs, { status: "measured", ms: 4_200, clock: "server",
+    boundary: "Voice load inside TTS session opening, on the voice's first use." });
+  const warm = harness(t);
+  warm.speak();
+  await until(() => warm.completions().length === 1);
+  const producing = warm.events.find((event) => event.type === "sample-phase" && event.phase === "producing");
+  assert.ok(producing?.type === "sample-phase" && producing.loadMs === undefined);
+  assert.equal(warm.completions()[0].timing.loadMs.status, "unavailable");
 });

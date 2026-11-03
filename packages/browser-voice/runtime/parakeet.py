@@ -4,6 +4,11 @@ Backend options are exactly setupId and an absolute local modelPath. Constructio
 is lazy; load is explicit and has no warmup. Transport owns finite mono 16 kHz
 little endian Float32 ingress and process scheduling. This adapter also checks
 the buffer contract before passing its exact view to MLX.
+
+Live words come from parakeet-mlx transcribe_stream, which swaps the encoder to
+local attention while a stream is open. Ending a stream puts the very same
+stock attention modules back, so the final pass is unchanged; transcribe ends
+any open stream first.
 """
 
 import copy
@@ -25,6 +30,9 @@ RUNTIME_VERSIONS = {
 WEIGHT_TENSOR_COUNT = 697
 LOADED_WEIGHT_DTYPES = ["mlx.core.bfloat16"]
 SEED = 0
+# Live stream: parakeet-mlx normalizes each chunk's mel on its own, so chunks
+# much under 800 ms of near silence decode to noise and wipe earlier words.
+STREAM = {"chunkSamples": 12_800, "contextSize": (64, 64), "depth": 1, "attention": "local"}
 
 # Byte sizes and SHA256 from the frozen mlx-parakeet/artifacts.json. Shared
 # preprocessing/tokenizer bytes are identical for both measured snapshots.
@@ -101,6 +109,9 @@ class Backend:
         self._spec = PRESETS[setup_id]
         self._model_path = Path(model_path)
         self._metadata = None
+        self._stream = None
+        self._pending = None
+        self._stock_attention = None
 
     def load(self):
         if self._metadata is not None:
@@ -169,20 +180,66 @@ class Backend:
             "context": None,
             "hotwords": None,
             "chunking": None,
+            "stream": {**STREAM, "contextSize": list(STREAM["contextSize"])},
         }
         return copy.deepcopy(self._metadata)
 
-    def transcribe(self, samples):
+    def _samples(self, samples, allow_empty=False):
         if self._metadata is None:
-            raise RuntimeError("Parakeet load() must complete before transcribe()")
+            raise RuntimeError("Parakeet load() must complete before use")
         view = memoryview(samples)
         native_little_endian = sys.byteorder == "little" and view.format in {"f", "=f", "@f"}
-        if (view.ndim != 1 or view.itemsize != 4 or not view.c_contiguous or not view.nbytes
+        if (view.ndim != 1 or view.itemsize != 4 or not view.c_contiguous or not (view.nbytes or allow_empty)
                 or not (native_little_endian or view.format == "<f")):
             raise ValueError("Parakeet samples must be a contiguous little endian Float32 view")
         data = self._np.frombuffer(view, dtype="<f4")
         if not self._np.isfinite(data).all():
             raise ValueError("Parakeet samples must be finite")
+        return view, data
+
+    def feed(self, samples, start):
+        """Live words: decodes each whole stream chunk; a remainder waits for the next feed."""
+        _, data = self._samples(samples, allow_empty=True)
+        if start:
+            self._end_stream()
+        mx = self._mx
+        with mx.stream(self._gpu_stream):
+            start_time = time.perf_counter()
+            if self._stream is None:
+                encoder = self._model.encoder
+                self._stock_attention = (encoder.pos_enc, [layer.self_attn for layer in encoder.layers])
+                stream = self._model.transcribe_stream(context_size=STREAM["contextSize"], depth=STREAM["depth"],
+                                                       decoding_config=self._decoding_config)
+                self._stream = stream.__enter__()
+                self._pending = self._np.empty(0, dtype="<f4")
+            pending = self._np.concatenate([self._pending, data])
+            chunk = STREAM["chunkSamples"]
+            whole = len(pending) // chunk * chunk
+            for offset in range(0, whole, chunk):
+                self._stream.add_audio(mx.array(pending[offset:offset + chunk], dtype=mx.float32))
+            self._pending = pending[whole:]
+            mx.synchronize(self._gpu_stream)
+            processing_ms = (time.perf_counter() - start_time) * 1000
+        return {"stable": "".join(token.text for token in self._stream.finalized_tokens),
+                "tentative": "".join(token.text for token in self._stream.draft_tokens),
+                "processingMs": processing_ms}
+
+    def _end_stream(self):
+        # The stream's own exit rebuilds fresh rel_pos modules, about 28 ms on
+        # the release path; restoring the stock objects costs nothing.
+        stock, self._stream, self._pending, self._stock_attention = self._stock_attention, None, None, None
+        if stock is not None:
+            encoder = self._model.encoder
+            encoder.pos_enc, attention = stock
+            for layer, original in zip(encoder.layers, attention, strict=True):
+                layer.self_attn = original
+
+    def close(self):
+        self._end_stream()
+
+    def transcribe(self, samples):
+        view, data = self._samples(samples)
+        self._end_stream()
         pcm_sha256 = hashlib.sha256(view.cast("B")).hexdigest()
         mx = self._mx
         with mx.stream(self._gpu_stream):

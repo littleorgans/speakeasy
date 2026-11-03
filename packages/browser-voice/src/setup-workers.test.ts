@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import { PythonSetupWorker, SetupWorkers, MAX_WORKER_PCM_BYTES, MAX_WORKER_TEXT_BYTES } from "./setup-workers.ts";
+import { createWorkerVoiceSynth } from "./voice-workers.ts";
 import { createCanonicalPcm, sha256, type SetupExecution, type SetupLoadResult } from "./setup-protocol.ts";
 import { CPU_PRESET, type CpuReady } from "./transcriber.ts";
 
@@ -43,7 +44,7 @@ class Fake:
             raise RuntimeError("load failed")
         if mode in ("sendRace", "exitAfterReady"):
             self.mark()
-        return {"revision": "pinned", "loadMs": 2, "pid": os.getpid()}
+        return {"revision": "pinned", "setupId": self.options.get("setupId"), "loadMs": 2, "pid": os.getpid()}
     def transcribe(self, samples):
         self.calls += 1
         if mode == "ignoreTerm":
@@ -64,15 +65,29 @@ class Fake:
                 "diagnostics": {"hex": raw.hex(), "count": len(samples), "pid": os.getpid(), "calls": self.calls}}
     def cleanup(self, text):
         return {"text": text, "rawText": text, "processingMs": 0}
+    def feed(self, samples, start):
+        if mode == "badPartial":
+            return {"stable": "", "tentative": "", "processingMs": -1}
+        self.fed = (0 if start else getattr(self, "fed", 0)) + len(samples)
+        return {"stable": " heard %d" % self.fed, "tentative": " maybe", "processingMs": 2}
+    def speak(self, text, voice, speed):
+        if mode == "badAudio":
+            return {"samples": b"\\0\\0\\xc0\\x7f", "sampleRate": 24000, "processingMs": 1}
+        pcm = struct.pack("<4f", len(text), speed, -0.0, len(voice))
+        return {"samples": pcm, "sampleRate": 24000, "processingMs": 2}
     def close(self):
         path = self.options.get("closeMarker")
         if path:
             with open(path, "w") as target:
                 target.write("closed")
 def factory(setup, options):
-    return Fake(options)
-def write(target, header):
+    return Fake({**options, "setupId": setup})
+def write(target, header, pcm=b""):
     header = dict(header)
+    if header["type"] == "audio" and mode == "audioHashMismatch":
+        header["audio"] = {**header["audio"], "sha256": "0" * 64}
+    if header["type"] == "partial" and mode == "badPartialReply":
+        header["partial"] = {**header["partial"], "stable": 7}
     if header["type"] == "ready" and mode == "badReady":
         header["metadata"] = {"revision": "wrong"}
     if header["type"] == "result":
@@ -108,7 +123,7 @@ def write(target, header):
         target.write(packet + packet)
         target.flush()
     else:
-        original_write(target, header)
+        original_write(target, header, pcm)
     if header["type"] == "ready" and mode == "exitAfterReady":
         os._exit(12)
     if header["type"] == "ready" and mode == "sendRace":
@@ -473,4 +488,63 @@ test("close awaits a CPU preparation already in flight before its final child re
   await pending;
   await closing;
   assert.ok(closes >= 2);
+});
+
+test("a worker voice speaks one segment and returns its exact PCM, checked against its identity", async (t) => {
+  const voice = (mode = "") => new PythonSetupWorker({ setupId: "kokoro-mlx-bf16", pythonPath: PYTHON, workerPath: fixture,
+    backendOptions: { mode }, expectedIdentity: { revision: "pinned" }, loadTimeoutMs: 3000, operationTimeoutMs: 3000 });
+  const worker = voice();
+  t.after(() => worker.close());
+  const first = await worker.speak("Hi.", "af_heart", 1.5);
+  assert.deepEqual([...first.samples], [3, 1.5, -0, 8]);
+  assert.ok(Object.is(first.samples[2], -0));
+  assert.equal(first.sampleRate, 24000);
+  assert.equal(first.processingMs, 2);
+  assert.equal(first.firstUse, true);
+  assert.ok(first.startupLoadWallMs > 0, "the first segment carries the load");
+  const second = await worker.speak("Again.", "af_heart", 1);
+  assert.equal(second.firstUse, false);
+  assert.equal(second.startupLoadWallMs, 0);
+  await assert.rejects(worker.speak(" ", "af_heart", 1), /empty/);
+  for (const mode of ["badAudio", "audioHashMismatch"]) {
+    const failing = voice(mode);
+    t.after(() => failing.close());
+    await assert.rejects(failing.speak("Hi.", "af_heart", 1), mode === "badAudio" ? /finite/ : /invalid voice audio/);
+  }
+});
+
+test("a worker voice synth maps the pipeline's speaker to the registry voice and passes the pins", async (t) => {
+  const synth = await createWorkerVoiceSynth("kokoro-mlx-bf16", { pythonPath: PYTHON, loadTimeoutMs: 3000 }, directory, fixture);
+  t.after(() => synth.close());
+  assert.equal(synth.numSpeakers, 2);
+  assert.equal(synth.sampleRate, 24000);
+  const michael = await synth.synth({ text: "Hi.", sid: 1, speed: 1 });
+  assert.deepEqual([...michael.samples], [3, 1, -0, "am_michael".length]);
+  assert.equal(michael.audioDurationMs, 4 / 24);
+  assert.equal((await synth.synth({ text: "Hi." })).samples[3], "af_heart".length, "speaker 0 is the default voice");
+  await assert.rejects(synth.synth({ text: "Hi.", sid: 2 }), /Invalid TTS speaker/);
+});
+
+test("live words feed a loaded worker, mark it used, and reject a malformed partial", async (t) => {
+  const worker = makeWorker();
+  t.after(() => worker.close());
+  await assert.rejects(worker.feed(new Float32Array(4), true), /explicit load required/);
+  assert.equal((await worker.load()).firstUse, true);
+  assert.deepEqual(await worker.feed(new Float32Array([0.5, -0, 1]), true), { stable: " heard 3", tentative: " maybe", processingMs: 2 });
+  assert.equal((await worker.feed(new Float32Array(0), false)).stable, " heard 3", "an empty feed still answers");
+  assert.equal((await worker.feed(new Float32Array(2), false)).stable, " heard 5");
+  assert.equal((await worker.transcribe(new Float32Array(4))).firstUse, false, "the final pass after live words is warm");
+  for (const [mode, message] of [["badPartial", /finite processingMs/], ["badPartialReply", /invalid worker partial/]] as const) {
+    const bad = makeWorker({ backendOptions: { mode } });
+    t.after(() => bad.close());
+    await bad.load();
+    await assert.rejects(bad.feed(new Float32Array(2), true), message);
+  }
+  const executor = new SetupWorkers({ python: { "hex/unified": { pythonPath: PYTHON, workerPath: fixture,
+    expectedIdentity: { revision: "pinned" }, loadTimeoutMs: 3000, operationTimeoutMs: 3000 } } });
+  t.after(() => executor.close());
+  const signal = new AbortController().signal;
+  await executor.load("hex/unified", { signal });
+  assert.equal((await executor.feed("hex/unified", new Float32Array(7), true, { signal })).stable, " heard 7");
+  await assert.rejects(executor.feed("sweep/score-2", new Float32Array(1), true, { signal }), /final text only/);
 });

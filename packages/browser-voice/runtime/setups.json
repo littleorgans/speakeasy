@@ -8,7 +8,7 @@
       "label": "Parakeet v3 MLX",
       "card": {
         "runtime": "parakeet-mlx 0.5.3 on MLX, Metal GPU",
-        "transcript": "final"
+        "transcript": "partials"
       },
       "model": "mlx-community/parakeet-tdt-0.6b-v3",
       "revision": "ed2b7e8c15f9aaa0b5772e2efb986255eaef7e15",
@@ -43,7 +43,7 @@
       "label": "Parakeet Ultra MLX",
       "card": {
         "runtime": "parakeet-mlx 0.5.3 on MLX, Metal GPU",
-        "transcript": "final"
+        "transcript": "partials"
       },
       "model": "selcukkubur/parakeet-ultra-mlx",
       "revision": "b554592c50b2a48471add2daa3d46fa9f00fef5e",
@@ -182,7 +182,7 @@
       "label": "Hex Parakeet Unified",
       "card": {
         "runtime": "transcribe.cpp 7045d1c, Metal GPU, Hex stream pipeline",
-        "transcript": "final"
+        "transcript": "partials"
       },
       "model": "parakeet-unified-en-0.6b",
       "revision": "826bdbc44c8806630a45c08ed8cef35a36817a17",
@@ -216,7 +216,7 @@
       "label": "Ultra plus Qwen cleanup",
       "card": {
         "runtime": "Ultra MLX, then mlx-lm 0.32.2 on Metal GPU",
-        "transcript": "final"
+        "transcript": "partials"
       },
       "model": "mlx-community/Qwen2.5-1.5B-Instruct-4bit",
       "revision": "8b403126fc14f14cfc99bb4cfa72ecbc129ea677",

@@ -1,13 +1,19 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import { WebSocket } from "ws";
 import { startBrowserVoiceServer, type BrowserVoiceServerOptions } from "./host.ts";
 import { SETUPS } from "./setup-registry.ts";
-import type { SetupExecution, SetupExecutor } from "./setup-protocol.ts";
+import type { SetupExecution, SetupExecutor, SetupId } from "./setup-protocol.ts";
 import { buildSpeechOutputCatalogue } from "./speech-output-catalog.ts";
 import { LOCAL_OUTPUT_MODELS, LOCAL_OUTPUT_REGISTRY } from "../../speech-io/src/tts/catalogue.ts";
 
 class FakeExecutor implements SetupExecutor {
   calls: SetupExecution[] = [];
+  fed: [SetupId, number, boolean][] = [];
+  async feed(setupId: SetupId, samples: Float32Array, start: boolean) {
+    this.fed.push([setupId, samples.length, start]);
+    return { stable: " Clear the", tentative: " scream", processingMs: 3 };
+  }
   async load() { return { startupMs: 0, loadMs: 0, firstUse: true }; }
   async execute(request: SetupExecution) {
     this.calls.push(request);
@@ -76,4 +82,35 @@ test("local voices publish their runtime and pinned payload size for the card", 
   assert.equal(kristin.runtime, "sherpa-onnx VITS, CPU");
   assert.equal(kristin.sizeBytes, 63_531_507 + 940 + 4_968);
   assert.ok(catalogue.models.every((model) => model.runtime && model.sizeBytes! > 0));
+});
+
+test("live words stream mic frames to a streaming setup's model and answer with its words, tagged by take", async (t) => {
+  const { server, executor } = await host(t, { home: "road-test" });
+  const socket = new WebSocket(server.url.replace("http", "ws") + "/live-words", { headers: { origin: server.url } });
+  t.after(() => socket.close());
+  const events: any[] = [];
+  socket.on("message", (data) => events.push(JSON.parse(data.toString())));
+  await new Promise((resolve) => socket.once("open", resolve));
+  const next = async (count: number) => {
+    for (let tries = 0; events.length < count; tries++) {
+      if (tries > 200) throw new Error(`waited for ${count} events, have ${JSON.stringify(events)}`);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  };
+  socket.send(JSON.stringify({ type: "begin", takeId: "t1", setupId: "qwen/context" }));
+  await next(1);
+  assert.deepEqual(events[0], { type: "error", takeId: null, message: "Qwen3 ASR with known words gives final text only" });
+  socket.send(JSON.stringify({ type: "begin", takeId: "t2", setupId: "mlx-cleanup/qwen-targeted" }));
+  socket.send(new Float32Array(320));
+  await next(4);
+  assert.deepEqual(events.slice(1).map((event) => [event.type, event.takeId]), [["loading", "t2"], ["ready", "t2"], ["partial", "t2"]]);
+  assert.equal(events[3].stable + events[3].tentative, " Clear the scream");
+  assert.deepEqual(executor.fed, [["mlx-parakeet/ultra-greedy", 320, true]], "cleanup shows its base model's words");
+  socket.send(JSON.stringify({ type: "end", takeId: "t2" }));
+  socket.send(new Float32Array(320));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(executor.fed.length, 1, "frames after end are dropped");
+  socket.send("{\"type\":\"begin\"}");
+  await next(5);
+  assert.equal(events[4].message, "takeId required");
 });

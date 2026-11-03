@@ -96,6 +96,9 @@ kbd { font-family: var(--mono); margin-left: 8px; }
 
 .said.placeholder { color: var(--ink-3); }
 
+/* Live words sit one tone below the final text, which replaces them in place. */
+.said.partial, .partial dd { color: var(--ink-2); }
+
 .timings { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
 
 .group { display: grid; gap: 8px; align-content: start; }
@@ -137,6 +140,9 @@ td.said-cell { color: var(--ink); overflow-wrap: anywhere; }
 th:last-child, td:last-child { padding-right: 0; }
 
 .num { text-align: right; white-space: nowrap; }
+
+/* Long timing headers wrap, so the transcript column keeps its room. */
+th.num { white-space: normal; vertical-align: bottom; }
 
 .note { display: block; color: var(--ink-3); }
 

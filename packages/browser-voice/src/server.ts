@@ -12,9 +12,10 @@ loadLocalEnv();
 const options = readBrowserVoiceOptions(process.argv.slice(2), process.env);
 const setup = await createSetupRuntime(options.setupRuntimeFile, { optional: options.setupRuntimeDefault });
 const credentials = createProviderCredentials();
-const localOutput = new LocalSpeechOutputFactory({ root: options.outputRoot });
-const { output, providers, speechOutput } = createProviderRuntime({ credentials,
-  readiness: setup.readiness, localOutput, localCatalogue: await getLocalOutputCatalogue(options.outputRoot),
+const localOutput = new LocalSpeechOutputFactory({ root: options.outputRoot,
+  createWorkerSynth: (model) => setup.voices.createSynth(model, options.outputRoot) });
+const { output, providers, speechOutput } = createProviderRuntime({ credentials, readiness: setup.readiness, localOutput,
+  localCatalogue: await getLocalOutputCatalogue(options.outputRoot, setup.voices.configured),
   createSocket: (url, apiKey) => new WebSocket(url, { headers: { Authorization: `Bearer ${apiKey}` } }),
 });
 const host = await startBrowserVoiceServer({ ...options,

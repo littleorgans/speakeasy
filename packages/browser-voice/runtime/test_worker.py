@@ -86,6 +86,38 @@ class WorkerTests(unittest.TestCase):
                 self.assertEqual(replies[1]["result"]["text"], "")
                 self.assertIn("backend diagnostics", diagnostic)
 
+    def test_feed_answers_live_words_only_where_the_backend_streams(self):
+        class Streaming(Backend):
+            def feed(self, samples, start):
+                self.calls.append((samples.tobytes(), start))
+                return {"stable": " heard", "tentative": " maybe", "processingMs": 4}
+
+        body = struct.pack("<2f", 0.5, -0.25)
+        fields = {k: v for k, v in identity(body).items() if k != "pcmBytes"}
+        data = (frame("load", options={}) + frame("feed", 2, body, start=True, **fields)
+                + frame("feed", 3, b"", start=False, **{k: v for k, v in identity(b"").items() if k != "pcmBytes"}))
+        code, replies, backend, _, _ = self.run_worker(data, backend=Streaming())
+        self.assertEqual(code, 0)
+        self.assertEqual([r["type"] for r in replies], ["ready", "partial", "partial"])
+        self.assertEqual(replies[1]["partial"], {"stable": " heard", "tentative": " maybe", "processingMs": 4})
+        self.assertEqual(backend.calls, [(body, True), (b"", False)])
+        refused = {
+            "final text only": (frame("load", options={}) + frame("feed", 2, body, start=True, **fields), Backend()),
+            "start must be a flag": (frame("load", options={}) + frame("feed", 2, body, start=1, **fields), Streaming()),
+            "hash checked": (frame("load", options={}) + frame("feed", 2, body, start=True, **{**fields, "sha256": "0" * 64}),
+                             Streaming()),
+        }
+        for label, (request, owner) in refused.items():
+            with self.subTest(label):
+                code, replies, owner, _, _ = self.run_worker(request, backend=owner)
+                self.assertEqual(code, 1)
+                self.assertEqual(replies[-1]["type"], "error")
+                self.assertFalse(any(isinstance(call, tuple) for call in owner.calls))
+        for bad in ({"stable": 1, "tentative": "", "processingMs": 0}, {"stable": "", "tentative": "", "processingMs": -1},
+                    {"stable": "", "tentative": "", "processingMs": 0, "extra": 1}):
+            with self.subTest(bad=bad), self.assertRaises(worker.ProtocolError):
+                worker.validate_partial(bad)
+
     def test_cleanup_exact_text_empty_and_base_identity(self):
         setup = "mlx-cleanup/qwen-targeted"
         for text in ("", "  café\n{\"A\":\"launch\"}  "):
@@ -242,6 +274,51 @@ class WorkerTests(unittest.TestCase):
                 fields = {k: v for k, v in identity(b"").items() if k != "pcmBytes"}
                 code, replies, _, _, _ = self.run_worker(
                     frame("load", options={}) + frame("transcribe", 2, **fields), backend=backend)
+                self.assertEqual(code, 1)
+                self.assertEqual(replies[-1]["type"], "error")
+
+    def test_voice_speak_replies_with_exact_pcm_and_never_transcribes(self):
+        voice_id = "kokoro-mlx-bf16"
+        pcm = struct.pack("<3f", 0.25, -0.0, -1.0)
+
+        class Voice(Backend):
+            def speak(self, text, voice, speed):
+                self.calls.append((text, voice, speed))
+                return {"samples": self.samples, "sampleRate": 24_000, "processingMs": 4}
+
+        backend = Voice()
+        backend.samples = pcm
+        data = (frame("load", setup_id=voice_id, options={})
+                + frame("speak", 2, setup_id=voice_id, text="Clear the screen.", voice="af_heart", speed=1)
+                + frame("close", 3, setup_id=voice_id))
+        target = io.BytesIO()
+        with contextlib.redirect_stderr(io.StringIO()):
+            code = worker.serve(io.BytesIO(data), target, voice_id, GENERATION, lambda selected, options: backend)
+        target.seek(0)
+        replies = []
+        while (reply := worker.read_frame(target)) is not None:
+            replies.append(reply)
+        self.assertEqual(code, 0)
+        self.assertEqual([header["type"] for header, _ in replies], ["ready", "audio", "closed"])
+        audio, body = replies[1]
+        self.assertEqual(body, pcm)
+        self.assertEqual(audio["audio"], {"sampleRate": 24_000, "sampleCount": 3,
+                                          "sha256": hashlib.sha256(pcm).hexdigest()})
+        self.assertEqual(backend.calls, [("Clear the screen.", "af_heart", 1.0)])
+        cases = [(voice_id, frame("transcribe", 2, setup_id=voice_id,
+                                  **{k: v for k, v in identity(b"").items() if k != "pcmBytes"}), pcm),
+                 (SETUP, frame("speak", 2, text="Hi.", voice="af_heart", speed=1), pcm),
+                 (voice_id, frame("speak", 2, setup_id=voice_id, text=" ", voice="af_heart", speed=1), pcm),
+                 (voice_id, frame("speak", 2, setup_id=voice_id, text="Hi.", voice="af_heart", speed=3), pcm),
+                 (voice_id, frame("speak", 2, setup_id=voice_id, text="Hi.", voice="af_heart", speed=1),
+                  struct.pack("<f", math.nan)),
+                 (voice_id, frame("speak", 2, setup_id=voice_id, text="Hi.", voice="af_heart", speed=1), b"\0" * 3)]
+        for setup_id, request, samples in cases:
+            with self.subTest(setup=setup_id, request=request[-60:]):
+                failing = Voice()
+                failing.samples = samples
+                code, replies, _, _, _ = self.run_worker(frame("load", setup_id=setup_id, options={}) + request,
+                                                         setup_id=setup_id, backend=failing)
                 self.assertEqual(code, 1)
                 self.assertEqual(replies[-1]["type"], "error")
 

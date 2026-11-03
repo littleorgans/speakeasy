@@ -176,7 +176,7 @@ test("mic capture leads a take with pre roll and ends it at the worklet's flush 
   await mic.start(false);
   const frame = (value: number, flush = false) => mic.node.port.onmessage({ data: { kind: "frame", samples: new Float32Array(320).fill(value), level: value, ...(flush ? { flush } : {}) } });
   for (let index = 0; index < 20; index++) frame(0.01);
-  assert.equal(mic.beginTake(), 4_800, "300 ms of idle audio leads the take");
+  assert.equal(mic.beginTake().length, 4_800, "300 ms of idle audio leads the take and is returned for live words");
   frame(0.3);
   const ended = mic.endTake();
   assert.equal(JSON.stringify(posted), '[{"kind":"flush"}]');
@@ -194,9 +194,9 @@ test("mic capture leads a take with pre roll and ends it at the worklet's flush 
  * The page with real gate, detector and text helpers; the mic and voice are
  * scripted fakes. With holdVoice the voice plays until stopped, then reports
  * a 41 ms stop; clearing the readback's hold lets later readings finish. Each mic take is one sample longer than the last, so replays
- * show which take they play.
+ * show which take they play. With transcript "partials" the setup streams: live records what reaches the live words channel.
  */
-function pageHarness({ holdVoice = false } = {}, rows: unknown[] = [
+function pageHarness({ holdVoice = false, transcript = "final" } = {}, rows: unknown[] = [
   { type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status: "processing", text: null, timings: {} } },
   { type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status: "complete", text: "Clear the screen.", timings: { firstUse: false, processingMs: 90 } } },
 ]) {
@@ -218,22 +218,28 @@ function pageHarness({ holdVoice = false } = {}, rows: unknown[] = [
   const posted: string[] = [];
   const played: number[] = [];
   let takes = 0;
-  class Mic { open = true; recording = false; async start() {} beginTake() { this.recording = true; return 0; }
+  const live: { begun: [string, number][]; pushed: number; ended: number } = { begun: [], pushed: 0, ended: 0 };
+  class LiveWords { takeId: string | null = null; serial = 0;
+    begin(setupId: string, preRoll: Float32Array) { live.begun.push([setupId, preRoll.length]); return this.takeId = `live-${++this.serial}`; }
+    push() { if (this.takeId) live.pushed++; }
+    end() { if (this.takeId) live.ended++; this.takeId = null; } }
+  class Mic { open = true; recording = false; async start() {} beginTake() { this.recording = true; return new Float32Array(4_800); }
     async endTake() { this.recording = false; return { samples: new Float32Array(8_000 + takes++).fill(0.1), preRollSamples: 0 }; } }
-  const voice = { firstAudioMs: 120, samples: new Float32Array(4), sampleRate: 22_050 };
+  let voiceLoads = [4_900];
+  const voice = () => ({ firstAudioMs: 120, samples: new Float32Array(4), sampleRate: 22_050, loadMs: voiceLoads.shift() ?? null });
   class Readback { active = false; playing = false; hold = holdVoice; stopped?: (result: unknown) => void; async prepare() {}
     speak(request: any) {
       spoken.push(request);
-      if (!this.hold) return Promise.resolve({ ...voice, outcome: "finished", totalMs: 900 });
+      if (!this.hold) return Promise.resolve({ ...voice(), outcome: "finished", totalMs: 900 });
       this.active = this.playing = true;
       return new Promise((resolve) => { this.stopped = resolve; });
     }
     stop() {
       if (!this.active) return;
       this.active = this.playing = false;
-      this.stopped!({ ...voice, outcome: "stopped", totalMs: null, stopMs: 41 });
+      this.stopped!({ ...voice(), outcome: "stopped", totalMs: null, stopMs: 41 });
     } }
-  const setups = { setups: [{ id: "mlx-parakeet/v3-greedy", label: "Parakeet v3 MLX", card: { runtime: "mlx", transcript: "final" }, readiness: { ready: true, sizeBytes: 1 } }] };
+  const setups = { setups: [{ id: "mlx-parakeet/v3-greedy", label: "Parakeet v3 MLX", card: { runtime: "mlx", transcript }, readiness: { ready: true, sizeBytes: 1 } }] };
   const voices = { revision: "rev", default: { model: "piper-kristin-medium" }, models: [{ id: "piper-kristin-medium", label: "Piper Kristin medium",
     provider: { kind: "local" }, defaultVoice: "kristin", defaultSpeed: 1, voices: [{ id: "kristin", label: "Kristin" }], readiness: { state: "ready" } }] };
   const fetch = async (url: string) => {
@@ -248,13 +254,13 @@ function pageHarness({ holdVoice = false } = {}, rows: unknown[] = [
   };
   const context = vm.createContext({ document, fetch, performance, setTimeout, clearTimeout, URLSearchParams, TextEncoder, TextDecoder,
     JSON, Float32Array, Promise, Option: function(label: string, value: string) { return { label, value }; },
-    HoldReleaseGate, MicCapture: Mic, VoiceReadback: Readback, TalkOverDetector, ...text,
+    HoldReleaseGate, MicCapture: Mic, VoiceReadback: Readback, LiveWords, TalkOverDetector, ...text,
     AudioContext: class { currentTime = 0; destination = {}; async resume() {}
       createBuffer(_channels: number, length: number) { return { length, copyToChannel() {} }; }
       createBufferSource() { const source = { buffer: { length: 0 }, connect() {}, stop() {}, start() { played.push(source.buffer.length); } }; return source; } },
     window: { setTimeout, clearTimeout } });
   vm.runInContext(source("road-test.js") + "\nglobalThis.Page = RoadTestPage;", context);
-  return { page: new context.Page(), elements, spoken, posted, played };
+  return { page: new context.Page(), elements, spoken, posted, played, live };
 }
 
 const until = async (done: () => unknown) => {
@@ -356,13 +362,137 @@ test("earlier takes label every cell and name a cold row's model start", async (
     row("complete", { text: "Clear the screen.", timings: { firstUse: true, processingMs: 90 } })]);
   await page.start();
   assert.deepEqual(elements.get("history-head").children.map((cell: any) => cell.textContent),
-    ["Speech in", "Voice", "Transcript", "Release to text", "Text to first audio", "Release to voice"]);
+    ["Speech in", "Voice", "Transcript", "Press to first words", "Release to text", "Text to first audio", "Release to voice"]);
   await take(page, 100);
   await take(page, 2_000);
   const [cold] = elements.get("history").children;
   assert.deepEqual(cold.children.map((cell: any) => cell.dataset.label),
-    ["Speech in", "Voice", "Transcript", "Release to text", "Text to first audio", "Release to voice"]);
-  const releaseToText = cold.children[3].children.map((part: any) => part.textContent);
+    ["Speech in", "Voice", "Transcript", "Press to first words", "Release to text", "Text to first audio", "Release to voice"]);
+  assert.equal(cold.children[3].children[0].textContent, "–", "a final text only setup shows no first words");
+  const releaseToText = cold.children[4].children.map((part: any) => part.textContent);
   assert.equal(releaseToText.length, 2);
   assert.match(releaseToText[1], /^Model start \d/);
+});
+
+test("a streaming setup shows live words while held, times them from the press, and the final replaces them", async () => {
+  const { page, elements, live } = pageHarness({ transcript: "partials" });
+  await page.start();
+  assert.equal(elements.get("input-card").textContent, "Local · 1 MB · mlx · partials while you speak");
+  const clock = performance.now;
+  let now = 1_000;
+  performance.now = () => now;
+  try {
+    page.press(1_000);
+    await until(() => live.begun.length === 1);
+    assert.deepEqual(live.begun, [["mlx-parakeet/v3-greedy", 4_800]], "the take begins with its pre roll");
+    page.frame({ level: 0.1, audioTime: 1, samples: new Float32Array(320) });
+    assert.equal(live.pushed, 1);
+    const takeId = page.run.live.takeId;
+    now = 1_100;
+    page.liveEvent({ type: "loading", takeId });
+    assert.equal(elements.get("status").textContent, "Listening. Loading Parakeet v3 MLX for live words.");
+    now = 1_900;
+    page.liveEvent({ type: "ready", takeId, cold: true });
+    assert.equal(elements.get("status").textContent, "Listening. Release when you finish.");
+    page.liveEvent({ type: "partial", takeId: "live-old", stable: "stale", tentative: "", processingMs: 1 });
+    assert.equal(elements.get("transcript").textContent, "", "words from another take never show");
+    now = 2_250;
+    page.liveEvent({ type: "partial", takeId, stable: " Clear the", tentative: " scream", processingMs: 40 });
+    assert.equal(elements.get("transcript").textContent, "Clear the scream");
+    now = 2_600;
+    page.release(2_600);
+    assert.equal(live.ended, 1, "release stops the live words before the release tail");
+    await until(() => page.run.output);
+  } finally { performance.now = clock; }
+  assert.equal(elements.get("transcript").textContent, "Clear the screen.", "the final replaces the live words in place");
+  const timings = listed(elements.get("input-timings"));
+  assert.ok(timings.includes("Press to first words: 1.25 s"), timings.join(" | "));
+  assert.ok(timings.includes("Model start: 800 ms"), "the live words' load counts as model start");
+  page.liveEvent({ type: "partial", takeId: page.run.live.takeId, stable: "late", tentative: "", processingMs: 1 });
+  assert.equal(page.run.live.words, "Clear the scream", "words after the final are ignored");
+  page.press(5_000);
+  await until(() => page.run.live);
+  page.liveEvent({ type: "loading", takeId: page.run.live.takeId });
+  page.liveEvent({ type: "ready", takeId: page.run.live.takeId, cold: false });
+  assert.equal(page.run.live.loadMs, undefined, "a warm model's load call is no model start");
+});
+
+test("a talk over with a streaming setup streams too, and shows its words as you say them", async () => {
+  const { page, elements, live } = pageHarness({ holdVoice: true, transcript: "partials" });
+  await page.start();
+  await take(page, 100);
+  let time = 1;
+  const frame = (level: number) => page.frame({ level, audioTime: time += 0.02, samples: new Float32Array(320) });
+  for (let index = 0; index < 10; index++) frame(0.002);
+  for (let index = 0; index < 3; index++) frame(0.2);
+  assert.equal(page.phase, "cut-in");
+  assert.equal(live.begun.length, 2, "the cut in begins its own live take");
+  page.liveEvent({ type: "partial", takeId: page.run.interrupt.live.takeId, stable: "Stop", tentative: " there", processingMs: 30 });
+  assert.ok(listed(elements.get("interrupt-timings")).includes("You said: Stop there"));
+  assert.equal(elements.get("interrupt-timings").children.at(-1).className, "wide partial");
+  while (page.phase === "cut-in") frame(0.002);
+  await until(() => page.phase === "idle");
+  assert.equal(live.ended, 2);
+  assert.equal(page.run.interrupt.text, "Clear the screen.");
+  assert.equal(elements.get("interrupt-timings").children.at(-1).className, "wide");
+});
+
+test("talk over starts off on every load, and the note says once where it works", () => {
+  const html = source("road-test.html");
+  const input = html.match(/<input[^>]*id="talk-over"[^>]*>/)![0];
+  assert.doesNotMatch(input, /\schecked/, "the switch starts off");
+  assert.match(input, /autocomplete="off"/, "a reload never restores a ticked switch");
+  assert.equal(html.match(/headphones/gi)?.length, 1);
+  assert.match(html, /Talking over works best with headphones; on speakers, other sound can stop the voice\./);
+});
+
+test("with talk over off, loud sound during the voice records nothing and the interrupt column shows only the stop", async () => {
+  const { page, elements, live } = pageHarness({ holdVoice: true, transcript: "partials" });
+  elements.set("talk-over", Object.assign(page.elements["talk-over"], { checked: false }));
+  await page.start();
+  assert.deepEqual(listed(elements.get("interrupt-timings")), ["Stop to silence: –"]);
+  await take(page, 100);
+  let time = 1;
+  for (let index = 0; index < 40; index++) page.frame({ level: index > 10 ? 0.3 : 0.002, audioTime: time += 0.02, samples: new Float32Array(320) });
+  assert.equal(page.phase, "speaking", "no cut in");
+  assert.equal(page.mic.recording, false, "no cut in recording");
+  assert.equal(live.begun.length, 1, "only the main take streamed");
+  assert.equal(page.run.interrupt, undefined, "no talk over detection");
+  page.stopVoice(5_000);
+  await until(() => page.phase === "idle");
+  assert.deepEqual(listed(elements.get("interrupt-timings")), ["Stop to silence: 41 ms"]);
+  assert.equal(elements.get("replay-talk-over").hidden, true);
+  page.elements["talk-over"].checked = true;
+  page.render();
+  assert.deepEqual(listed(elements.get("interrupt-timings")), ["Stop to silence: 41 ms", "Voice heard after: –", "Silent after: –"]);
+});
+
+test("a take with no words shows no first words, and a voice's first use names its model start", async () => {
+  const silent = [
+    { type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status: "complete", text: "", timings: { firstUse: false, processingMs: 40 } } },
+  ];
+  const { page, elements } = pageHarness({ transcript: "partials" }, silent);
+  await page.start();
+  const quiet = async (at: number) => {
+    page.press(at);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    page.release(at + 4_000);
+    await until(() => page.run.input && page.phase === "idle");
+  };
+  await quiet(100);
+  assert.equal(elements.get("status").textContent, "Nothing heard. Try again closer to the microphone.");
+  assert.ok(listed(elements.get("input-timings")).includes("Press to first words: –"));
+  await quiet(9_000);
+  const [empty] = elements.get("history").children;
+  assert.equal(empty.children[2].children[0].textContent, "Nothing heard");
+  assert.equal(empty.children[3].children[0].textContent, "–", "Earlier takes carry no first words either");
+
+  const spoken = pageHarness();
+  await spoken.page.start();
+  await take(spoken.page, 100);
+  assert.ok(listed(spoken.elements.get("output-timings")).includes("Model start: 4.90 s"), "the voice's first use");
+  await take(spoken.page, 2_000);
+  assert.ok(!listed(spoken.elements.get("output-timings")).some((row: string) => row.startsWith("Model start")), "a warm voice");
+  const [cold] = spoken.elements.get("history").children;
+  assert.deepEqual(cold.children[5].children.map((part: any) => part.textContent), ["120 ms", "Model start 4.90 s"]);
 });

@@ -257,3 +257,42 @@ test("sessions cannot start more native work after factory shutdown", async () =
   assert.equal(calls, 0);
   await session.close();
 });
+
+test("worker voices run the shared pipeline on the host's synth and close with the factory", async () => {
+  await assert.rejects(new LocalSpeechOutputFactory().open({ ...DEFAULT_LOCAL_OUTPUT, model: "kokoro-mlx-bf16", voice: "af_heart" }),
+    /Voice runtime is not configured/);
+  const requests: SynthRequest[] = [];
+  let closed = 0;
+  const factory = new LocalSpeechOutputFactory({ createWorkerSynth: async (model) => {
+    assert.equal(model, "kokoro-mlx-bf16");
+    return { numSpeakers: 2, sampleRate: 24000, close: async () => { closed += 1; },
+      synth: async (request) => { requests.push(request); return result(24000); } };
+  } });
+  const session = await factory.open({ ...DEFAULT_LOCAL_OUTPUT, model: "kokoro-mlx-bf16", voice: "am_michael" });
+  const audio = await collect(session.speak("Navigate to the Little Organs project. Then wait."));
+  assert.deepEqual(requests.map((request) => [request.text, request.sid]),
+    [["Navigate to the Little", 1], ["Organs project.", 1], ["Then wait.", 1]], "planned segments, one speak each");
+  assert.ok(audio.every((segment) => segment.sampleRate === 24000));
+  await session.close();
+  await factory.close();
+  assert.equal(closed, 1);
+});
+
+test("only the open that loads a voice reports its load time", async () => {
+  let clock = 100;
+  const now = performance.now;
+  performance.now = () => clock;
+  try {
+    const factory = new LocalSpeechOutputFactory({ createSynth: async () => {
+      clock += 2_500;
+      return { numSpeakers: 1, sampleRate: 22050, synth: async () => result(22050) };
+    } });
+    const first = await factory.open();
+    assert.equal(first.loadMs, 2_500);
+    const second = await factory.open();
+    assert.equal(second.loadMs, undefined, "a loaded voice reports no load");
+    await first.close();
+    await second.close();
+    await factory.close();
+  } finally { performance.now = now; }
+});

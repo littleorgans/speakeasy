@@ -114,6 +114,9 @@ export class VoiceReadback {
         selectionRevision: event.selectionRevision, selection: job.selection, text: job.text }));
     } else if (event.type === "sample-accepted") {
       job.playbackId = event.playbackId;
+    } else if (event.type === "sample-phase") {
+      // The host reports a voice load as the voice opens, so a stopped reading keeps it.
+      if (Number.isFinite(event.loadMs)) job.loadMs = event.loadMs;
     } else if (event.type === "sample-error") {
       if (event.code === "BUSY" && ++job.tries < BUSY_RETRY_LIMIT) {
         setTimeout(() => { if (this.job === job && !job.stopping) this.request(job); }, BUSY_RETRY_MS);
@@ -181,7 +184,7 @@ export class VoiceReadback {
     for (const chunk of job.chunks) { samples.set(chunk, offset); offset += chunk.length; }
     job.resolve({ outcome: result.outcome, message: result.message ?? "", firstAudioMs: since(job.firstAudioAt),
       totalMs: result.outcome === "finished" ? since(job.endAt) : null, stopMs: result.stopMs ?? null,
-      hostFirstAudioMs: job.hostFirstAudioMs ?? null, samples, sampleRate: job.sampleRate });
+      hostFirstAudioMs: job.hostFirstAudioMs ?? null, loadMs: job.loadMs ?? null, samples, sampleRate: job.sampleRate });
     this.onChange();
   }
 }

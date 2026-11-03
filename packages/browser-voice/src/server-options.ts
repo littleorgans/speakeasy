@@ -9,11 +9,17 @@ import { isSetupId, type SetupId } from "./setup-protocol.ts";
 import { SetupWorkers, type SetupWorkersOptions } from "./setup-workers.ts";
 import { ChildTranscriber } from "./transcriber.ts";
 import type { SetupReadiness } from "./setup-routes.ts";
+import { isWorkerOutput, LOCAL_OUTPUT_MODELS, type LocalOutputModelId } from "../../speech-io/src/tts/catalogue.ts";
+import { createWorkerVoiceSynth, type VoiceRuntimeLocation } from "./voice-workers.ts";
 
 type PythonSetupId = Exclude<SetupId, "sweep/score-2">;
 /** The one native location a Python setup needs beyond its model. */
 const EXTRA_LOCATIONS: Partial<Record<PythonSetupId, "libraryPath" | "runnerPath">> = {
   "qwen/context": "libraryPath", "hex/unified": "runnerPath",
+};
+/** The one native location a worker voice needs beyond its interpreter. */
+const VOICE_EXTRA_LOCATIONS: Partial<Record<LocalOutputModelId, "runnerPath">> = {
+  "piper-kristin-split": "runnerPath", "kokoro-coreml": "runnerPath",
 };
 const DEFAULT_SETUP_TIMEOUT_MS = 120_000;
 /** Gitignored, machine specific; read when no flag or environment value names another. */
@@ -23,6 +29,7 @@ export type SetupRuntimeLocations = {
   python?: Partial<Record<PythonSetupId, { pythonPath: string; modelPath: string; libraryPath?: string;
     runnerPath?: string; loadTimeoutMs?: number; operationTimeoutMs?: number }>>;
   cpu?: { modelRoot: string };
+  voices?: Partial<Record<LocalOutputModelId, VoiceRuntimeLocation>>;
 };
 
 export function readBrowserVoiceOptions(
@@ -30,8 +37,8 @@ export function readBrowserVoiceOptions(
   env: NodeJS.ProcessEnv,
 ): { port: number; runtimeConfig: RuntimeConfig; promptReader?: PromptReaderConfig; hotwordsPath?: string;
   setupRuntimeFile: string; setupRuntimeDefault: boolean; outputRoot: string; home: "room" | "road-test" } {
-  const portFlag = argv.indexOf("--port");
-  const port = portFlag === -1 ? 4317 : Number(argv[portFlag + 1]);
+  const portFlag = readFlag(argv, "--port");
+  const port = portFlag === undefined ? 4317 : Number(portFlag);
   if (!Number.isInteger(port) || port < 0 || port > 65_535) {
     throw new Error("--port must be an integer from 0 to 65535");
   }
@@ -66,7 +73,7 @@ export function readBrowserVoiceOptions(
 /** Pure server configuration: paths only, never portable provider preferences. */
 export function parseSetupRuntimeLocations(value: unknown): SetupRuntimeLocations {
   if (!isRecord(value)) throw new Error("setup runtime must be an object");
-  exactFields(value, ["python", "cpu"]);
+  exactFields(value, ["python", "cpu", "voices"]);
   const result: SetupRuntimeLocations = {};
   if (value.python !== undefined) {
     if (!isRecord(value.python)) throw new Error("python runtimes must be an object");
@@ -77,14 +84,19 @@ export function parseSetupRuntimeLocations(value: unknown): SetupRuntimeLocation
       exactFields(config, ["pythonPath", "modelPath", ...(extra ? [extra] : []), "loadTimeoutMs", "operationTimeoutMs"]);
       const parsed = { pythonPath: absoluteLocation(config.pythonPath), modelPath: absoluteLocation(config.modelPath),
         ...(extra ? { [extra]: absoluteLocation(config[extra]) } : {}) };
-      for (const key of ["loadTimeoutMs", "operationTimeoutMs"] as const) {
-        if (config[key] !== undefined && (!Number.isSafeInteger(config[key]) || Number(config[key]) < 1)) {
-          throw new Error("worker deadlines must be positive integer milliseconds");
-        }
-      }
-      result.python[id] = { ...parsed,
-        ...(config.loadTimeoutMs === undefined ? {} : { loadTimeoutMs: Number(config.loadTimeoutMs) }),
-        ...(config.operationTimeoutMs === undefined ? {} : { operationTimeoutMs: Number(config.operationTimeoutMs) }) };
+      result.python[id] = { ...parsed, ...deadlines(config) };
+    }
+  }
+  if (value.voices !== undefined) {
+    if (!isRecord(value.voices)) throw new Error("voice runtimes must be an object");
+    result.voices = {};
+    for (const [id, config] of Object.entries(value.voices)) {
+      const model = LOCAL_OUTPUT_MODELS.find((entry) => entry.id === id);
+      if (!model || !isWorkerOutput(model.id) || !isRecord(config)) throw new Error("unknown worker voice");
+      const extra = VOICE_EXTRA_LOCATIONS[model.id];
+      exactFields(config, ["pythonPath", ...(extra ? [extra] : []), "loadTimeoutMs", "operationTimeoutMs"]);
+      result.voices[model.id] = { pythonPath: absoluteLocation(config.pythonPath),
+        ...(extra ? { [extra]: absoluteLocation(config[extra]) } : {}), ...deadlines(config) };
     }
   }
   if (value.cpu !== undefined) {
@@ -93,6 +105,16 @@ export function parseSetupRuntimeLocations(value: unknown): SetupRuntimeLocation
     result.cpu = { modelRoot: absoluteLocation(value.cpu.modelRoot) };
   }
   return result;
+}
+
+function deadlines(config: Record<string, unknown>): { loadTimeoutMs?: number; operationTimeoutMs?: number } {
+  for (const key of ["loadTimeoutMs", "operationTimeoutMs"] as const) {
+    if (config[key] !== undefined && (!Number.isSafeInteger(config[key]) || Number(config[key]) < 1)) {
+      throw new Error("worker deadlines must be positive integer milliseconds");
+    }
+  }
+  return { ...(config.loadTimeoutMs === undefined ? {} : { loadTimeoutMs: Number(config.loadTimeoutMs) }),
+    ...(config.operationTimeoutMs === undefined ? {} : { operationTimeoutMs: Number(config.operationTimeoutMs) }) };
 }
 
 function absoluteLocation(value: unknown): string {
@@ -133,7 +155,31 @@ export async function createSetupRuntime(file?: string, { optional = false } = {
   const executor = new SetupWorkers({ python, cpu: new ChildTranscriber({ mode: "sweep/score-2", modelRoot,
     startupTimeoutMs: DEFAULT_SETUP_TIMEOUT_MS, timeoutMs: DEFAULT_SETUP_TIMEOUT_MS }) });
   const setupReadiness = await inspectSetupReadiness(locations, modelRoot, missingFile);
-  return { executor, readiness: () => setupReadiness, missingFile };
+  const voices = await inspectVoiceRuntimes(locations.voices ?? {});
+  return { executor, readiness: () => setupReadiness, missingFile, voices: {
+    /** Whether a worker voice's runtime files exist; its payload is checked with the catalogue. */
+    configured: (id: LocalOutputModelId) => voices.has(id),
+    createSynth: (id: LocalOutputModelId, outputRoot: string) => {
+      const location = locations.voices?.[id];
+      if (!location || !voices.has(id)) return Promise.reject(new Error("Voice runtime is not configured"));
+      return createWorkerVoiceSynth(id, location, outputRoot);
+    },
+  } };
+}
+
+/** Worker voices whose interpreter, and native runner where one is needed, exist and run. */
+async function inspectVoiceRuntimes(voices: NonNullable<SetupRuntimeLocations["voices"]>): Promise<Set<LocalOutputModelId>> {
+  const ready = new Set<LocalOutputModelId>();
+  for (const [id, location] of Object.entries(voices) as [LocalOutputModelId, VoiceRuntimeLocation][]) {
+    try {
+      for (const path of [location.pythonPath, ...(location.runnerPath ? [location.runnerPath] : [])]) {
+        await access(path, constants.X_OK);
+        if (!(await stat(path)).isFile()) throw new Error();
+      }
+      ready.add(id);
+    } catch { /* Unavailable: the catalogue reports the runtime as missing. */ }
+  }
+  return ready;
 }
 
 async function inspectSetupReadiness(locations: SetupRuntimeLocations, modelRoot: string,
@@ -201,8 +247,9 @@ async function modelBytes(path: string): Promise<number> {
   return total;
 }
 
+/** The last occurrence wins, so flags after `pnpm road-test --` override the script's own. */
 function readFlag(argv: string[], flag: string): string | undefined {
-  const index = argv.indexOf(flag);
+  const index = argv.lastIndexOf(flag);
   if (index === -1) return undefined;
   const value = argv[index + 1];
   if (!value || value.startsWith("--")) throw new Error(`${flag} needs a value`);

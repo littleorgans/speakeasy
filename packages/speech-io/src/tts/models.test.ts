@@ -7,9 +7,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { COMPLETE_MARKER } from "../engines/assets.ts";
-import { ensureTtsModel, resolveTtsModelPaths, TTS_MODELS, LOCAL_TTS_MODELS, verifyTtsFiles, type TtsModel } from "./models.ts";
+import { ensureTtsModel, getTtsModel, resolveTtsModelPaths, TTS_MODELS, LOCAL_TTS_MODELS, verifyTtsFiles, type TtsModel } from "./models.ts";
 
-const entries = Object.entries({ ...TTS_MODELS, ...LOCAL_TTS_MODELS }) as [string, TtsModel][];
+/** Sherpa descriptors; worker voices are checked on their own below. */
+const entries = Object.entries({ ...TTS_MODELS, ...LOCAL_TTS_MODELS })
+  .filter(([, model]) => model.family !== "worker") as [string, TtsModel][];
 
 test("every TTS model pins its archive or exact payload files", () => {
   for (const [id, model] of entries) {
@@ -93,4 +95,16 @@ test("payload verification rejects tampering despite completion markers and requ
 
 test("browser payloads leave legacy CLI model defaults intact", () => {
   assert.deepEqual(Object.keys(TTS_MODELS), ["piper-amy", "piper-ryan-high", "piper-lessac-high", "piper-libritts", "kokoro-v0.19", "kokoro-int8"]);
+});
+
+test("worker voices pin their payload but never load through sherpa", () => {
+  for (const id of ["kokoro-mlx-bf16", "pocket-18m", "piper-kristin-split", "kokoro-coreml"] as const) {
+    const model = LOCAL_TTS_MODELS[id];
+    assert.equal(model.family, "worker");
+    for (const file of model.files) {
+      assert.match(file.sha256, /^[0-9a-f]{64}$/, file.name);
+      assert.ok(file.bytes > 0, file.name);
+    }
+    assert.throws(() => getTtsModel(id), /worker runtime/);
+  }
 });
