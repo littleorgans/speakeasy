@@ -28,6 +28,7 @@ export class VoiceCopy {
     this.recording = null;
     this.capture = null;
     this.microphone = null;
+    this.problem = "";
     this.build();
   }
 
@@ -63,6 +64,7 @@ export class VoiceCopy {
 
   /** Shows the panel for a voice copy model and the chosen voice; hidden otherwise. */
   show(model, voiceId) {
+    if (this.model?.id !== model?.id || this.voice?.id !== voiceId) this.problem = "";
     this.model = model;
     this.voice = model?.voices.find((voice) => String(voice.id) === String(voiceId)) ?? null;
     const copy = Boolean(model?.voices.some((voice) => voice.origin));
@@ -75,14 +77,15 @@ export class VoiceCopy {
     this.forget.disabled = !this.recording;
     this.listen.disabled = mine ? !this.recording : !this.voice?.origin;
     if (!this.capture) {
-      this.status.textContent = mine ? (this.recording ? `Recorded ${seconds(this.recording.samples.length / this.recording.rate)}`
-        : "Nothing recorded yet.") : this.voice?.transcript ? `Says: ${this.voice.transcript}` : "";
+      this.status.textContent = this.problem || (mine ? (this.recording ? `Recorded ${seconds(this.recording.samples.length / this.recording.rate)}`
+        : "Nothing recorded yet.") : this.voice?.transcript ? `Says: ${this.voice.transcript}` : "");
     }
   }
 
   async start() {
     if (this.starting || this.capture) return;
     this.starting = true;
+    this.problem = "";
     this.refresh();
     try {
       const context = await this.audio();
@@ -100,7 +103,7 @@ export class VoiceCopy {
     } catch (error) {
       this.capture?.stop();
       this.capture = null;
-      this.status.textContent = `Microphone unavailable: ${error?.message ?? error}`;
+      this.problem = `Microphone unavailable: ${error?.message ?? error}`;
     } finally {
       this.starting = false;
       this.refresh();
@@ -117,11 +120,12 @@ export class VoiceCopy {
     const rate = capture.rate;
     const samples = take?.samples.slice(0, Math.round(rate * MAX_RECORDING_MS / 1_000)) ?? new Float32Array();
     if (samples.length < rate * MIN_RECORDING_MS / 1_000) {
-      this.status.textContent = "Too short. Record at least a second.";
+      this.problem = "Too short. Record at least a second.";
       this.refresh();
       return;
     }
     if (this.recording) await this.discard();
+    this.problem = "";
     this.recording = { samples, rate, id: null };
     await this.upload();
     this.refresh();
@@ -130,6 +134,7 @@ export class VoiceCopy {
   /** Sends the recording to the host; resolves with its id, or null with the reason shown. */
   async upload(recording = this.recording) {
     if (!recording) return null;
+    this.problem = "";
     try {
       const response = await this.fetch(`/speech-output/references?sampleRate=${recording.rate}`, { method: "POST",
         headers: { "content-type": "application/octet-stream" }, body: recording.samples.slice().buffer });
@@ -142,7 +147,7 @@ export class VoiceCopy {
       recording.id = body.id;
       return body.id;
     } catch (error) {
-      this.status.textContent = `Upload failed: ${error.message}`;
+      this.status.textContent = this.problem = `Upload failed: ${error.message}`;
       return null;
     }
   }
@@ -150,6 +155,7 @@ export class VoiceCopy {
   async discard() {
     const recording = this.recording;
     this.recording = null;
+    this.problem = "";
     if (recording?.id) await this.fetch(`/speech-output/references/${recording.id}`, { method: "DELETE" }).catch(() => {});
     this.refresh();
   }
@@ -165,7 +171,7 @@ export class VoiceCopy {
       if (!response.ok) throw new Error(response.status);
       const buffer = await context.decodeAudioData(await response.arrayBuffer());
       this.play(buffer.getChannelData(0), buffer.sampleRate);
-    } catch (error) { this.status.textContent = `Listen failed: ${error.message}`; }
+    } catch (error) { this.status.textContent = this.problem = `Listen failed: ${error.message}`; }
   }
 
   /**

@@ -982,6 +982,29 @@ test("reference recording reuses its stopped capture graph across repeated recor
   assert.equal(harness.microphones[0].open, false, "the stopped graph retains no microphone stream");
 });
 
+test("reference recording failures stay visible after the panel refreshes", async () => {
+  const harness = pageHarness({ models: QWEN_MODELS });
+  await harness.page.start();
+  await pickModel(harness, "qwen3-tts-0.6b-base");
+  harness.elements.get("output-voice").value = "recording";
+  harness.page.render();
+  const copy = harness.page.voiceCopy;
+  const audio = copy.audio;
+  copy.audio = async () => { throw new Error("permission denied"); };
+  await copy.start();
+  assert.match(copy.status.textContent, /Microphone unavailable: permission denied/);
+  copy.recording = { samples: new Float32Array(48_000), rate: 48_000, id: null };
+  copy.fetch = async () => { throw new Error("connection lost"); };
+  await copy.upload();
+  harness.page.render();
+  assert.match(copy.status.textContent, /Upload failed: connection lost/);
+  copy.recording = null;
+  copy.audio = audio;
+  await copy.start();
+  await copy.stop();
+  assert.match(copy.status.textContent, /Too short\. Record at least a second\./);
+});
+
 test("readings that overlap while the speech socket opens share one connection", async () => {
   const { readback, sockets } = readbackHarness();
   let connected!: () => void;
