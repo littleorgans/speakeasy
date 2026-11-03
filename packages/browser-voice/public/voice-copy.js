@@ -27,6 +27,7 @@ export class VoiceCopy {
     this.voice = null;
     this.recording = null;
     this.capture = null;
+    this.microphone = null;
     this.build();
   }
 
@@ -70,6 +71,7 @@ export class VoiceCopy {
     const mine = this.voice?.id === RECORDING;
     for (const node of [this.record, this.forget, this.words]) node.hidden = !mine;
     this.record.textContent = this.capture ? "Stop" : this.recording ? "Record again" : "Record reference";
+    this.record.disabled = Boolean(this.starting);
     this.forget.disabled = !this.recording;
     this.listen.disabled = mine ? !this.recording : !this.voice?.origin;
     if (!this.capture) {
@@ -79,11 +81,16 @@ export class VoiceCopy {
   }
 
   async start() {
+    if (this.starting || this.capture) return;
+    this.starting = true;
+    this.refresh();
     try {
       const context = await this.audio();
-      this.capture = new MicCapture({ context, rate: context.sampleRate, constraints: RAW });
-      await this.capture.start(false);
-      this.capture.beginTake();
+      const capture = this.microphone ??= new MicCapture({ context, rate: context.sampleRate, constraints: RAW });
+      this.capture = capture;
+      await capture.start(false);
+      if (this.capture !== capture) { capture.stop(); return; }
+      capture.beginTake();
       const began = performance.now();
       this.ticker = setInterval(() => {
         const elapsed = performance.now() - began;
@@ -94,8 +101,10 @@ export class VoiceCopy {
       this.capture?.stop();
       this.capture = null;
       this.status.textContent = `Microphone unavailable: ${error?.message ?? error}`;
+    } finally {
+      this.starting = false;
+      this.refresh();
     }
-    this.refresh();
   }
 
   async stop() {

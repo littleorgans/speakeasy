@@ -263,7 +263,11 @@ function pageHarness({ holdVoice = false, transcript = "final", models = [] as u
     }
     push() { if (this.takeId) live.pushed++; }
     end() { if (this.takeId) live.ended++; this.takeId = null; } }
-  class Mic { open = true; recording = false; async start() {} beginTake() { this.recording = true; return new Float32Array(4_800); }
+  const microphones: any[] = [];
+  class Mic { open = true; recording = false; rate: number;
+    constructor({ rate = 16_000 } = {}) { this.rate = rate; microphones.push(this); }
+    async start() { this.open = true; } stop() { this.open = this.recording = false; }
+    beginTake() { this.recording = true; return new Float32Array(4_800); }
     async endTake() { this.recording = false; return { samples: new Float32Array(8_000 + takes++).fill(0.1), preRollSamples: 0 }; } }
   let voiceLoads = [4_900];
   const voice = () => ({ firstAudioMs: 120, samples: new Float32Array(4), sampleRate: 22_050, loadMs: voiceLoads.shift() ?? null });
@@ -306,13 +310,13 @@ function pageHarness({ holdVoice = false, transcript = "final", models = [] as u
   const context = vm.createContext({ document, fetch, performance, Math, Number, String, Object, setInterval, clearInterval, setTimeout, clearTimeout, URLSearchParams, TextEncoder, TextDecoder,
     JSON, Float32Array, Promise, Option: function(label: string, value: string) { return { label, value }; },
     HoldReleaseGate, MicCapture: Mic, VoiceReadback: Readback, LiveWords, TalkOverDetector, ...text, ...trail,
-    AudioContext: class { currentTime = 0; destination = {}; async resume() {}
+    AudioContext: class { currentTime = 0; sampleRate = 48_000; destination = {}; async resume() {}
       createBuffer(_channels: number, length: number) { return { length, copyToChannel() {} }; }
       createBufferSource() { const source = { buffer: { length: 0 }, connect() {}, stop() {}, start() { played.push(source.buffer.length); } }; return source; } },
     window: { setTimeout, clearTimeout } });
   vm.runInContext(["setting-controls.js", "voice-settings.js", "voice-copy.js", "road-test.js"].map(source).join("\n")
     + "\nglobalThis.Page = RoadTestPage;", context);
-  return { page: new context.Page(), elements, spoken, posted, played, live, document };
+  return { page: new context.Page(), elements, spoken, posted, played, live, document, microphones };
 }
 
 const until = async (done: () => unknown) => {
@@ -964,6 +968,18 @@ test("Forget removes a reference even when its upload is still in flight", async
   assert.equal(await upload, null, "an upload that was forgotten cannot become usable");
   assert.deepEqual(deleted, [`/speech-output/references/${id}`]);
   assert.equal(copy.recording, null);
+});
+
+test("reference recording reuses its stopped capture graph across repeated recordings", async () => {
+  const harness = pageHarness({ models: QWEN_MODELS });
+  await harness.page.start();
+  const copy = harness.page.voiceCopy;
+  for (let index = 0; index < 3; ++index) {
+    await copy.start();
+    await copy.stop();
+  }
+  assert.equal(harness.microphones.length, 1, "each capture owns a worklet connected to the long lived context");
+  assert.equal(harness.microphones[0].open, false, "the stopped graph retains no microphone stream");
 });
 
 test("readings that overlap while the speech socket opens share one connection", async () => {
