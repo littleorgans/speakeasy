@@ -8,7 +8,7 @@ const MAX_COMMAND_BYTES = 20_000;
 const MAX_SETTINGS = 32;
 const MAX_SETTING_TEXT = 1_000;
 
-/** A recording the host holds, by the SHA256 of its PCM, with the exact words it says. */
+/** A recording the host holds, by its PCM and sample rate identity, with the exact words it says. */
 export type ReferenceChoice = { id: string; transcript: string };
 
 export type SpeechOutputCommand =
