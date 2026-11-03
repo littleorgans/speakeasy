@@ -881,3 +881,37 @@ test("readback sends settings and a reference, keeps the applied settings, and u
   assert.equal(result.outcome, "error");
   assert.deepEqual(result.settings, { seed: 3, topP: 1 });
 });
+
+test("replacing a reading while its playback clear is pending settles both readings", async () => {
+  const { readback, sockets, ports } = readbackHarness();
+  const first = readback.speak({ selection, catalogueRevision: "rev", text: "First." });
+  await until(() => sockets[0]?.sent.length);
+  const socket = sockets[0]!;
+  const requestId = socket.sent[0].requestId;
+  socket.event({ type: "sample-accepted", requestId, playbackId: 1 });
+  socket.event({ type: "playback", requestId, action: "start", playbackId: 1, sampleRate: 22_050 });
+  const second = readback.speak({ selection, catalogueRevision: "rev", text: "Second." });
+  await until(() => socket.sent.some((event) => event.type === "select-output" && event.requestId !== requestId));
+  ports[0]!.onmessage!({ data: { kind: "drained", playbackId: 1, audioTime: 10.5 } });
+  const next = socket.sent.at(-1).requestId;
+  socket.event({ type: "sample-error", requestId: next, code: "SETTINGS_INVALID", message: "bad setting" });
+  assert.equal((await second).outcome, "error");
+  const result = await Promise.race([first, new Promise<null>((resolve) => setTimeout(() => resolve(null), 1_100))]);
+  assert.equal(result?.outcome, "stopped", "replacing a job must resolve the reading it displaced");
+});
+
+test("readings that overlap while the speech socket opens share one connection", async () => {
+  const { readback, sockets } = readbackHarness();
+  let connected!: () => void;
+  const pending = new Promise<void>((resolve) => { connected = resolve; });
+  readback.prepare = () => pending;
+  const first = readback.speak({ selection, catalogueRevision: "rev", text: "First." });
+  const second = readback.speak({ selection, catalogueRevision: "rev", text: "Second." });
+  connected();
+  await until(() => sockets.some((socket) => socket.sent.length));
+  const socket = sockets.find((socket) => socket.sent.length)!;
+  socket.event({ type: "sample-error", requestId: socket.sent[0].requestId, code: "SETTINGS_INVALID", message: "bad setting" });
+  assert.equal((await first).outcome, "stopped");
+  assert.equal((await second).outcome, "error");
+  assert.equal(sockets.length, 1, "a superseded preparation must not open a second socket");
+});

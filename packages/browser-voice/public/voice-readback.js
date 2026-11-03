@@ -42,12 +42,15 @@ export class VoiceReadback {
   /** Resolves when the reading drains, stops or fails; never rejects. */
   async speak({ selection, catalogueRevision, text, settings, reference, restore }) {
     this.stop();
+    // A replacement may arrive before the stopped playback's clear reply.
+    if (this.job) this.finish(this.job, { outcome: "stopped" });
     const job = { selection, catalogueRevision, text, settings, reference, restore, requestedAt: performance.now(), tries: 0,
       chunks: [], sampleRate: null, firstAudioAt: null };
     job.done = new Promise((resolve) => { job.resolve = resolve; });
     this.job = job;
     try {
       await this.prepare();
+      if (this.job !== job) return job.done;
       await this.open();
       if (this.job === job) this.request(job);
     } catch (error) {
