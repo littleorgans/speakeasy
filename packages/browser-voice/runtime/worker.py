@@ -30,6 +30,7 @@ BACKENDS = {
     "piper-kristin-split": "native_voice",
     "kokoro-coreml": "native_voice",
     "phonon-31m": "phonon",
+    "phonon-40m": "phonon",
     "qwen3-tts-0.6b": "qwen_speechcpp",
     "qwen3-tts-1.7b": "qwen_speechcpp",
     "qwen3-tts-0.6b-base": "qwen_clone",
@@ -38,8 +39,9 @@ BACKENDS = {
     "kokoro-ane-folded-heart": "native_voice",
 }
 # Speech out voices answer speak with PCM; they never transcribe.
-VOICES = {"kokoro-mlx-bf16", "pocket-18m", "piper-kristin-split", "kokoro-coreml", "phonon-31m", "qwen3-tts-0.6b",
-          "qwen3-tts-1.7b", "qwen3-tts-0.6b-base", "qwen3-tts-1.7b-base", "kokoro-ane-heart", "kokoro-ane-folded-heart"}
+VOICES = {"kokoro-mlx-bf16", "pocket-18m", "piper-kristin-split", "kokoro-coreml", "phonon-31m", "phonon-40m",
+          "qwen3-tts-0.6b", "qwen3-tts-1.7b", "qwen3-tts-0.6b-base", "qwen3-tts-1.7b-base", "kokoro-ane-heart",
+          "kokoro-ane-folded-heart"}
 MIN_SPEED, MAX_SPEED = 0.5, 2.0
 SPEECH_IN_RATES = (16_000,)
 # A voice copy reference arrives at the browser's own capture rate.
