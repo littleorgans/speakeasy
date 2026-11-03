@@ -925,6 +925,27 @@ test("a reading keeps its selected reference and retry transcript when the voice
   assert.equal(await spoken[0].restore(), null, "Forget must prevent a retry from restoring that recording");
 });
 
+test("Forget removes a reference even when its upload is still in flight", async () => {
+  const harness = pageHarness({ models: QWEN_MODELS });
+  await harness.page.start();
+  const copy = harness.page.voiceCopy;
+  const id = "c".repeat(64);
+  const deleted: string[] = [];
+  let uploaded!: () => void;
+  copy.recording = { samples: new Float32Array(48_000), rate: 48_000, id: null };
+  copy.fetch = async (url: string, { method }: { method: string }) => {
+    if (method === "DELETE") { deleted.push(url); return { ok: true }; }
+    await new Promise<void>((resolve) => { uploaded = resolve; });
+    return { ok: true, json: async () => ({ id }) };
+  };
+  const upload = copy.upload();
+  await copy.discard();
+  uploaded();
+  assert.equal(await upload, null, "an upload that was forgotten cannot become usable");
+  assert.deepEqual(deleted, [`/speech-output/references/${id}`]);
+  assert.equal(copy.recording, null);
+});
+
 test("readings that overlap while the speech socket opens share one connection", async () => {
   const { readback, sockets } = readbackHarness();
   let connected!: () => void;

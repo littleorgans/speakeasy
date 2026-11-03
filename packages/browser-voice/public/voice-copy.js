@@ -126,6 +126,10 @@ export class VoiceCopy {
         headers: { "content-type": "application/octet-stream" }, body: recording.samples.slice().buffer });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? response.status);
+      if (this.recording !== recording) {
+        await this.fetch(`/speech-output/references/${body.id}`, { method: "DELETE" });
+        return null;
+      }
       recording.id = body.id;
       return body.id;
     } catch (error) {
