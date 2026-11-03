@@ -45,6 +45,17 @@ export const LOCAL_OUTPUT_MODELS = [
       { id: "am_michael", label: "Michael", languages: ["en-US"], speakerId: 1 },
     ],
   },
+  {
+    id: "pocket-18m",
+    label: "Pocket TTS 18M",
+    provider: { kind: "local" },
+    runtime: "pocket-tts 4.0.1 on PyTorch, CPU",
+    defaultVoice: "bill_boerst",
+    sampleRate: 24_000,
+    streaming: "sentence",
+    licence: "CC BY 4.0 weights: attribution required; the model card prohibits voice impersonation without consent. MIT code. Voice bill_boerst from Kyutai's CC0 collection.",
+    voices: [{ id: "bill_boerst", label: "Bill", languages: ["en"], speakerId: 0 }],
+  },
 ] as const;
 
 export type LocalOutputModel = typeof LOCAL_OUTPUT_MODELS[number];

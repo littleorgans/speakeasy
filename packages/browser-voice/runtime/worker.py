@@ -22,9 +22,10 @@ BACKENDS = {
     "qwen/context": "qwen_asr",
     "hex/unified": "hex_unified",
     "kokoro-mlx-bf16": "kokoro_mlx",
+    "pocket-18m": "pocket_18m",
 }
 # Speech out voices answer speak with PCM; they never transcribe.
-VOICES = {"kokoro-mlx-bf16"}
+VOICES = {"kokoro-mlx-bf16", "pocket-18m"}
 MIN_SPEED, MAX_SPEED = 0.5, 2.0
 
 

@@ -29,6 +29,9 @@
   "voices": {
     "kokoro-mlx-bf16": {
       "pythonPath": "/absolute/path/to/kokoro-mlx-py3.12/bin/python"
+    },
+    "pocket-18m": {
+      "pythonPath": "/absolute/path/to/pocket-18m-py3.12/bin/python"
     }
   }
 }

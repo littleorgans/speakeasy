@@ -8,13 +8,12 @@ segment; the host's sentence pipeline plans and trims segments, as for sherpa.
 """
 
 import copy
-import hashlib
-import importlib.metadata
 import math
 import os
 from pathlib import Path
-import platform
 import time
+
+from pins import attest_snapshot, runtime_identity
 
 
 VOICE_ID = "kokoro-mlx-bf16"
@@ -30,27 +29,6 @@ FILES = {
     "voices/am_michael.safetensors": (522320, "3940147ded35deba0bb52e8132f89b719298e0520258c34584358aa5a24da2ea"),
 }
 VOICES = ("af_heart", "am_michael")
-
-
-def _validate_snapshot(model_path):
-    if not model_path.is_dir():
-        raise ValueError("Kokoro MLX modelPath must be an existing local snapshot directory")
-    for name, (size, expected) in FILES.items():
-        path = model_path / name
-        if not path.is_file() or path.stat().st_size != size:
-            raise ValueError(f"Kokoro MLX snapshot size mismatch: {name}")
-        with path.open("rb") as handle:
-            if hashlib.file_digest(handle, "sha256").hexdigest() != expected:
-                raise ValueError(f"Kokoro MLX snapshot SHA256 mismatch: {name}")
-
-
-def _runtime_identity():
-    if platform.python_version() != PYTHON_VERSION:
-        raise ValueError(f"Kokoro MLX requires Python {PYTHON_VERSION}")
-    versions = {name: importlib.metadata.version(name) for name in RUNTIME_VERSIONS}
-    if versions != RUNTIME_VERSIONS:
-        raise ValueError("Kokoro MLX runtime version mismatch; use requirements-kokoro-mlx.txt")
-    return {"python": PYTHON_VERSION, **versions}
 
 
 class Backend:
@@ -69,8 +47,8 @@ class Backend:
     def load(self):
         if self._metadata is not None:
             return copy.deepcopy(self._metadata)
-        _validate_snapshot(self._model_path)
-        runtime = _runtime_identity()
+        attest_snapshot(self._model_path, FILES, "Kokoro MLX")
+        runtime = runtime_identity(PYTHON_VERSION, RUNTIME_VERSIONS, "requirements-kokoro-mlx.txt", "Kokoro MLX")
         # Local snapshot only: mlx-audio otherwise asks the hub for voice packs.
         os.environ["HF_HUB_OFFLINE"] = "1"
         start = time.perf_counter()

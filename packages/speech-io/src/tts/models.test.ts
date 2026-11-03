@@ -98,11 +98,13 @@ test("browser payloads leave legacy CLI model defaults intact", () => {
 });
 
 test("worker voices pin their payload but never load through sherpa", () => {
-  const model = LOCAL_TTS_MODELS["kokoro-mlx-bf16"];
-  assert.equal(model.family, "worker");
-  for (const file of model.files) {
-    assert.match(file.sha256, /^[0-9a-f]{64}$/, file.name);
-    assert.ok(file.bytes > 0, file.name);
+  for (const id of ["kokoro-mlx-bf16", "pocket-18m"] as const) {
+    const model = LOCAL_TTS_MODELS[id];
+    assert.equal(model.family, "worker");
+    for (const file of model.files) {
+      assert.match(file.sha256, /^[0-9a-f]{64}$/, file.name);
+      assert.ok(file.bytes > 0, file.name);
+    }
+    assert.throws(() => getTtsModel(id), /worker runtime/);
   }
-  assert.throws(() => getTtsModel("kokoro-mlx-bf16"), /worker runtime/);
 });

@@ -112,6 +112,19 @@ export const LOCAL_TTS_MODELS = {
     ],
     attribution: ["README.md"],
   },
+  "pocket-18m": {
+    name: "pocket-tts-english-18m-2026-10-a7056f50",
+    note: "Pocket TTS English 18M, kyutai/pocket-tts-without-voice-cloning@a7056f50, bill_boerst voice, 24000 Hz",
+    family: "worker",
+    sampleRate: 24_000,
+    numSpeakers: 1,
+    files: [
+      { name: "languages/english_18m_2026-10/model.safetensors", bytes: 111_728_528, sha256: "599329dcea2f2a8d17b575e1c6e11b78822453c9073040d55c26faadf4883188" },
+      { name: "languages/english_18m_2026-10/tokenizer.model", bytes: 59_339, sha256: "d461765ae179566678c93091c5fa6f2984c31bbe990bf1aa62d92c64d91bc3f6" },
+      { name: "languages/english_18m_2026-10/embeddings/bill_boerst.safetensors", bytes: 4_360_600, sha256: "927a31d7627daf996efce71ee7898a799a9386738077c3bd401bd1445f6f6657" },
+    ],
+    attribution: ["README.md"],
+  },
 } as const satisfies Record<string, TtsModel | WorkerTtsModel>;
 
 /** Legacy CLI sweep registry, including its original iteration order. */
