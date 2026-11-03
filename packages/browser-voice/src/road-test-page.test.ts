@@ -45,10 +45,10 @@ test("talk over tracks the noise floor, so steady echo below three times it neve
 test("model cards are plain text: where it runs, size and runtime", () => {
   assert.equal(text.inputCard({ readiness: { ready: true, sizeBytes: 2_509_042_622 },
     card: { runtime: "parakeet-mlx 0.5.3 on MLX, Metal GPU", transcript: "final" } }),
-    "Local · 2.5 GB · parakeet-mlx 0.5.3 on MLX, Metal GPU · final text only");
+    "Local · 2.5 GB · parakeet-mlx 0.5.3 on MLX, Metal GPU", "the Live words choice says whether words show while you speak");
   assert.equal(text.inputCard({ readiness: { ready: false, reason: "runtime or model files need setup" },
     card: { runtime: "speech.cpp", transcript: "partials" } }),
-    "Local · size unknown · speech.cpp · partials while you speak · needs setup: runtime or model files need setup");
+    "Local · size unknown · speech.cpp · needs setup: runtime or model files need setup");
   assert.equal(text.outputCard({ provider: { kind: "local" }, sizeBytes: 63_537_415, runtime: "sherpa-onnx VITS, CPU",
     streaming: "sentence", readiness: { state: "ready" } }), "Local · 64 MB · sherpa-onnx VITS, CPU · streams by sentence");
   assert.equal(text.formatDuration(312.4), "312 ms");
@@ -295,7 +295,7 @@ async function take(page: any, pressAt: number) {
 test("the page loop: hold, release, final text, then the chosen voice reads it back", async () => {
   const { page, elements, spoken, posted } = pageHarness();
   await page.start();
-  assert.equal(elements.get("input-card").textContent, "Local · 1 MB · mlx · final text only");
+  assert.equal(elements.get("input-card").textContent, "Local · 1 MB · mlx");
   page.press(100);
   await new Promise((resolve) => setTimeout(resolve, 0));
   page.release(500);
@@ -390,7 +390,7 @@ test("earlier takes label every cell and name a cold row's model start", async (
 test("a streaming setup shows live words while held, times them from the press, and the final replaces them", async () => {
   const { page, elements, live } = pageHarness({ transcript: "partials" });
   await page.start();
-  assert.equal(elements.get("input-card").textContent, "Local · 1 MB · mlx · partials while you speak");
+  assert.equal(elements.get("input-card").textContent, "Local · 1 MB · mlx");
   const clock = performance.now;
   let now = 1_000;
   performance.now = () => now;

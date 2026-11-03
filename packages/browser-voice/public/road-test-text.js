@@ -10,14 +10,16 @@ export function formatBytes(bytes) {
   return bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1e6))} MB`;
 }
 
-/** Name · where it runs · size · runtime · transcript mode. The name is the list entry itself. */
+/**
+ * Where it runs · size · runtime. The name is the list entry itself; whether
+ * words show while you speak is the Live words choice, said once there.
+ */
 export function inputCard(setup) {
   const ready = setup.readiness?.ready === true;
   return [
     "Local",
     formatBytes(setup.readiness?.sizeBytes) ?? "size unknown",
     setup.card?.runtime ?? "runtime unknown",
-    setup.card?.transcript === "partials" ? "partials while you speak" : "final text only",
     ready ? "" : `needs setup: ${setup.readiness?.reason ?? "not configured"}`,
   ].filter(Boolean).join(" · ");
 }

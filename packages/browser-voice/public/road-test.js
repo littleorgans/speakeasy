@@ -25,7 +25,7 @@ const HISTORY_LIMIT = 20;
 const PLACEHOLDER = "The transcript appears here, and the voice reads it back.";
 const LISTENING = "Listening. Release when you finish.";
 const DONE = "Done";
-/** Earlier takes columns; narrow screens stack each row and label its cells with these. */
+/** Earlier takes columns; the transcript spans a line of its own, and narrow screens label each cell with these. */
 const HISTORY_COLUMNS = [
   { label: "Speech in", cell: (run) => [run.setup.label, liveDiffers(run) ? `Live words ${run.liveChoice.setup.label}` : null] },
   { label: "Voice", cell: (run) => [run.output ? run.voiceLabel : null] },
@@ -70,7 +70,7 @@ export class RoadTestPage {
       const head = document.createElement("th");
       head.scope = "col";
       head.textContent = label;
-      if (kind === "num") head.className = kind;
+      if (kind) head.className = kind;
       return head;
     }));
     try {
