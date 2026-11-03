@@ -198,21 +198,26 @@ export async function runCorpusBench(
   const columns = models.flatMap((model) => gateColumns(model, options.engine));
   for (const { model, gate, column } of columns) {
     const engine = await openEngine(model, gate);
-    await engine.prepare?.();
-    const engineLabel = engine.label ?? options.engine;
-    const threads = engine.threads ?? null;
-    const gateLabel = gate === "model" ? null : gate;
-    log(
-      `model=${column} engine=${engineLabel} threads=${threads ?? "runtime-default"} gate=${gateLabel ?? "n/a"} endpoint=manual cadence=${options.frameMs}ms/frame release=end-of-capture rewrite=${rewrite ? `column(rules=${rewrite.rules.length},numbers=${rewrite.numbers})` : "off"}`,
-    );
-    for (const [index, entry] of scored.entries()) {
-      const row = report.utterances[index]!;
-      row.models[column] = await scoreTake(engine, entry, options.frameMs, rewrite);
-      log(formatTake(column, row));
+    try {
+      await engine.prepare?.();
+      const engineLabel = engine.label ?? options.engine;
+      const threads = engine.threads ?? null;
+      const gateLabel = gate === "model" ? null : gate;
+      log(
+        `model=${column} engine=${engineLabel} threads=${threads ?? "runtime-default"} gate=${gateLabel ?? "n/a"} endpoint=manual cadence=${options.frameMs}ms/frame release=end-of-capture rewrite=${rewrite ? `column(rules=${rewrite.rules.length},numbers=${rewrite.numbers})` : "off"}`,
+      );
+      for (const [index, entry] of scored.entries()) {
+        const row = report.utterances[index]!;
+        row.models[column] = await scoreTake(engine, entry, options.frameMs, rewrite);
+        log(formatTake(column, row));
+      }
+      report.models.push(
+        summarize({ column, engineLabel, gate: gateLabel, threads }, report.utterances),
+      );
+    } finally {
+      // One model lifetime per column: free it before the next column loads.
+      await engine.release?.();
     }
-    report.models.push(
-      summarize({ column, engineLabel, gate: gateLabel, threads }, report.utterances),
-    );
   }
 
   for (const summary of report.models) {

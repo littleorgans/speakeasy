@@ -4,7 +4,7 @@ import { OrtGraniteEngine } from "./ort-granite.ts";
 import { isGraniteModelId } from "./ort-granite-models.ts";
 import { resolveOrtModel, type OrtModelId } from "./ort-models.ts";
 import { OrtTdtEngine } from "./ort-tdt.ts";
-import { isOrtTdtModelId, type OrtTdtModelId } from "./ort-tdt-models.ts";
+import { isOrtTdtModelId } from "./ort-tdt-models.ts";
 import { loadOrtBinding } from "./ort-runtime.ts";
 import { OrtWhistleEngine } from "./ort-whistle.ts";
 import { loadWhistleRuntime } from "./ort-whistle-runtime.ts";
@@ -26,14 +26,6 @@ export type AnyOrtEngine = OrtWhistleEngine | OrtGraniteEngine | OrtTdtEngine;
  * Build the engine for any `ORT_MODELS` id, with the silence gate its
  * descriptor asks for unless `gate` overrides.
  */
-export function createLocalOrtEngine(
-  model: OrtTdtModelId,
-  gate?: SilenceGateMode,
-): Promise<OrtTdtEngine>;
-export function createLocalOrtEngine(
-  model: OrtModelId,
-  gate?: SilenceGateMode,
-): Promise<AnyOrtEngine>;
 export async function createLocalOrtEngine(
   model: OrtModelId,
   gate: SilenceGateMode = "model",

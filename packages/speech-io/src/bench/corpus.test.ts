@@ -112,6 +112,7 @@ async function bench(
   const dir = await mkdtemp(join(tmpdir(), "speakeasy-corpus-"));
   const created: Array<BenchModelId | undefined> = [];
   const gates: SilenceGateMode[] = [];
+  const lifetimes: string[] = [];
   const stdout: string[] = [];
   const log: string[] = [];
   try {
@@ -121,13 +122,19 @@ async function bench(
       createEngine: (model, gate) => {
         created.push(model);
         gates.push(gate);
-        return scriptedEngine(HYPOTHESES[model ?? MODEL_A]!);
+        lifetimes.push(`create ${model}`);
+        return {
+          ...scriptedEngine(HYPOTHESES[model ?? MODEL_A]!),
+          release: async () => {
+            lifetimes.push(`release ${model}`);
+          },
+        };
       },
       log: (line) => log.push(line),
       writeJson: (json) => stdout.push(json),
     };
     const report = await runCorpusBench(cliOptions(dir, overrides), deps);
-    return { report, created, gates, stdout, log };
+    return { report, created, gates, lifetimes, stdout, log };
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -228,14 +235,48 @@ test("the bench scores the newest take per prompt and lists the superseded ones"
 });
 
 test("an offline model scores a gate off and a gate on column from separate engines", async () => {
-  const { report, created, gates } = await bench({ models: [MODEL_A, OFFLINE] });
+  const { report, created, gates, lifetimes } = await bench({ models: [MODEL_A, OFFLINE] });
   assert.deepEqual(created, [MODEL_A, OFFLINE, OFFLINE]);
   assert.deepEqual(gates, ["model", "off", "on"]);
+  assert.deepEqual(lifetimes, [
+    `create ${MODEL_A}`,
+    `release ${MODEL_A}`,
+    `create ${OFFLINE}`,
+    `release ${OFFLINE}`,
+    `create ${OFFLINE}`,
+    `release ${OFFLINE}`,
+  ]);
   assert.deepEqual(
     report.models.map((summary) => [summary.model, summary.gate]),
     [[MODEL_A, null], [OFFLINE, "off"], [`${OFFLINE}+gate`, "on"]],
   );
   assert.deepEqual(Object.keys(report.utterances[0]!.models), [MODEL_A, OFFLINE, `${OFFLINE}+gate`]);
+});
+
+test("a take that throws still releases its column's engine", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "speakeasy-corpus-"));
+  const lifetimes: string[] = [];
+  try {
+    await writeCorpus(dir);
+    const deps: Partial<CorpusBenchDeps> = {
+      createEngine: (model) => {
+        lifetimes.push(`create ${model}`);
+        return {
+          open: async () => {
+            throw new Error("open failed");
+          },
+          release: async () => {
+            lifetimes.push(`release ${model}`);
+          },
+        };
+      },
+      log: () => {},
+    };
+    await assert.rejects(runCorpusBench(cliOptions(dir, { models: [MODEL_A, MODEL_B] }), deps), /open failed/);
+    assert.deepEqual(lifetimes, [`create ${MODEL_A}`, `release ${MODEL_A}`]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("summaries split WER and the raw identifier rate by stratum", async () => {
