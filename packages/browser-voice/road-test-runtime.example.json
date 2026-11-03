@@ -66,6 +66,16 @@
       "pythonPath": "/absolute/path/to/any/python3",
       "runnerPath": "/absolute/path/to/speech.cpp-0.10.0/speech"
     },
+    "qwen3-tts-1.7b": {
+      "pythonPath": "/absolute/path/to/any/python3",
+      "runnerPath": "/absolute/path/to/speech.cpp-0.10.0/speech"
+    },
+    "qwen3-tts-0.6b-base": {
+      "pythonPath": "/absolute/path/to/qwen-tts-py3.12/bin/python"
+    },
+    "qwen3-tts-1.7b-base": {
+      "pythonPath": "/absolute/path/to/qwen-tts-py3.12/bin/python"
+    },
     "kokoro-ane-heart": {
       "pythonPath": "/absolute/path/to/any/python3",
       "runnerPath": "/absolute/path/to/kokoro-ane/KokoroCoreMLWorker"

@@ -75,7 +75,7 @@ export function createProviderRuntime(options: ProviderRuntimeOptions): {
     createOutput: (config, context) => {
       context.recheck();
       return output.create(config, { beforeRequest: context.recheck, getKey: context.apiKey,
-        signal: context.signal, observe: context.observe });
+        signal: context.signal, observe: context.observe, ...(context.execution ? { execution: context.execution } : {}) });
     },
     quiesce: (config) => output.quiesce(config),
     close: () => output.close(),

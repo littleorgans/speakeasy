@@ -188,3 +188,9 @@ test("strict replay validates declared format and sample layout", () => {
     assert.throws(() => decodeWavSamples(bytes), message);
   }
 });
+
+test("decodeWavSamples takes another exact rate when asked, and keeps 16 kHz by default", () => {
+  const samples = Float32Array.of(0.25, -0.5);
+  assert.deepEqual(decodeWavSamples(encodeWavFloat32(samples, 24_000), 24_000), samples);
+  assert.throws(() => decodeWavSamples(encodeWavFloat32(samples, 24_000)), /Expected 16000 Hz/);
+});

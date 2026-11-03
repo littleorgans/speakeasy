@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   buildTimingReport,
   planSegments,
+  planSegmentsStream,
   splitSentences,
   trimSilence,
 } from "./stream.ts";
@@ -148,4 +149,17 @@ test("cancelling a pending text pull suppresses later synthesis and requests pro
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(synths, 1);
   assert.equal(closed, 1);
+});
+
+test("firstClause false plans whole sentences, for whole and streamed input alike", async () => {
+  const text = "I mean, we've got so much going on. The build finished on the staging channel. Then stop";
+  assert.deepEqual(planSegments(text, { firstClause: false }), splitSentences(text));
+  assert.deepEqual(planSegments("I mean, we've got so much going on.", { firstClause: false }), ["I mean, we've got so much going on."]);
+  const deltas = async function* () { for (const word of text.split(/(?<= )/)) yield word; };
+  const streamed: string[] = [];
+  for await (const segment of planSegmentsStream(deltas(), { firstClause: false })) streamed.push(segment);
+  assert.deepEqual(streamed, splitSentences(text));
+  const carved: string[] = [];
+  for await (const segment of planSegmentsStream(deltas())) carved.push(segment);
+  assert.deepEqual(carved, planSegments(text), "the default still carves");
 });

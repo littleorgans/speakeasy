@@ -10,6 +10,7 @@ import {
 } from "./setup-protocol.ts";
 import { isCpuSetupId, type ChildTranscriber, type CpuReady, type CpuSetupId } from "./transcriber.ts";
 import { isWorkerOutput, LOCAL_OUTPUT_MODELS, type LocalOutputModelId } from "../../speech-io/src/tts/catalogue.ts";
+import type { SynthRequest } from "../../speech-io/src/tts/synth.ts";
 
 export { MAX_WORKER_HEADER_BYTES, MAX_WORKER_PCM_BYTES, MAX_WORKER_TEXT_BYTES };
 
@@ -78,11 +79,13 @@ function validateIdentity(value: PcmIdentity): void {
     throw new SetupWorkerError("invalid PCM identity");
   }
 }
-function wireIdentity(value: PcmIdentity): Header {
+/** PCM identity at any rate: speech in is 16 kHz, a voice copy reference keeps its capture rate. */
+type RatedPcmIdentity = Omit<PcmIdentity, "sampleRate"> & { sampleRate: number };
+function wireIdentity(value: RatedPcmIdentity): Header {
   return { sampleRate: value.sampleRate, channels: value.channels, sampleCount: value.sampleCount,
     pcmBytes: value.pcmBytes, sha256: value.pcmSha256 };
 }
-function canonicalPcm(samples: Float32Array): { body: Buffer; identity: PcmIdentity } {
+function canonicalPcm(samples: Float32Array, sampleRate = 16000): { body: Buffer; identity: RatedPcmIdentity } {
   if (!(samples instanceof Float32Array) || samples.byteLength > MAX_WORKER_PCM_BYTES) {
     throw new SetupWorkerError("invalid PCM length");
   }
@@ -92,8 +95,12 @@ function canonicalPcm(samples: Float32Array): { body: Buffer; identity: PcmIdent
   // Own exactly this view before any asynchronous model load. Preserve signed zero.
   const body = Buffer.from(new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength));
   if (endianness() === "BE") body.swap32();
-  return { body, identity: { sampleRate: 16000, channels: 1, sampleCount: samples.length,
+  return { body, identity: { sampleRate, channels: 1, sampleCount: samples.length,
     pcmBytes: body.length, pcmSha256: hash(body) } };
+}
+/** The SHA256 of samples as the worker receives them: little endian Float32. */
+export function pcmDigest(samples: Float32Array): string {
+  return canonicalPcm(samples).identity.pcmSha256;
 }
 function matches(actual: unknown, expected: unknown): boolean {
   if (Array.isArray(expected)) return Array.isArray(actual) && actual.length === expected.length
@@ -166,12 +173,24 @@ export class PythonSetupWorker {
     } catch (error) { return Promise.reject(error); }
   }
 
-  /** One planned segment of speech out; the worker loads on first use. */
-  speak(text: string, voice: string, speed: number, signal?: AbortSignal): Promise<PythonVoiceResult> {
-    if (typeof text !== "string" || !text.trim() || Buffer.byteLength(text, "utf8") > MAX_WORKER_TEXT_BYTES) {
-      return Promise.reject(new SetupWorkerError("speak text is empty or exceeds limit"));
-    }
-    return this.#run("speak", { text, voice, speed }, Buffer.alloc(0), signal);
+  /**
+   * One planned segment of speech out; the worker loads on first use. A
+   * reading's settings ride in the header and a voice copy reference as the
+   * body, its identity hashed here; the worker refuses either for a voice
+   * that does not take it.
+   */
+  speak(text: string, voice: string, speed: number, signal?: AbortSignal,
+    { settings, reference }: Pick<SynthRequest, "settings" | "reference"> = {}): Promise<PythonVoiceResult> {
+    try {
+      if (typeof text !== "string" || !text.trim() || Buffer.byteLength(text, "utf8") > MAX_WORKER_TEXT_BYTES) {
+        throw new SetupWorkerError("speak text is empty or exceeds limit");
+      }
+      const pcm = reference ? canonicalPcm(reference.samples, reference.sampleRate) : undefined;
+      if (pcm && pcm.identity.pcmSha256 !== reference!.sha256) throw new SetupWorkerError("reference identity mismatch");
+      return this.#run("speak", { text, voice, speed, ...(settings ? { settings } : {}),
+        ...(pcm ? { reference: { ...wireIdentity(pcm.identity), transcript: reference!.transcript } } : {}) },
+      pcm?.body ?? Buffer.alloc(0), signal);
+    } catch (error) { return Promise.reject(error); }
   }
 
   load(signal?: AbortSignal): Promise<SetupLoadResult> {

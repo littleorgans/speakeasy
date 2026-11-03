@@ -3,6 +3,7 @@ import { CartesiaTextToSpeech, type CartesiaOptions } from "./cartesia.ts";
 import { DEFAULT_LOCAL_OUTPUT } from "./catalogue.ts";
 import type { TextToSpeech, TTSSession } from "./contract.ts";
 import { LocalSpeechOutputFactory } from "./factory.ts";
+import type { SynthExecution } from "./synth.ts";
 import { OpenAITextToSpeech, type OpenAISocketFactory } from "./openai.ts";
 
 /** Trusted host execution handles, kept outside portable preferences. */
@@ -11,6 +12,8 @@ export type SpeechOutputContext = {
   beforeRequest?: () => void | Promise<void>;
   signal?: AbortSignal;
   observe?: CartesiaOptions["onRequestComplete"];
+  /** One reading's voice settings and reference; local voices only. */
+  execution?: SynthExecution;
 };
 
 export type SpeechOutputFactoryOptions = {
@@ -37,10 +40,11 @@ export class SpeechOutputFactory {
     if (this.#closed) throw new Error("Speech output factory is closed");
     const selected = { ...config, provider: { ...config.provider } };
     const execution = { ...context };
+    if (execution.execution && selected.provider.kind !== "local") throw new ProviderError("CONFIG_UNSUPPORTED");
     let open: () => Promise<TTSSession>;
     switch (selected.provider.kind) {
       case "local": {
-        const output = this.#local.create(selected);
+        const output = this.#local.create(selected, execution.execution);
         open = () => output.open();
         break;
       }

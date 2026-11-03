@@ -53,6 +53,9 @@ export function splitSentences(text: string): string[] {
  */
 export const FIRST_CHUNK_MAX_WORDS = 4;
 
+/** firstClause false keeps the opening sentence whole: whole sentences only. */
+export type PlanOptions = { firstClause?: boolean };
+
 /**
  * Plan streaming chunks: an aggressively short first chunk, then whole
  * sentences. The first sentence is cut at the earliest of its first clause
@@ -60,10 +63,10 @@ export const FIRST_CHUNK_MAX_WORDS = 4;
  * sentence already within the cap is left whole. Splitting only the opener
  * keeps the prosody cost off every later sentence.
  */
-export function planSegments(text: string): string[] {
+export function planSegments(text: string, { firstClause = true }: PlanOptions = {}): string[] {
   const sentences = splitSentences(text);
-  if (sentences.length === 0) {
-    return [];
+  if (sentences.length === 0 || !firstClause) {
+    return sentences;
   }
   const [head, tail] = carveFirstChunk(sentences[0]!);
   const rest = sentences.slice(1);
@@ -111,9 +114,10 @@ function isSentenceEnd(word: string): boolean {
  */
 export async function* planSegmentsStream(
   tokens: AsyncIterable<string>,
+  { firstClause = true }: PlanOptions = {},
 ): AsyncGenerator<string> {
   let buffer = "";
-  let headEmitted = false;
+  let headEmitted = !firstClause;
   for await (const delta of tokens) {
     buffer += delta;
     if (!headEmitted) {

@@ -49,3 +49,18 @@ test("selection is explicit and revisions cannot be forged into a config", () =>
   });
   assert.throws(() => parse({ type: "select-output", requestId: "choose", catalogueRevision: "revision", selection, selected: true }));
 });
+
+test("speak-sample carries bounded primitive settings and a recording by hash, nothing else", () => {
+  const reference = { id: "a".repeat(64), transcript: "Hello." };
+  assert.deepEqual(parse({ ...command, settings: { seed: 3, greedy: true, language: "en" }, reference }),
+    { ...command, settings: { seed: 3, greedy: true, language: "en" }, reference });
+  for (const extra of [{ settings: [] }, { settings: { seed: [3] } }, { settings: { seed: null } },
+    { settings: { text: "x".repeat(1_001) } }, { settings: Object.fromEntries([...Array(33)].map((_, index) => [`k${index}`, 1])) },
+    { reference: { id: "A".repeat(64), transcript: "" } }, { reference: { id: "a".repeat(63), transcript: "" } },
+    { reference: { id: "a".repeat(64) } }, { reference: { ...reference, path: "/tmp/x" } },
+    { reference: { id: "a".repeat(64), transcript: "x".repeat(2_001) } }]) {
+    assert.throws(() => parse({ ...command, ...extra }), /invalid/, JSON.stringify(extra).slice(0, 80));
+  }
+  assert.throws(() => parse({ type: "select-output", requestId: "r", catalogueRevision: "revision", selection, settings: {} }),
+    /invalid/, "selection never carries settings");
+});

@@ -27,6 +27,7 @@ import { SetupWorkers } from "./setup-workers.ts";
 import type { SetupExecutor } from "./setup-protocol.ts";
 import { SetupRoutes, type ProviderRoutesConfig, type SetupReadiness } from "./setup-routes.ts";
 import { SpeechOutputSession, type SpeechOutputSessionOptions } from "./speech-output-session.ts";
+import { PICK_ROUTE, REFERENCE_ROUTE, servePick, serveVoiceReferences, VoiceReferenceStore } from "./voice-references.ts";
 import { ChildTranscriber, TRANSCRIBE_MODEL_ID, TranscriptionError, type Transcriber } from "./transcriber.ts";
 
 const PUBLIC_ROOT = fileURLToPath(new URL("../public/", import.meta.url));
@@ -57,6 +58,9 @@ const STATIC_FILES = new Map([
   ["/talk-over.js", "talk-over.js"],
   ["/road-test-text.js", "road-test-text.js"],
   ["/setting-controls.js", "setting-controls.js"],
+  ["/voice-settings.js", "voice-settings.js"],
+  ["/voice-copy.js", "voice-copy.js"],
+  ["/voice-settings.css", "voice-settings.css"],
 ]);
 const PROMPT_READER_API = "/prompt-reader/";
 const PROMPT_READER_TAKES = "/prompt-reader/takes/";
@@ -103,8 +107,17 @@ export async function startBrowserVoiceServer(options: BrowserVoiceServerOptions
   const setupRoutes = new SetupRoutes({ reader: promptReader, comparison, lease,
     providers: options.providers, readiness: options.setupReadiness ?? (() => []) });
   const sessions = new Set<BrowserConversationSession>();
+  const references = new VoiceReferenceStore();
   const server = createServer((request, response) => {
     const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
+    if (pathname === REFERENCE_ROUTE || pathname.startsWith(`${REFERENCE_ROUTE}/`)) {
+      void serveVoiceReferences(request, response, references);
+      return;
+    }
+    if (pathname.startsWith(PICK_ROUTE)) {
+      void servePick(request, response);
+      return;
+    }
     if (pathname === "/speech-output/models") {
       try {
         requireLoopback(request);
@@ -155,7 +168,7 @@ export async function startBrowserVoiceServer(options: BrowserVoiceServerOptions
       target.emit("connection", webSocket, request);
     });
   });
-  outputSockets.on("connection", (socket) => connectSpeechOutput(socket, options, lease, outputSessions));
+  outputSockets.on("connection", (socket) => connectSpeechOutput(socket, options, lease, outputSessions, references));
   liveSockets.on("connection", (socket) => {
     const session = new LiveWordsSession({ socket, comparison, acquire: () => lease.tryAcquire("comparison") });
     liveSessions.add(session);
@@ -225,8 +238,9 @@ function connectSpeechOutput(
   options: BrowserVoiceServerOptions,
   lease: AudioWorkLease,
   outputSessions: Set<SpeechOutputSession>,
+  references: VoiceReferenceStore,
 ): void {
-  const session = new SpeechOutputSession({ sessionId: randomUUID(),
+  const session = new SpeechOutputSession({ sessionId: randomUUID(), references,
     ...options.speechOutput!, catalogue: () => currentOutputCatalogue(options.speechOutput!, options.providers),
     policy: options.providers!.policy,
     acquire: () => lease.tryAcquire("tryout"),

@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { performance } from "node:perf_hooks";
 import type { OfflineTtsConfig } from "sherpa-onnx-node";
+import type { Settings } from "../settings.ts";
 import { createTtsFrontend, type TtsFrontend } from "./frontend.ts";
 import {
   ensureTtsModel,
@@ -43,12 +44,21 @@ const loadSherpa = () => require("sherpa-onnx-node") as typeof import("sherpa-on
 
 const DEFAULT_NUM_THREADS = 2;
 
+/** Reference audio a voice copy model conditions on; transcript is the exact words, null where none is known. */
+export type VoiceReference = { sha256: string; samples: Float32Array; sampleRate: number; transcript: string | null };
+
+/** Per reading extras beside the portable selection: resolved voice settings and, for a recording, its reference. */
+export type SynthExecution = { settings: Settings; reference?: VoiceReference };
+
 export type SynthRequest = {
   text: string;
   /** Speaker id; 0 for single-voice models. */
   sid?: number;
   /** Speaking rate multiplier; 1 is the model's native pace. */
   speed?: number;
+  /** Resolved voice settings minus pipeline ones; sherpa voices declare none. */
+  settings?: Settings;
+  reference?: VoiceReference;
 };
 
 export type SynthResult = {

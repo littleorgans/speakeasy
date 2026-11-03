@@ -1,14 +1,20 @@
 import { parseSpeechOutputConfig, safeProviderError } from "@speakeasy/speech-io/providers";
 import type { ProviderErrorCode, SpeechOutputConfig, SpeechOutputRegistry, SpeechTiming } from "@speakeasy/speech-io/providers";
+import type { Settings } from "../../speech-io/src/settings.ts";
 
 export const MAX_SAMPLE_TEXT_LENGTH = 2_000;
 export const DEFAULT_SAMPLE_TEXT = "The room is ready. Take your time, then tell me what you would like to try.";
 const MAX_COMMAND_BYTES = 20_000;
+const MAX_SETTINGS = 32;
+const MAX_SETTING_TEXT = 1_000;
+
+/** A recording the host holds, by the SHA256 of its PCM, with the exact words it says. */
+export type ReferenceChoice = { id: string; transcript: string };
 
 export type SpeechOutputCommand =
   | { type: "select-output"; requestId: string; catalogueRevision: string; selection: SpeechOutputConfig }
   | { type: "speak-sample"; requestId: string; catalogueRevision: string; selectionRevision?: number;
-      selection: SpeechOutputConfig; text: string }
+      selection: SpeechOutputConfig; text: string; settings?: Settings; reference?: ReferenceChoice }
   | { type: "cancel-sample"; requestId: string }
   | { type: "playback-drained"; playbackId: number; audioEndMs?: number };
 
@@ -34,8 +40,9 @@ export type SampleProviderObservation = {
 export type SpeechOutputEvent =
   | { type: "output-selected"; requestId: string; catalogueRevision: string;
       selectionRevision: number; selection: SpeechOutputConfig }
+  /** settings: every declared voice setting as the host applied it; empty for a model that declares none. */
   | { type: "sample-accepted"; requestId: string; playbackId: number; generation: number;
-      selection: SpeechOutputConfig; text: string; textId: string }
+      selection: SpeechOutputConfig; text: string; textId: string; settings: Settings }
   /** producing carries loadMs when opening loaded the voice. */
   | { type: "sample-phase"; requestId: string; playbackId: number; phase: "opening" | "producing"; loadMs?: number }
   | { type: "sample-complete"; requestId: string; playbackId: number;
@@ -53,6 +60,8 @@ const MESSAGES = {
   TIMEOUT: "Speech trial timed out before playback completed.",
   AUDIO_INVALID: "Speech provider returned invalid audio.",
   SESSION_CLOSED: "Speech trial session is closed.",
+  SETTINGS_INVALID: "Choose voice settings this model offers.",
+  REFERENCE_MISSING: "The server no longer holds this recording. Record it again.",
 } as const;
 
 export type SpeechOutputErrorCode = keyof typeof MESSAGES | ProviderErrorCode;
@@ -92,7 +101,7 @@ export function parseSpeechOutputCommand(raw: string, registry: SpeechOutputRegi
   if (value.type !== "select-output" && value.type !== "speak-sample") return invalid();
   const required = ["type", "requestId", "catalogueRevision", "selection"];
   if (value.type === "speak-sample") required.push("text");
-  if (!fields(value, required, value.type === "speak-sample" ? ["selectionRevision"] : []) ||
+  if (!fields(value, required, value.type === "speak-sample" ? ["selectionRevision", "settings", "reference"] : []) ||
       typeof value.catalogueRevision !== "string" || value.catalogueRevision.length > 128 ||
       !value.catalogueRevision.trim()) return invalid();
   const selection = parseSpeechOutputConfig(value.selection, registry);
@@ -103,11 +112,25 @@ export function parseSpeechOutputCommand(raw: string, registry: SpeechOutputRegi
     throw new SpeechOutputError("TEXT_INVALID");
   }
   if (value.selectionRevision !== undefined && !integer(value.selectionRevision, 1)) return invalid();
+  if (value.settings !== undefined && !settingsShape(value.settings)) return invalid();
+  if (value.reference !== undefined && !referenceShape(value.reference)) return invalid();
   return { type: value.type, requestId: value.requestId, catalogueRevision: value.catalogueRevision,
     selection, text: value.text,
-    ...(value.selectionRevision === undefined ? {} : { selectionRevision: value.selectionRevision as number }) };
+    ...(value.selectionRevision === undefined ? {} : { selectionRevision: value.selectionRevision as number }),
+    ...(value.settings === undefined ? {} : { settings: { ...value.settings as Settings } }),
+    ...(value.reference === undefined ? {} : { reference: { ...value.reference as ReferenceChoice } }) };
 }
 
+/** Shape only; the session checks values against the model's declarations. */
+function settingsShape(value: unknown): value is Settings {
+  return record(value) && Object.keys(value).length <= MAX_SETTINGS && Object.values(value).every((entry) =>
+    typeof entry === "boolean" || (typeof entry === "number" && Number.isFinite(entry)) ||
+    (typeof entry === "string" && entry.length <= MAX_SETTING_TEXT));
+}
+function referenceShape(value: unknown): value is ReferenceChoice {
+  return record(value) && fields(value, ["id", "transcript"]) && typeof value.id === "string" &&
+    /^[0-9a-f]{64}$/.test(value.id) && typeof value.transcript === "string" && value.transcript.length <= MAX_SAMPLE_TEXT_LENGTH;
+}
 function invalid(): never { throw new SpeechOutputError("COMMAND_INVALID"); }
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
