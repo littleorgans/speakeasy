@@ -5,18 +5,31 @@ import { serialize } from "node:v8";
 import { SHERPA_MODELS } from "@speakeasy/speech-io/stt";
 
 export const TRANSCRIBE_MODEL_ID = "en-parakeet-ultra-int8";
-export const CPU_PRESET = Object.freeze({
-  mode: "sweep/score-2", model: TRANSCRIBE_MODEL_ID,
-  revision: "b86784a3a5356cbd126f710b61cd90c5fe5898f1",
+export const CPU_DECODING = {
+  model: TRANSCRIBE_MODEL_ID, revision: "b86784a3a5356cbd126f710b61cd90c5fe5898f1",
   runtimeVersion: "2.0.1", runtimeGitSha1: "af2d8d81", onnxruntimeVersion: "1.28.2",
-  hotwordsSha256: "0f5d821e73171e540a688d50c481007f58662609e1e7892b20829ba7092ea79b",
+  // The BPE vocabulary derives from the token table alone, so every list shares it.
   vocabularySha256: "41130ff456706304a1adec782ccc9e003c4d417e8e324353d281be958cac4e17",
   provider: "cpu", threads: 2, featureDim: 80, sampleRate: 16_000,
   decodingMethod: "modified_beam_search", maxActivePaths: 4, hotwordsScore: 2,
   lengthReward: 0, maxSamples: 960_000, gate: "off", rewrite: "off", padding: false,
-} as const);
+} as const;
+/** One sherpa CPU setup per fixed word list; each runs in its own child. */
+export const CPU_PRESETS = Object.freeze({
+  "sweep/score-2": Object.freeze({ ...CPU_DECODING, mode: "sweep/score-2", words: "launch\nclaude\ngrok\n",
+    hotwordsSha256: "0f5d821e73171e540a688d50c481007f58662609e1e7892b20829ba7092ea79b" }),
+  // Transport Matters' shipped default list (transport-matters PR #1364), cased as the model emits.
+  "tm/today": Object.freeze({ ...CPU_DECODING, mode: "tm/today", words: "Grok\nClaude\nCodex\n",
+    hotwordsSha256: "0f6cb23db8c767504f966d2cab903db4e0e7ef984c91a3e6c9061ad131323ee9" }),
+});
+export type CpuSetupId = keyof typeof CPU_PRESETS;
+export type CpuPreset = typeof CPU_PRESETS[CpuSetupId];
+export const CPU_SETUP_IDS = Object.freeze(Object.keys(CPU_PRESETS) as CpuSetupId[]);
+export function isCpuSetupId(value: unknown): value is CpuSetupId {
+  return typeof value === "string" && Object.hasOwn(CPU_PRESETS, value);
+}
 
-export type TranscriptionMode = "legacy" | typeof CPU_PRESET.mode;
+export type TranscriptionMode = "legacy" | CpuSetupId;
 export type TakeHotwords = { path: string; count: number; revision: string };
 export type CpuLoadMetadata = { loadMs: number; modelConstructionMs: number | null };
 export type CpuComparisonTiming = CpuLoadMetadata & {
@@ -26,7 +39,7 @@ export type Transcript = {
   text: string; decodeMs: number; model: string; hotwords?: TakeHotwords; comparison?: CpuComparisonTiming;
 };
 export type CpuReady = {
-  type: "ready"; version: 1; preset: typeof CPU_PRESET;
+  type: "ready"; version: 1; preset: CpuPreset;
   load: CpuLoadMetadata; assets: Record<string, string>;
 };
 
@@ -67,7 +80,7 @@ export class ChildTranscriber implements Transcriber {
   readonly #startupTimeoutMs: number;
   readonly #hotwordsPath: string | undefined;
   readonly #modelRoot: string | undefined;
-  readonly #mode: TranscriptionMode;
+  readonly #preset: CpuPreset | undefined;
   readonly #pending = new Map<number, Pending>();
   #child: ChildProcess | undefined;
   #nextId = 0;
@@ -86,9 +99,10 @@ export class ChildTranscriber implements Transcriber {
     this.#label = options.label ?? TRANSCRIBE_MODEL_ID;
     this.#timeoutMs = options.timeoutMs ?? TRANSCRIBE_TIMEOUT_MS;
     this.#startupTimeoutMs = options.startupTimeoutMs ?? TRANSCRIBE_TIMEOUT_MS;
-    this.#mode = options.mode ?? "legacy";
-    if (this.#mode !== "legacy" && this.#mode !== CPU_PRESET.mode) throw new Error("Unknown CPU transcription mode");
-    if (this.#mode === CPU_PRESET.mode && options.hotwordsPath !== undefined) {
+    const mode = options.mode ?? "legacy";
+    if (mode !== "legacy" && !isCpuSetupId(mode)) throw new Error("Unknown CPU transcription mode");
+    this.#preset = mode === "legacy" ? undefined : CPU_PRESETS[mode];
+    if (this.#preset && options.hotwordsPath !== undefined) {
       throw new Error("Fixed CPU mode cannot use an editable hotword file");
     }
     this.#hotwordsPath = options.hotwordsPath === undefined ? undefined : resolve(options.hotwordsPath);
@@ -99,7 +113,7 @@ export class ChildTranscriber implements Transcriber {
   }
 
   async prepare(): Promise<CpuReady> {
-    if (this.#mode !== CPU_PRESET.mode) throw new Error("Explicit prepare requires fixed CPU mode");
+    if (!this.#preset) throw new Error("Explicit prepare requires fixed CPU mode");
     const lifecycle = this.#lifecycle;
     await this.#retiring;
     if (lifecycle !== this.#lifecycle) throw new TranscriptionError("transcriber closed", this.#label);
@@ -109,7 +123,7 @@ export class ChildTranscriber implements Transcriber {
 
   async transcribe(samples: Float32Array): Promise<Transcript> {
     const lifecycle = this.#lifecycle;
-    if (this.#mode === CPU_PRESET.mode) {
+    if (this.#preset) {
       validateCpuSamples(samples);
       // Own this exact view before cold preparation or retirement can yield.
       samples = samples.slice();
@@ -143,8 +157,8 @@ export class ChildTranscriber implements Transcriber {
   #spawn(): ChildProcess {
     if (this.#child) return this.#child;
     const started = performance.now();
-    const args = this.#mode === CPU_PRESET.mode
-      ? ["--cpu-preset=sweep/score-2", ...(this.#modelRoot ? [this.#modelRoot] : [])]
+    const args = this.#preset
+      ? [`--cpu-preset=${this.#preset.mode}`, ...(this.#modelRoot ? [this.#modelRoot] : [])]
       : this.#hotwordsPath === undefined ? [] : [this.#hotwordsPath];
     const child = fork(this.#workerPath, args, {
       serialization: "advanced", stdio: ["ignore", "inherit", "inherit", "ipc"],
@@ -155,7 +169,7 @@ export class ChildTranscriber implements Transcriber {
       child.once("exit", () => resolve());
       child.once("close", () => resolve());
     });
-    if (this.#mode === CPU_PRESET.mode) {
+    if (this.#preset) {
       let accept!: (ready: CpuReady) => void;
       let reject!: (error: Error) => void;
       const promise = new Promise<CpuReady>((resolve, fail) => { accept = resolve; reject = fail; });
@@ -172,9 +186,9 @@ export class ChildTranscriber implements Transcriber {
     if (this.#child !== child) return;
     try {
       if (serialize(value).byteLength > 65_536 || !record(value)) throw new Error("Invalid CPU worker reply");
-      if (this.#mode === CPU_PRESET.mode && !this.#readyValue) {
+      if (this.#preset && !this.#readyValue) {
         if (value.type === "startup-error" && typeof value.error === "string") throw new Error(value.error);
-        validateCpuReady(value);
+        validateCpuReady(value, this.#preset);
         this.#readyValue = value;
         this.#startupMs = performance.now() - this.#ready!.started;
         clearTimeout(this.#ready!.timer);
@@ -190,13 +204,14 @@ export class ChildTranscriber implements Transcriber {
         this.#settle(value.id as number, new TranscriptionError(value.error, this.#label, value.hotwords as TakeHotwords | undefined));
       } else {
         if (typeof value.text !== "string" || !duration(value.decodeMs)) throw new Error("Invalid CPU transcript");
-        if (this.#mode === CPU_PRESET.mode && (!validTiming(value.comparison) ||
-            !validHotwords(value.hotwords) || value.hotwords.revision !== CPU_PRESET.hotwordsSha256 || value.hotwords.count !== 3)) {
+        if (this.#preset && (!validTiming(value.comparison) || !validHotwords(value.hotwords) ||
+            value.hotwords.revision !== this.#preset.hotwordsSha256 ||
+            value.hotwords.count !== cpuWords(this.#preset).length)) {
           throw new Error("Invalid fixed CPU result metadata");
         }
         this.#settle(value.id as number, { text: value.text, decodeMs: value.decodeMs,
           ...(value.hotwords ? { hotwords: value.hotwords as TakeHotwords } : {}),
-          ...(this.#mode === CPU_PRESET.mode ? {
+          ...(this.#preset ? {
             comparison: { ...value.comparison as CpuComparisonTiming, processStartupMs: this.#startupMs },
           } : {}) });
       }
@@ -232,7 +247,7 @@ export function validateCpuSamples(samples: Float32Array): void {
   if (!(samples instanceof Float32Array) || samples.length === 0) {
     throw new TranscriptionError("CPU comparison requires Float32 samples", TRANSCRIBE_MODEL_ID);
   }
-  if (samples.length > CPU_PRESET.maxSamples) {
+  if (samples.length > CPU_DECODING.maxSamples) {
     throw new TranscriptionError("CPU comparison exceeds 60 seconds; audio is never truncated", TRANSCRIBE_MODEL_ID);
   }
   if (!samples.every(Number.isFinite)) {
@@ -256,12 +271,15 @@ function validHotwords(value: unknown): value is TakeHotwords {
     (value.count as number) >= 0 && typeof value.revision === "string";
 }
 
-export function validateCpuReady(value: unknown): asserts value is CpuReady {
+/** A preset's fixed phrases, one per line of its list. */
+export function cpuWords(preset: CpuPreset): string[] { return preset.words.trimEnd().split("\n"); }
+
+export function validateCpuReady(value: unknown, preset: CpuPreset): asserts value is CpuReady {
   if (!record(value) || value.type !== "ready" || value.version !== 1 || !record(value.preset) ||
       !validLoad(value.load) || value.load.modelConstructionMs === null || !record(value.assets)) {
     throw new Error("Invalid CPU worker ready metadata");
   }
-  for (const [key, expected] of Object.entries(CPU_PRESET)) {
+  for (const [key, expected] of Object.entries(preset)) {
     if (value.preset[key] !== expected) throw new Error(`CPU ready preset mismatch: ${key}`);
   }
   for (const file of SHERPA_MODELS[TRANSCRIBE_MODEL_ID].files) {

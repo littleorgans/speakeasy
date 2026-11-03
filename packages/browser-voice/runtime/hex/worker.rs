@@ -8,13 +8,16 @@
 //!
 //! stdin: per request, one op byte, a u32 LE sample count, then that many f32
 //! LE samples at 16 kHz mono. `T` transcribes a whole take; `S` starts a live
-//! stream and `F` feeds it, each answered with the stream's partial text. Any
-//! other request ends the live stream unfinalized. End of input exits.
+//! stream and `F` feeds it, each answered with the stream's partial text. `S`
+//! carries the stream's chunk and lookahead, two i32 LE ms, before its samples:
+//! a pair from transcribe.cpp's Unified menu. Any other request ends the live
+//! stream unfinalized. End of input exits.
 //! stdout: one JSON line at ready, then one JSON line per request. No network
 //! client, no files written.
 use std::{error::Error, io::{self, Read, Write}, time::Instant};
 use serde_json::json;
-use transcribe_cpp::{Backend, Model, ModelOptions, RunOptions, SessionOptions, StreamOptions, TimestampKind};
+use transcribe_cpp::{Backend, Model, ModelOptions, ParakeetBufferedStreamOptions, RunOptions, SessionOptions,
+    StreamExtension, StreamOptions, TimestampKind};
 
 mod transcription {
     pub mod pause_segmenter;
@@ -29,7 +32,9 @@ const MAX_SAMPLES: usize = 1_920_000;
 #[derive(Default)]
 pub struct Partial { stable: String, tentative: String }
 
-enum Request { Take(Vec<f32>), Feed { start: bool, samples: Vec<f32> } }
+/// A live stream's (chunk, right) in ms; Hex's own stream keeps the model default.
+type Lookahead = (i32, i32);
+enum Request { Take(Vec<f32>), Feed { start: Option<Lookahead>, samples: Vec<f32> } }
 
 fn read_request(input: &mut impl Read) -> Result<Option<Request>, Box<dyn Error>> {
     let mut head = [0u8; 5];
@@ -38,14 +43,18 @@ fn read_request(input: &mut impl Read) -> Result<Option<Request>, Box<dyn Error>
     }
     let count = u32::from_le_bytes([head[1], head[2], head[3], head[4]]) as usize;
     if count > MAX_SAMPLES { return Err("request exceeds the sample limit".into()); }
+    let mut lookahead = [0u8; 8];
+    if head[0] == b'S' { input.read_exact(&mut lookahead)?; }
+    let lookahead = (i32::from_le_bytes([lookahead[0], lookahead[1], lookahead[2], lookahead[3]]),
+        i32::from_le_bytes([lookahead[4], lookahead[5], lookahead[6], lookahead[7]]));
     let mut bytes = vec![0u8; count * 4];
     input.read_exact(&mut bytes)?;
     let samples: Vec<f32> = bytes.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
     if samples.iter().any(|x| !x.is_finite()) { return Err("nonfinite sample".into()); }
     match head[0] {
         b'T' if count > 0 => Ok(Some(Request::Take(samples))),
-        b'S' => Ok(Some(Request::Feed { start: true, samples })),
-        b'F' => Ok(Some(Request::Feed { start: false, samples })),
+        b'S' => Ok(Some(Request::Feed { start: Some(lookahead), samples })),
+        b'F' => Ok(Some(Request::Feed { start: None, samples })),
         _ => Err("unknown request".into()),
     }
 }
@@ -58,10 +67,12 @@ fn emit(out: &mut impl Write, record: serde_json::Value) -> Result<(), Box<dyn E
 
 /// One live stream, fed in Hex's own 2,560 sample chunks; a remainder waits
 /// for the next feed. Returns the request that ended it.
-fn live(model: &Model, options: &RunOptions, session_options: &SessionOptions, mut samples: Vec<f32>,
-    input: &mut impl Read, out: &mut impl Write) -> Result<Option<Request>, Box<dyn Error>> {
+fn live(model: &Model, options: &RunOptions, session_options: &SessionOptions, (chunk_ms, right_ms): Lookahead,
+    mut samples: Vec<f32>, input: &mut impl Read, out: &mut impl Write) -> Result<Option<Request>, Box<dyn Error>> {
     let mut session = model.session_with(session_options)?;
-    let mut stream = session.stream(options, &StreamOptions::default())?;
+    let buffered = ParakeetBufferedStreamOptions { left_ms: None, chunk_ms: Some(chunk_ms), right_ms: Some(right_ms) };
+    let stream_options = StreamOptions { family: Some(StreamExtension::ParakeetBuffered(buffered)), ..Default::default() };
+    let mut stream = session.stream(options, &stream_options)?;
     let mut cap = PauseCap::new(&mut stream, TRAILING_SAMPLES);
     let mut pending: Vec<f32> = Vec::new();
     loop {
@@ -79,7 +90,7 @@ fn live(model: &Model, options: &RunOptions, session_options: &SessionOptions, m
             Err(error) => emit(out, json!({"kind":"error", "error":error}))?,
         }
         match read_request(input)? {
-            Some(Request::Feed { start: false, samples: next }) => samples = next,
+            Some(Request::Feed { start: None, samples: next }) => samples = next,
             other => return Ok(other),
         }
     }
@@ -108,7 +119,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut request = read_request(&mut input)?;
     while let Some(next) = request {
         request = match next {
-            Request::Feed { samples, .. } => live(&model, &options, &session_options, samples, &mut input, &mut out)?,
+            // A feed with no stream open starts one at Hex's own lookahead.
+            Request::Feed { start, samples } => live(&model, &options, &session_options, start.unwrap_or((1040, 1040)),
+                samples, &mut input, &mut out)?,
             Request::Take(samples) => {
                 let started = Instant::now();
                 // Hex recreates its session for every dictation.

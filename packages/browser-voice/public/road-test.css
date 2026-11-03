@@ -76,6 +76,13 @@ button:disabled { color: var(--ink-3); border-color: var(--rule); cursor: defaul
 
 kbd { font-family: var(--mono); margin-left: 8px; }
 
+/* Live words and their settings: one row of equal columns under the speech in choice. */
+.live { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 16px; align-items: start; }
+
+.setting { display: grid; gap: 8px; }
+
+.live .columns { display: contents; }
+
 .talk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
 
 .hold { min-height: 48px; padding: 0 24px; border-color: var(--mint); background: var(--mint-soft); }
@@ -98,6 +105,19 @@ kbd { font-family: var(--mono); margin-left: 8px; }
 
 /* Live words sit one tone below the final text, which replaces them in place. */
 .said.partial, .partial dd { color: var(--ink-2); }
+
+/* The revision trail: each live update, its time from the press, changed words marked. */
+.trail summary { width: fit-content; cursor: pointer; }
+
+.trail ol { display: grid; gap: 8px; margin: 8px 0 0; padding: 0; list-style: none; font-size: var(--small); color: var(--ink-3); }
+
+.trail li { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 16px; }
+
+.trail .when { font-variant-numeric: tabular-nums; }
+
+.trail ins { color: var(--ink); text-decoration: none; }
+
+.trail del { color: var(--live); }
 
 .timings { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
 
@@ -129,27 +149,42 @@ dd.missing { color: var(--ink-3); }
 
 .history { display: grid; gap: 8px; }
 
-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+/*
+ * Each earlier take is one grid row of models and timings, its transcript a
+ * full width line beneath, so no column squeezes a label past one wrap.
+ */
+.history table, .history thead, .history tbody { display: block; font-variant-numeric: tabular-nums; }
 
-th { text-align: left; font-weight: 500; padding: 0 16px 8px 0; border-bottom: 1px solid var(--rule); }
+.history tr {
+  display: grid;
+  /* The two timings that can carry a model start note get the room for it. */
+  grid-template-columns: minmax(0, 6fr) minmax(0, 4fr) minmax(0, 4fr) minmax(0, 5fr) minmax(0, 5fr) minmax(0, 4fr);
+  gap: 8px 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--rule);
+}
 
-td { padding: 8px 16px 8px 0; border-bottom: 1px solid var(--rule); vertical-align: top; font-size: var(--small); color: var(--ink-2); }
+.history thead tr { padding-top: 0; }
 
-td.said-cell { color: var(--ink); overflow-wrap: anywhere; }
+th { padding: 0; text-align: left; font-weight: 500; align-self: end; }
 
-th:last-child, td:last-child { padding-right: 0; }
+td { padding: 0; font-size: var(--small); color: var(--ink-2); }
 
-.num { text-align: right; white-space: nowrap; }
+td.said-cell { grid-column: 1 / -1; grid-row: 2; color: var(--ink); overflow-wrap: anywhere; }
 
-/* Long timing headers wrap, so the transcript column keeps its room. */
-th.num { white-space: normal; vertical-align: bottom; }
+/* The transcript line needs no column head; screen readers still hear it. */
+th.said-cell { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+.num { text-align: right; }
+
+td.num { white-space: nowrap; }
 
 .note { display: block; color: var(--ink-3); }
 
 footer { padding-top: 24px; border-top: 1px solid var(--rule); }
 
 @media (max-width: 640px) {
-  .pair { grid-template-columns: 1fr; }
+  .pair, .live { grid-template-columns: 1fr; }
   .timings { grid-template-columns: 1fr; }
   /* Two equal buttons on one line; the level line meters inside Hold to speak. */
   .talk { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 8px; }
@@ -160,10 +195,12 @@ footer { padding-top: 24px; border-top: 1px solid var(--rule); }
   .replay:has(#replay-talk-over:not([hidden])) #replay-voice { grid-column: 1 / -1; }
   /* Each earlier take stacks into labelled lines, so every timing stays on screen. */
   .history thead { display: none; }
-  .history table, .history tbody { display: block; }
-  .history tr { display: grid; gap: 8px; padding: 16px 0; border-bottom: 1px solid var(--rule); }
-  .history td { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 16px; padding: 0; border: 0; text-align: right; }
+  .history tr { grid-template-columns: 1fr; padding: 16px 0; }
+  .history td { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 16px; text-align: right; }
   .history td::before { content: attr(data-label); grid-row: span 2; text-align: left; color: var(--ink-3); }
+  /* The transcript and its trail read from the left edge, under their label. */
+  .history td.said-cell { grid-row: auto; grid-template-columns: minmax(0, 1fr); row-gap: 8px; text-align: left; }
+  .history td.said-cell::before { grid-row: auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {

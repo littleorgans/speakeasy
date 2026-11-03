@@ -5,6 +5,8 @@ import vm from "node:vm";
 import { HoldReleaseGate } from "../public/hold-release.js";
 import * as preRoll from "../public/pre-roll.js";
 import * as text from "../public/road-test-text.js";
+import * as trail from "../public/live-trail.js";
+import { liveStream } from "./live-settings.ts";
 import { END_SILENCE_MS, TalkOverDetector } from "../public/talk-over.js";
 import { VoiceReadback } from "../public/voice-readback.js";
 
@@ -43,10 +45,10 @@ test("talk over tracks the noise floor, so steady echo below three times it neve
 test("model cards are plain text: where it runs, size and runtime", () => {
   assert.equal(text.inputCard({ readiness: { ready: true, sizeBytes: 2_509_042_622 },
     card: { runtime: "parakeet-mlx 0.5.3 on MLX, Metal GPU", transcript: "final" } }),
-    "Local · 2.5 GB · parakeet-mlx 0.5.3 on MLX, Metal GPU · final text only");
+    "Local · 2.5 GB · parakeet-mlx 0.5.3 on MLX, Metal GPU", "the Live words choice says whether words show while you speak");
   assert.equal(text.inputCard({ readiness: { ready: false, reason: "runtime or model files need setup" },
     card: { runtime: "speech.cpp", transcript: "partials" } }),
-    "Local · size unknown · speech.cpp · partials while you speak · needs setup: runtime or model files need setup");
+    "Local · size unknown · speech.cpp · needs setup: runtime or model files need setup");
   assert.equal(text.outputCard({ provider: { kind: "local" }, sizeBytes: 63_537_415, runtime: "sherpa-onnx VITS, CPU",
     streaming: "sentence", readiness: { state: "ready" } }), "Local · 64 MB · sherpa-onnx VITS, CPU · streams by sentence");
   assert.equal(text.formatDuration(312.4), "312 ms");
@@ -213,14 +215,18 @@ function pageHarness({ holdVoice = false, transcript = "final" } = {}, rows: unk
   const document = { getElementById(id: string) {
     if (!elements.has(id)) elements.set(id, id.endsWith("-model") || id.endsWith("-voice") ? select() : element());
     return elements.get(id);
-  }, createElement: element, addEventListener() {} };
+  }, createElement: (tag: string) => Object.assign(tag === "select" ? select() : element(), { tag }), addEventListener() {} };
   const spoken: any[] = [];
   const posted: string[] = [];
   const played: number[] = [];
   let takes = 0;
-  const live: { begun: [string, number][]; pushed: number; ended: number } = { begun: [], pushed: 0, ended: 0 };
+  const live: { begun: [string, number][]; settings: unknown[]; pushed: number; ended: number } = { begun: [], settings: [], pushed: 0, ended: 0 };
   class LiveWords { takeId: string | null = null; serial = 0;
-    begin(setupId: string, preRoll: Float32Array) { live.begun.push([setupId, preRoll.length]); return this.takeId = `live-${++this.serial}`; }
+    begin(setupId: string, preRoll: Float32Array, settings: unknown) {
+      live.begun.push([setupId, preRoll.length]);
+      live.settings.push(settings);
+      return this.takeId = `live-${++this.serial}`;
+    }
     push() { if (this.takeId) live.pushed++; }
     end() { if (this.takeId) live.ended++; this.takeId = null; } }
   class Mic { open = true; recording = false; async start() {} beginTake() { this.recording = true; return new Float32Array(4_800); }
@@ -239,7 +245,14 @@ function pageHarness({ holdVoice = false, transcript = "final" } = {}, rows: unk
       this.active = this.playing = false;
       this.stopped!({ ...voice(), outcome: "stopped", totalMs: null, stopMs: 41 });
     } }
-  const setups = { setups: [{ id: "mlx-parakeet/v3-greedy", label: "Parakeet v3 MLX", card: { runtime: "mlx", transcript }, readiness: { ready: true, sizeBytes: 1 } }] };
+  // The setups route's live fields, from the real registry; Hex streams too, for a pairing.
+  const streaming = transcript === "partials";
+  const setups = { setups: [
+    { id: "mlx-parakeet/v3-greedy", label: "Parakeet v3 MLX", card: { runtime: "mlx", transcript }, readiness: { ready: true, sizeBytes: 1 },
+      live: streaming ? liveStream("mlx-parakeet/v3-greedy") : null, liveDefault: streaming ? "mlx-parakeet/v3-greedy" : null },
+    { id: "hex/unified", label: "Hex Parakeet Unified", card: { runtime: "transcribe.cpp", transcript: "partials" },
+      readiness: { ready: true, sizeBytes: 1 }, live: liveStream("hex/unified"), liveDefault: "hex/unified" },
+  ] };
   const voices = { revision: "rev", default: { model: "piper-kristin-medium" }, models: [{ id: "piper-kristin-medium", label: "Piper Kristin medium",
     provider: { kind: "local" }, defaultVoice: "kristin", defaultSpeed: 1, voices: [{ id: "kristin", label: "Kristin" }], readiness: { state: "ready" } }] };
   const fetch = async (url: string) => {
@@ -254,7 +267,7 @@ function pageHarness({ holdVoice = false, transcript = "final" } = {}, rows: unk
   };
   const context = vm.createContext({ document, fetch, performance, setTimeout, clearTimeout, URLSearchParams, TextEncoder, TextDecoder,
     JSON, Float32Array, Promise, Option: function(label: string, value: string) { return { label, value }; },
-    HoldReleaseGate, MicCapture: Mic, VoiceReadback: Readback, LiveWords, TalkOverDetector, ...text,
+    HoldReleaseGate, MicCapture: Mic, VoiceReadback: Readback, LiveWords, TalkOverDetector, ...text, ...trail,
     AudioContext: class { currentTime = 0; destination = {}; async resume() {}
       createBuffer(_channels: number, length: number) { return { length, copyToChannel() {} }; }
       createBufferSource() { const source = { buffer: { length: 0 }, connect() {}, stop() {}, start() { played.push(source.buffer.length); } }; return source; } },
@@ -282,7 +295,7 @@ async function take(page: any, pressAt: number) {
 test("the page loop: hold, release, final text, then the chosen voice reads it back", async () => {
   const { page, elements, spoken, posted } = pageHarness();
   await page.start();
-  assert.equal(elements.get("input-card").textContent, "Local · 1 MB · mlx · final text only");
+  assert.equal(elements.get("input-card").textContent, "Local · 1 MB · mlx");
   page.press(100);
   await new Promise((resolve) => setTimeout(resolve, 0));
   page.release(500);
@@ -377,7 +390,7 @@ test("earlier takes label every cell and name a cold row's model start", async (
 test("a streaming setup shows live words while held, times them from the press, and the final replaces them", async () => {
   const { page, elements, live } = pageHarness({ transcript: "partials" });
   await page.start();
-  assert.equal(elements.get("input-card").textContent, "Local · 1 MB · mlx · partials while you speak");
+  assert.equal(elements.get("input-card").textContent, "Local · 1 MB · mlx");
   const clock = performance.now;
   let now = 1_000;
   performance.now = () => now;
@@ -495,4 +508,104 @@ test("a take with no words shows no first words, and a voice's first use names i
   assert.ok(!listed(spoken.elements.get("output-timings")).some((row: string) => row.startsWith("Model start")), "a warm voice");
   const [cold] = spoken.elements.get("history").children;
   assert.deepEqual(cold.children[5].children.map((part: any) => part.textContent), ["120 ms", "Model start 4.90 s"]);
+});
+
+test("the trail marks inserted, replaced and removed words, and counts only changes to words already shown", () => {
+  const kinds = (before: string, after: string) => trail.diffWords(before, after).map((segment) =>
+    `${segment.kind}:${segment.was.join(" ")}>${segment.words.join(" ")}`);
+  assert.deepEqual(kinds("", "Clear the"), ["inserted:>Clear the"]);
+  assert.deepEqual(kinds("Clear the scream", "Clear the screen."), ["same:>Clear the", "replaced:scream>screen."]);
+  assert.deepEqual(kinds("One, two", "One, two, three."), ["same:>One, two,", "inserted:>three."],
+    "case and punctuation alone are no change; the newer form shows");
+  assert.deepEqual(kinds("Spawn ten codecs agents", "Spawn ten Codex agents"), ["same:>Spawn ten", "replaced:codecs>Codex", "same:>agents"]);
+  assert.deepEqual(kinds("Open the the browser", "Open the browser"), ["same:>Open the", "removed:the>", "same:>browser"]);
+  assert.equal(trail.isCorrection(trail.diffWords("Clear", "Clear the")), false, "words added at the end are no correction");
+  assert.deepEqual(kinds("seven, eight, n", "seven, eight, nine, ten"), ["same:>seven, eight,", "inserted:>nine, ten"],
+    "a word still being written grows; it is no correction");
+  assert.equal(trail.isCorrection(trail.diffWords("Clear screen", "Clear the screen")), true, "words put back in the middle are");
+  const updates = [{ atMs: 900, words: "Clear" }, { atMs: 1_700, words: "Clear the scream" }, { atMs: 2_500, words: "Clear the screen" }];
+  assert.equal(trail.trailSummary(updates), "3 updates, 1 correction");
+  assert.equal(trail.trailSummary(updates.slice(0, 1)), "1 update, no corrections");
+  const element = (tag: string) => ({ tag, textContent: "", children: [] as any[], className: "", append(...nodes: any[]) { this.children.push(...nodes); } });
+  const items = trail.trailItems({ createElement: element }, updates, "Clear the screen.", text.formatDuration);
+  const flat = (node: any): string => node.children.length ? node.children.map(flat).join("")
+    : node.tag === "ins" ? `[+${node.textContent}]` : node.tag === "del" ? `[-${node.textContent}]` : node.textContent;
+  assert.deepEqual(items.map((item: any) => `${item.children[0].textContent} ${flat(item.children[1]).trim()}`), [
+    "+900 ms [+Clear]", "+1.70 s Clear [+the scream]", "+2.50 s Clear the [-scream] [+screen]", "Final Clear the screen."]);
+});
+
+test("the live words line names the live model, the settings the host applied, and a final model that gives final text only", () => {
+  const ultra = { id: "mlx-parakeet/ultra-greedy", label: "Parakeet Ultra MLX" };
+  const stream = liveStream(ultra.id)!;
+  assert.equal(text.liveLine({ setup: ultra, stream, settings: { updateMs: 800 } }, ultra),
+    "Live words: Parakeet Ultra MLX stream, updates every 800 ms, the last 5.12 s may change.");
+  assert.equal(text.liveLine({ setup: ultra, stream, settings: { updateMs: 1_600 } },
+    { id: "mlx-cleanup/qwen-targeted", label: "Ultra plus Qwen cleanup", baseSetup: ultra.id }),
+  "Live words: Parakeet Ultra MLX stream, updates every 1.6 s, the last 5.12 s may change. Ultra plus Qwen cleanup writes the final text.");
+  assert.equal(text.liveLine({ setup: { id: "hex/unified", label: "Hex Parakeet Unified" }, stream: liveStream("hex/unified")!,
+    settings: { lookaheadMs: 2_080 } }), "Live words: Hex Parakeet Unified stream, 2.08 s lookahead, written words never change.");
+  assert.equal(text.liveLine(null), "Live words off.");
+  const qwen = { id: "qwen/context", label: "Qwen3 ASR with known words", card: { transcript: "final" } };
+  assert.equal(text.liveLine(null, qwen), "Live words off. Qwen3 ASR with known words gives final text only.");
+  assert.equal(text.liveLine(null, { ...ultra, card: { transcript: "partials" } }), "Live words off.");
+  assert.equal(text.liveLine({ setup: ultra, stream, settings: { updateMs: 800 } }, qwen),
+    "Live words: Parakeet Ultra MLX stream, updates every 800 ms, the last 5.12 s may change. Qwen3 ASR with known words writes the final text only.");
+});
+
+test("live words default to the setup's own stream; another live model and its settings reach the channel, and each figure names its model", async () => {
+  const { page, elements, live } = pageHarness({ transcript: "partials" });
+  await page.start();
+  assert.equal(elements.get("live-model").value, "mlx-parakeet/v3-greedy", "today's pairing");
+  assert.deepEqual(elements.get("live-model").options.map((option: any) => option.label), ["Off", "Parakeet v3 MLX", "Hex Parakeet Unified"]);
+  assert.deepEqual(elements.get("live-settings").children.map((column: any) => column.children[0].textContent), ["Updates every"]);
+  assert.equal(elements.get("live-line").textContent, "Live words: Parakeet v3 MLX stream, updates every 800 ms, the last 5.12 s may change.");
+  elements.get("live-model").value = "hex/unified";
+  elements.get("live-model").listeners.get("change")!();
+  const [lookahead] = elements.get("live-settings").children;
+  assert.equal(lookahead.children[0].textContent, "Lookahead");
+  lookahead.children[1].value = "480";
+  const clock = performance.now;
+  let now = 1_000;
+  performance.now = () => now;
+  try {
+    page.press(1_000);
+    await until(() => live.begun.length === 1);
+    assert.deepEqual(live.begun[0], ["hex/unified", 4_800]);
+    assert.equal(JSON.stringify(live.settings[0]), JSON.stringify({ lookaheadMs: 480 }));
+    const takeId = page.run.live.takeId;
+    page.liveEvent({ type: "stream", takeId, setupId: "hex/unified", settings: { lookaheadMs: 480 } });
+    now = 1_900;
+    page.liveEvent({ type: "partial", takeId, stable: " Clear the", tentative: "", processingMs: 5 });
+    now = 2_300;
+    page.liveEvent({ type: "partial", takeId, stable: " Clear the scream", tentative: "", processingMs: 5 });
+    assert.equal(elements.get("live-line").textContent,
+      "Live words: Hex Parakeet Unified stream, 480 ms lookahead, written words never change. Parakeet v3 MLX writes the final text.");
+    assert.equal(elements.get("trail").hidden, false);
+    assert.equal(elements.get("trail-summary").textContent, "2 updates, no corrections");
+    page.release(2_600);
+    await until(() => page.run.output);
+  } finally { performance.now = clock; }
+  const named = elements.get("input-timings").children.map((row: any) =>
+    `${row.children[0].textContent}${row.children[0].children.map((note: any) => ` (${note.textContent})`).join("")}`);
+  assert.deepEqual(named.slice(0, 2), ["Press to first words (Hex Parakeet Unified)", "Release to text (Parakeet v3 MLX)"]);
+  assert.equal(elements.get("trail-list").children.length, 3, "two updates, then the final");
+  await take(page, 5_000);
+  const row = elements.get("history").children[0];
+  assert.equal(row.children[0].children.map((cell: any) => cell.textContent).join(" | "), "Parakeet v3 MLX | Live words Hex Parakeet Unified");
+  assert.equal(row.children[2].children.at(-1).children[0].textContent, "2 updates, no corrections", "earlier takes keep the trail");
+  elements.get("input-model").listeners.get("change")!();
+  assert.equal(elements.get("live-model").value, "mlx-parakeet/v3-greedy", "a new speech in choice restores its own pairing");
+});
+
+test("with live words off nothing streams, no first words figure shows, and the line says so once", async () => {
+  const { page, elements, live } = pageHarness({ transcript: "partials" });
+  await page.start();
+  elements.get("live-model").value = "off";
+  elements.get("live-model").listeners.get("change")!();
+  assert.equal(elements.get("live-settings").children.length, 0);
+  await take(page, 100);
+  assert.equal(live.begun.length, 0);
+  assert.equal(elements.get("live-line").textContent, "Live words off.");
+  assert.equal(elements.get("trail").hidden, true);
+  assert.ok(!listed(elements.get("input-timings")).some((row: string) => row.startsWith("Press to first words")));
 });

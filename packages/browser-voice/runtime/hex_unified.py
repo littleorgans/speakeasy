@@ -4,7 +4,8 @@ Backend options contain absolute runnerPath and modelPath, plus an optional
 setupId fixed to hex/unified. Construction starts nothing; load verifies the
 model hash, starts the worker and waits for its ready line. Each take goes
 through Hex's own stream pipeline inside the worker; feed runs the same
-pipeline live and answers with its committed and tentative words.
+pipeline live, at the lookahead the page chose, and answers with its
+committed and tentative words.
 """
 
 import copy
@@ -23,6 +24,10 @@ MODEL_SHA256 = "4b50b6dd862bf6e346929aaf4f5eaacec003bfa3f56462d6c874b41ef2f38795
 RUNTIME_COMMIT = "7045d1c0fe7cee37747b2792977421d435e75fca"
 HEX_COMMIT = "826bdbc44c8806630a45c08ed8cef35a36817a17"
 PROCESSING_TIMING = "worker Instant around session, stream feeds, pause cap and finalize"
+# Live lookahead the page offers (src/live-settings.ts), as transcribe.cpp's
+# Unified (chunk, right) menu in ms; Hex ships 2080, the model default.
+LOOKAHEAD_MS = {2080: (1040, 1040), 1120: (560, 560), 480: (160, 320)}
+DEFAULT_LOOKAHEAD_MS = 2080
 
 
 def _digest(path):
@@ -85,19 +90,30 @@ class Backend:
             self.close()
             raise
 
-    def _send(self, op, samples):
+    def _send(self, op, samples, extra=b""):
         if self.process is None or self.metadata is None:
             raise RuntimeError("Hex backend is not loaded")
         if sys.byteorder != "little":
             raise RuntimeError("Hex worker requires a little endian host")
         body = samples.tobytes()
-        self.process.stdin.write(op + struct.pack("<I", len(body) // 4) + body)
+        self.process.stdin.write(op + struct.pack("<I", len(body) // 4) + extra + body)
         self.process.stdin.flush()
         return body
 
-    def feed(self, samples, start):
-        """Live words: start opens a fresh stream, as Hex does per dictation."""
-        self._send(b"S" if start else b"F", samples)
+    def feed(self, samples, start, settings=None):
+        """Live words: start opens a fresh stream, as Hex does per dictation, at the chosen lookahead."""
+        if not start:
+            if settings is not None:
+                raise ValueError("Hex live settings go with start")
+            self._send(b"F", samples)
+        else:
+            settings = {} if settings is None else settings
+            if not isinstance(settings, dict) or set(settings) - {"lookaheadMs"}:
+                raise ValueError("Hex live settings are lookaheadMs")
+            lookahead = settings.get("lookaheadMs", DEFAULT_LOOKAHEAD_MS)
+            if isinstance(lookahead, bool) or lookahead not in LOOKAHEAD_MS:
+                raise ValueError("Hex lookahead must be an offered value")
+            self._send(b"S", samples, struct.pack("<ii", *LOOKAHEAD_MS[lookahead]))
         reply = self._reply()
         if reply.get("kind") != "partial":
             raise RuntimeError("Hex worker returned no partial")

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 export const SETUP_IDS = Object.freeze([
   "mlx-parakeet/v3-greedy", "mlx-parakeet/ultra-greedy", "qwen/context",
-  "sweep/score-2", "hex/unified", "mlx-cleanup/qwen-targeted",
+  "sweep/score-2", "tm/today", "hex/unified", "mlx-cleanup/qwen-targeted",
 ] as const);
 export type SetupId = typeof SETUP_IDS[number];
 export const DEFAULT_SETUP_ID: SetupId = SETUP_IDS[0];
@@ -35,6 +35,8 @@ export type SetupExecutionResult = {
 export type SetupExecutionContext = Readonly<{ signal: AbortSignal }>;
 /** Live words while the owner speaks: settled text, then text the model may still change. */
 export type LivePartial = { stable: string; tentative: string; processingMs: number };
+/** Streaming settings by name, applied when a live stream starts (live-settings.ts). */
+export type LiveSettings = Readonly<Record<string, number>>;
 
 /**
  * load and execute must settle only after a cancelled/failed generation exits.
@@ -48,8 +50,9 @@ export interface SetupExecutor {
   execute(request: SetupExecution, context: SetupExecutionContext): Promise<SetupExecutionResult>;
   release(setupId: SetupId): Promise<void>;
   close(): Promise<void>;
-  /** Live words, only for engines that truly stream; start opens a fresh stream. Requires load. */
-  feed?(setupId: SetupId, samples: Float32Array, start: boolean, context: SetupExecutionContext): Promise<LivePartial>;
+  /** Live words, only for engines that truly stream; start opens a fresh stream with these settings. Requires load. */
+  feed?(setupId: SetupId, samples: Float32Array, start: boolean, context: SetupExecutionContext,
+    settings?: LiveSettings): Promise<LivePartial>;
 }
 
 export type SetupFailureCode = "limit" | "unavailable" | "load" | "execution" | "protocol" | "cancelled";

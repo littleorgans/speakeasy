@@ -4,7 +4,7 @@ import { getSetup, parseSetupSelection } from "./setup-registry.ts";
 import {
   assertBoundedText, assertSetupExecutionResult, assertSetupLoadResult, CLEANUP_SETUP_ID,
   createCanonicalPcm, IDLE_RELEASE_MS, MAX_TEXT_BYTES, pcmIdentity, SETUP_IDS, sha256, ULTRA_SETUP_ID,
-  type CanonicalPcm, type ComparisonEvent, type ComparisonHandle, type ComparisonResult,
+  type CanonicalPcm, type ComparisonEvent, type ComparisonHandle, type ComparisonResult, type LiveSettings,
   type SetupExecution, type SetupExecutionResult, type SetupExecutor, type SetupFailure,
   type SetupFailureCode, type SetupId, type SetupRow, type SetupRowStatus, type SetupTimings,
 } from "./setup-protocol.ts";
@@ -106,13 +106,14 @@ export class SetupComparison {
    * only while no comparison runs and no earlier take is settling, and a
    * comparison waits for its last call. `acquire` is the host's audio lease.
    */
-  live(setupId: SetupId, options: { onEvent(event: LiveTakeEvent): void; acquire(): (() => void) | undefined }): LiveTake {
+  live(setupId: SetupId, options: { settings?: LiveSettings; onEvent(event: LiveTakeEvent): void;
+    acquire(): (() => void) | undefined }): LiveTake {
     if (this.#closed) throw new Error("comparison service is closed");
     const earlier = [...this.#takes];
     for (const take of earlier) void take.stop();
     let release: (() => void) | undefined;
     const take: LiveTake = new LiveTake({ setupId, executor: this.#executor, maxSamples: getSetup(setupId).maxSamples,
-      onEvent: options.onEvent,
+      ...(options.settings ? { settings: options.settings } : {}), onEvent: options.onEvent,
       admit: () => !this.#active && !this.#closed && earlier.every((other) => !this.#takes.has(other))
         && (release ??= options.acquire()) !== undefined,
       touch: () => { this.#resident.set(setupId, this.#now()); },

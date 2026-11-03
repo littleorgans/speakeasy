@@ -22,13 +22,15 @@ while True:
     head = sys.stdin.buffer.read(5)
     if len(head) < 5: break
     op, count = head[:1], struct.unpack("<I", head[1:])[0]
+    lookahead = struct.unpack("<ii", sys.stdin.buffer.read(8)) if op == b"S" else None
     samples = struct.unpack("<%df" % count, sys.stdin.buffer.read(count * 4))
     if op == b"T":
         print(json.dumps({{"kind": "result", "text": "heard %d" % len(samples), "rawText": " heard", "processingMs": 2.5,
                           "pauseDroppedSamples": 0}}), flush=True)
     else:
+        if lookahead: opened = "%d+%d" % lookahead
         fed = (0 if op == b"S" else fed) + len(samples)
-        print(json.dumps({{"kind": "partial", "stable": "fed %d" % fed, "tentative": " so far", "processingMs": 1.5}}), flush=True)
+        print(json.dumps({{"kind": "partial", "stable": "fed %d" % fed, "tentative": " at " + opened, "processingMs": 1.5}}), flush=True)
 """
 
 
@@ -88,11 +90,18 @@ class HexUnifiedTest(unittest.TestCase):
             backend.load()
         samples = lambda count: memoryview(array.array("f", [0.1] * count).tobytes()).cast("f")
         first = backend.feed(samples(3), True)
-        self.assertEqual(first, {"stable": "fed 3", "tentative": " so far", "processingMs": 1.5})
+        self.assertEqual(first, {"stable": "fed 3", "tentative": " at 1040+1040", "processingMs": 1.5},
+                         "without settings the stream opens at Hex's own 2.08 s lookahead")
         worker.validate_partial(first)
         self.assertEqual(backend.feed(samples(2), False)["stable"], "fed 5")
         self.assertEqual(backend.transcribe(samples(4))["text"], "heard 4", "a take follows a live stream")
-        self.assertEqual(backend.feed(samples(1), True)["stable"], "fed 1")
+        fresh = backend.feed(samples(1), True, {"lookaheadMs": 480})
+        self.assertEqual((fresh["stable"], fresh["tentative"]), ("fed 1", " at 160+320"), "the chosen lookahead reaches the worker")
+        for bad in ({"lookaheadMs": 500}, {"lookaheadMs": True}, {"chunkMs": 1040}, []):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                backend.feed(samples(1), True, bad)
+        with self.assertRaises(ValueError):
+            backend.feed(samples(1), False, {"lookaheadMs": 480})
         process = backend.process
         backend.close()
         self.assertEqual(process.returncode, 0)

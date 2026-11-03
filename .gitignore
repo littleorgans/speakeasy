@@ -8,3 +8,4 @@ results/
 /corpus/
 .venv/
 .env
+__pycache__/

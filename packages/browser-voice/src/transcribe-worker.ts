@@ -6,16 +6,19 @@ import {
   TakeTranscription, instrumentCpuBinding, preflightCpuModel, validateCpuRuntime, type CpuMeasurements,
 } from "./take-transcription.ts";
 import {
-  CPU_PRESET, TRANSCRIBE_MODEL_ID, TranscriptionError, validateCpuSamples,
+  CPU_PRESETS, isCpuSetupId, TRANSCRIBE_MODEL_ID, TranscriptionError, validateCpuSamples,
   type CpuReady, type TranscribeReply, type TranscribeRequest,
 } from "./transcriber.ts";
 
-const fixed = process.argv[2] === "--cpu-preset=sweep/score-2";
+const presetId = process.argv[2]?.startsWith("--cpu-preset=") ? process.argv[2].slice("--cpu-preset=".length) : undefined;
+if (presetId !== undefined && !isCpuSetupId(presetId)) throw new Error("Unknown CPU preset");
+const preset = presetId === undefined ? undefined : CPU_PRESETS[presetId];
+const fixed = preset !== undefined;
 const modelRoot = fixed ? process.argv[3] ?? SHERPA_ROOT : SHERPA_ROOT;
 let measurements: CpuMeasurements = { modelConstructionMs: null, processingMs: null };
 let assets: Record<string, string> = {};
 const transcriber = new TakeTranscription({
-  mode: fixed ? CPU_PRESET.mode : "legacy",
+  mode: preset?.mode ?? "legacy",
   hotwordsPath: fixed ? undefined : process.argv[2],
   createEngine: loadEngine,
   measurements: () => measurements,
@@ -29,7 +32,7 @@ async function start(): Promise<void> {
   if (fixed) {
     try {
       const load = await transcriber.prepare();
-      send({ type: "ready", version: 1, preset: CPU_PRESET, load, assets } satisfies CpuReady);
+      send({ type: "ready", version: 1, preset: preset!, load, assets } satisfies CpuReady);
     } catch (error) {
       send({ type: "startup-error", error: message(error) });
       process.disconnect?.();
@@ -59,8 +62,8 @@ async function answer(request: unknown): Promise<void> {
 }
 
 async function loadEngine(hotwords: Hotwords | undefined) {
-  if (fixed) {
-    assets = await preflightCpuModel(modelRoot);
+  if (preset) {
+    assets = await preflightCpuModel(modelRoot, preset);
     const native = loadSherpaBinding();
     validateCpuRuntime(native);
     const instrumented = instrumentCpuBinding(native);

@@ -10,14 +10,16 @@ export function formatBytes(bytes) {
   return bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1e6))} MB`;
 }
 
-/** Name · where it runs · size · runtime · transcript mode. The name is the list entry itself. */
+/**
+ * Where it runs · size · runtime. The name is the list entry itself; whether
+ * words show while you speak is the Live words choice, said once there.
+ */
 export function inputCard(setup) {
   const ready = setup.readiness?.ready === true;
   return [
     "Local",
     formatBytes(setup.readiness?.sizeBytes) ?? "size unknown",
     setup.card?.runtime ?? "runtime unknown",
-    setup.card?.transcript === "partials" ? "partials while you speak" : "final text only",
     ready ? "" : `needs setup: ${setup.readiness?.reason ?? "not configured"}`,
   ].filter(Boolean).join(" · ");
 }
@@ -30,6 +32,22 @@ export function outputCard(model) {
     model.streaming === "sentence" ? "streams by sentence" : model.streaming === "pcm" ? "streams audio" : "",
     model.readiness?.state === "ready" ? "" : `needs setup: ${model.readiness?.reason ?? model.readiness?.state}`,
   ].filter(Boolean).join(" · ");
+}
+
+/**
+ * What makes a take's live words, from the stream and settings the host
+ * applied: "Live words: Parakeet Ultra MLX stream, updates every 800 ms, the
+ * last 5.12 s may change." A final from another model replaces them, and a
+ * final model that cannot stream is named as giving final text only.
+ */
+export function liveLine(live, final) {
+  const finalOnly = final?.card?.transcript === "final";
+  if (!live) return finalOnly ? `Live words off. ${final.label} gives final text only.` : "Live words off.";
+  const phrases = live.stream.settings.map((setting) =>
+    setting.options.find((option) => option.value === live.settings[setting.id])?.phrase).filter(Boolean);
+  const replaced = final && final.id !== live.setup.id
+    ? ` ${final.label} writes the final text${finalOnly ? " only" : ""}.` : "";
+  return `Live words: ${[`${live.setup.label} stream`, ...phrases].join(", ")}.${replaced}`;
 }
 
 /** The browser's reported output path delays in ms; null where it reports none. */

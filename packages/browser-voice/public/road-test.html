@@ -21,6 +21,10 @@
           <select id="input-model"></select>
           <span class="quiet card" id="input-card"></span>
         </label>
+        <div class="live" id="live-row">
+          <label class="setting"><span class="label">Live words</span><select id="live-model"></select></label>
+          <span class="columns" id="live-settings"></span>
+        </div>
         <div class="choice">
           <label class="label" for="output-model">Speech out</label>
           <span class="pair">
@@ -41,6 +45,8 @@
         <div class="transcript">
           <h2 class="label"><span>Transcript</span><span class="quiet" id="take-models"></span></h2>
           <p class="said" id="transcript">The transcript appears here, and the voice reads it back.</p>
+          <p class="quiet" id="live-line"></p>
+          <details class="trail" id="trail" hidden><summary class="quiet" id="trail-summary"></summary><ol id="trail-list"></ol></details>
         </div>
         <div class="timings">
           <div class="group"><h2 class="label" id="input-heading">Speech in</h2><dl id="input-timings" aria-labelledby="input-heading"></dl></div>

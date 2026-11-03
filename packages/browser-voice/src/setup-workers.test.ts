@@ -9,7 +9,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { PythonSetupWorker, SetupWorkers, MAX_WORKER_PCM_BYTES, MAX_WORKER_TEXT_BYTES } from "./setup-workers.ts";
 import { createWorkerVoiceSynth } from "./voice-workers.ts";
 import { createCanonicalPcm, sha256, type SetupExecution, type SetupLoadResult } from "./setup-protocol.ts";
-import { CPU_PRESET, type CpuReady } from "./transcriber.ts";
+import { CPU_PRESETS, type CpuReady } from "./transcriber.ts";
 
 let PYTHON: string;
 const RUNTIME = fileURLToPath(new URL("../runtime/", import.meta.url));
@@ -65,11 +65,12 @@ class Fake:
                 "diagnostics": {"hex": raw.hex(), "count": len(samples), "pid": os.getpid(), "calls": self.calls}}
     def cleanup(self, text):
         return {"text": text, "rawText": text, "processingMs": 0}
-    def feed(self, samples, start):
+    def feed(self, samples, start, settings):
         if mode == "badPartial":
             return {"stable": "", "tentative": "", "processingMs": -1}
         self.fed = (0 if start else getattr(self, "fed", 0)) + len(samples)
-        return {"stable": " heard %d" % self.fed, "tentative": " maybe", "processingMs": 2}
+        chosen = " " + json.dumps(settings, sort_keys=True) if settings else ""
+        return {"stable": " heard %d" % self.fed, "tentative": " maybe" + chosen, "processingMs": 2}
     def speak(self, text, voice, speed):
         if mode == "badAudio":
             return {"samples": b"\\0\\0\\xc0\\x7f", "sampleRate": 24000, "processingMs": 1}
@@ -427,14 +428,14 @@ test("scheduler executor loads explicitly, verifies canonical identity, and pres
 });
 
 test("scheduler delegates CPU prepare, timing, cancellation and release to the supplied fixed child", async () => {
-  const ready: CpuReady = { type: "ready", version: 1, preset: CPU_PRESET,
+  const ready: CpuReady = { type: "ready", version: 1, preset: CPU_PRESETS["sweep/score-2"],
     load: { loadMs: 10, modelConstructionMs: 8 }, assets: {} };
   const calls: string[] = [];
   let releaseBlocked!: () => void;
   let started!: () => void;
   const barrier = new Promise<void>((resolve) => { started = resolve; });
   let block = false;
-  const executor = new SetupWorkers({ cpu: {
+  const executor = new SetupWorkers({ cpu: { "sweep/score-2": {
     async prepare() { calls.push("prepare"); return ready; },
     async transcribe(samples) {
       calls.push("transcribe");
@@ -443,11 +444,11 @@ test("scheduler delegates CPU prepare, timing, cancellation and release to the s
         await new Promise<void>((resolve) => { releaseBlocked = resolve; started(); });
         throw new Error("child closed");
       }
-      return { text: "", decodeMs: 7, model: CPU_PRESET.model,
+      return { text: "", decodeMs: 7, model: CPU_PRESETS["sweep/score-2"].model,
         comparison: { loadMs: 10, modelConstructionMs: 8, processingMs: 3, workerWallMs: 4, firstUse: true } };
     },
     async closeAndWait() { calls.push("closeAndWait"); releaseBlocked?.(); },
-  } });
+  } } });
   const context = { signal: new AbortController().signal };
   const request: SetupExecution = { operation: "transcribe", setupId: "sweep/score-2",
     requestId: "cpu-1", pcm: createCanonicalPcm(new Float32Array([0.5])) };
@@ -469,16 +470,44 @@ test("scheduler delegates CPU prepare, timing, cancellation and release to the s
   assert.ok(calls.filter((call) => call === "closeAndWait").length >= 3);
 });
 
+test("each CPU setup has its own child, so one list's take never waits on or reuses the other's", async () => {
+  const calls: string[] = [];
+  const fake = (id: "sweep/score-2" | "tm/today") => ({
+    async prepare(): Promise<CpuReady> {
+      calls.push(`${id} prepare`);
+      return { type: "ready", version: 1, preset: CPU_PRESETS[id], load: { loadMs: 1, modelConstructionMs: 1 }, assets: {} };
+    },
+    async transcribe() {
+      calls.push(`${id} transcribe`);
+      return { text: id, decodeMs: 1, model: CPU_PRESETS[id].model,
+        comparison: { loadMs: 1, modelConstructionMs: 1, processingMs: 1, workerWallMs: 1, firstUse: true } };
+    },
+    async closeAndWait() { calls.push(`${id} close`); },
+  });
+  const executor = new SetupWorkers({ cpu: { "sweep/score-2": fake("sweep/score-2"), "tm/today": fake("tm/today") } });
+  const context = { signal: new AbortController().signal };
+  const pcm = createCanonicalPcm(new Float32Array([0.5]));
+  await executor.load("tm/today", context);
+  await assert.rejects(executor.execute({ operation: "transcribe", setupId: "sweep/score-2", requestId: "a", pcm }, context),
+    /explicit load/);
+  assert.equal((await executor.execute({ operation: "transcribe", setupId: "tm/today", requestId: "b", pcm }, context)).text,
+    "tm/today");
+  await executor.release("tm/today");
+  // A failed take retires only its own setup's child.
+  assert.deepEqual(calls, ["tm/today prepare", "sweep/score-2 close", "tm/today transcribe", "tm/today close"]);
+  await executor.close();
+});
+
 test("close awaits a CPU preparation already in flight before its final child retirement", async () => {
   let release!: () => void;
   const preparing = new Promise<CpuReady>((resolve) => { release = () => resolve({ type: "ready", version: 1,
-    preset: CPU_PRESET, load: { loadMs: 1, modelConstructionMs: 1 }, assets: {} }); });
+    preset: CPU_PRESETS["sweep/score-2"], load: { loadMs: 1, modelConstructionMs: 1 }, assets: {} }); });
   let closes = 0;
-  const executor = new SetupWorkers({ cpu: {
+  const executor = new SetupWorkers({ cpu: { "sweep/score-2": {
     prepare: () => preparing,
     async transcribe() { throw new Error("unused"); },
     async closeAndWait() { closes++; },
-  } });
+  } } });
   const pending = assert.rejects(executor.load("sweep/score-2", { signal: new AbortController().signal }), /closed/);
   let settled = false;
   const closing = executor.close().then(() => { settled = true; });
@@ -546,5 +575,9 @@ test("live words feed a loaded worker, mark it used, and reject a malformed part
   const signal = new AbortController().signal;
   await executor.load("hex/unified", { signal });
   assert.equal((await executor.feed("hex/unified", new Float32Array(7), true, { signal })).stable, " heard 7");
+  assert.equal((await executor.feed("hex/unified", new Float32Array(1), true, { signal }, { lookaheadMs: 480 })).tentative,
+    ' maybe {"lookaheadMs": 480}', "a start's settings reach the backend");
+  assert.equal((await executor.feed("hex/unified", new Float32Array(1), false, { signal }, { lookaheadMs: 480 })).tentative,
+    " maybe", "settings go only with a start");
   await assert.rejects(executor.feed("sweep/score-2", new Float32Array(1), true, { signal }), /final text only/);
 });

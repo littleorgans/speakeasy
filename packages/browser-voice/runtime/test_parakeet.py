@@ -392,6 +392,16 @@ parakeet.Backend({'setupId': 'mlx-parakeet/v3-greedy', 'modelPath': '/missing/sn
             fresh = backend.feed(samples(chunk), True)
             self.assertEqual(fresh["stable"], "", "start opens a fresh stream")
             self.assertEqual(sum(event[0] == "transcribe-stream" for event in runtime.events), 1)
+            runtime.events.clear()
+            chosen = backend.feed(samples(chunk * 2), True, {"updateMs": 1_600})
+            self.assertEqual([event for event in runtime.events if event[0] in ("transcribe-stream", "add-audio")],
+                             [("transcribe-stream", (64, 64), 1, True), ("add-audio", chunk * 2)],
+                             "the chosen update size reaches parakeet-mlx")
+            for bad in ({"updateMs": 320}, {"windowMs": 5_120}, {"updateMs": True}, {"depth": 2}, []):
+                with self.subTest(bad=bad), self.assertRaises(ValueError):
+                    backend.feed(samples(1), True, bad)
+            with self.assertRaises(ValueError):
+                backend.feed(samples(1), False, {"updateMs": 800})
             backend.close()
             self.assertIs(runtime.model.encoder.layers[0].self_attn, runtime.stock_attention[1][0])
             with self.assertRaises(ValueError):

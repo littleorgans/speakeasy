@@ -10,8 +10,10 @@ import { LOCAL_OUTPUT_MODELS, LOCAL_OUTPUT_REGISTRY } from "../../speech-io/src/
 class FakeExecutor implements SetupExecutor {
   calls: SetupExecution[] = [];
   fed: [SetupId, number, boolean][] = [];
-  async feed(setupId: SetupId, samples: Float32Array, start: boolean) {
+  settings: unknown[] = [];
+  async feed(setupId: SetupId, samples: Float32Array, start: boolean, _context?: unknown, settings?: unknown) {
     this.fed.push([setupId, samples.length, start]);
+    this.settings.push(settings);
     return { stable: " Clear the", tentative: " scream", processingMs: 3 };
   }
   async load() { return { startupMs: 0, loadMs: 0, firstUse: true }; }
@@ -43,6 +45,20 @@ test("the road test flag serves the road test page at the root; the room keeps t
   for (const asset of ["/road-test.css", "/road-test.js", "/road-test-text.js", "/mic-capture.js", "/voice-readback.js", "/talk-over.js"]) {
     assert.equal((await fetch(road.url + asset)).status, 200, asset);
   }
+});
+
+test("the host serves every module the road test page imports", async (t) => {
+  const { server } = await host(t, { home: "road-test" });
+  const seen = new Set<string>();
+  const visit = async (path: string): Promise<void> => {
+    if (seen.has(path)) return;
+    seen.add(path);
+    const response = await fetch(server.url + path);
+    assert.equal(response.status, 200, path);
+    for (const [, child] of (await response.text()).matchAll(/^import .* from "(\/[^"]+)";$/gm)) await visit(child!);
+  };
+  await visit("/road-test.js");
+  assert.ok(seen.has("/live-trail.js") && seen.size > 5, [...seen].join(" "));
 });
 
 test("a live take transcribes without a prompt reader; saved takes still need one", async (t) => {
@@ -101,16 +117,29 @@ test("live words stream mic frames to a streaming setup's model and answer with 
   await next(1);
   assert.deepEqual(events[0], { type: "error", takeId: null, message: "Qwen3 ASR with known words gives final text only" });
   socket.send(JSON.stringify({ type: "begin", takeId: "t2", setupId: "mlx-cleanup/qwen-targeted" }));
+  await next(2);
+  assert.equal(events[1].message, "Ultra plus Qwen cleanup gives final text only",
+    "the page names the live model itself; a cleanup setup's is its base");
+  socket.send(JSON.stringify({ type: "begin", takeId: "t3", setupId: "mlx-parakeet/ultra-greedy", settings: { updateMs: 1_200 } }));
   socket.send(new Float32Array(320));
-  await next(4);
-  assert.deepEqual(events.slice(1).map((event) => [event.type, event.takeId]), [["loading", "t2"], ["ready", "t2"], ["partial", "t2"]]);
-  assert.equal(events[3].stable + events[3].tentative, " Clear the scream");
-  assert.deepEqual(executor.fed, [["mlx-parakeet/ultra-greedy", 320, true]], "cleanup shows its base model's words");
-  socket.send(JSON.stringify({ type: "end", takeId: "t2" }));
+  await next(6);
+  assert.deepEqual(events[2], { type: "stream", takeId: "t3", setupId: "mlx-parakeet/ultra-greedy",
+    settings: { updateMs: 1_200 } }, "the host names the stream and every setting it applies");
+  assert.deepEqual(events.slice(3).map((event) => [event.type, event.takeId]), [["loading", "t3"], ["ready", "t3"], ["partial", "t3"]]);
+  assert.equal(events[5].stable + events[5].tentative, " Clear the scream");
+  assert.deepEqual(executor.fed, [["mlx-parakeet/ultra-greedy", 320, true]]);
+  assert.deepEqual(executor.settings, [{ updateMs: 1_200 }]);
+  socket.send(JSON.stringify({ type: "end", takeId: "t3" }));
   socket.send(new Float32Array(320));
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(executor.fed.length, 1, "frames after end are dropped");
+  for (const [settings, message] of [[{ updateMs: 320 }, "unsupported updateMs"], [{ lookaheadMs: 480 }, "unknown live setting lookaheadMs"]]) {
+    const count = events.length;
+    socket.send(JSON.stringify({ type: "begin", takeId: "t4", setupId: "mlx-parakeet/v3-greedy", settings }));
+    await next(count + 1);
+    assert.equal(events[count].message, message);
+  }
   socket.send("{\"type\":\"begin\"}");
-  await next(5);
-  assert.equal(events[4].message, "takeId required");
+  await next(events.length + 1);
+  assert.equal(events.at(-1).message, "takeId required");
 });

@@ -5,10 +5,10 @@ import { fileURLToPath } from "node:url";
 import {
   assertLivePartial, MAX_HEADER_BYTES as MAX_WORKER_HEADER_BYTES, MAX_PCM_BYTES as MAX_WORKER_PCM_BYTES,
   MAX_TEXT_BYTES as MAX_WORKER_TEXT_BYTES, SETUP_PROTOCOL_VERSION, sha256 as hash,
-  type LivePartial, type PcmIdentity, type SetupId, type SetupExecution, type SetupExecutionContext,
+  type LivePartial, type LiveSettings, type PcmIdentity, type SetupId, type SetupExecution, type SetupExecutionContext,
   type SetupExecutionResult, type SetupExecutor, type SetupLoadResult,
 } from "./setup-protocol.ts";
-import type { ChildTranscriber, CpuReady } from "./transcriber.ts";
+import { isCpuSetupId, type ChildTranscriber, type CpuReady, type CpuSetupId } from "./transcriber.ts";
 import { isWorkerOutput, LOCAL_OUTPUT_MODELS, type LocalOutputModelId } from "../../speech-io/src/tts/catalogue.ts";
 
 export { MAX_WORKER_HEADER_BYTES, MAX_WORKER_PCM_BYTES, MAX_WORKER_TEXT_BYTES };
@@ -30,9 +30,11 @@ export type PythonVoiceResult = {
   samples: Float32Array; sampleRate: number; processingMs: number; firstUse: boolean;
   startupLoadWallMs: number; workerWallMs: number;
 };
+/** Every speech in setup that runs in the Python worker: all but the sherpa CPU setups. */
+export type PythonSetupId = Exclude<SetupId, CpuSetupId>;
 export type PythonWorkerOptions = {
   /** A Python speech in setup or a worker voice; the wire field keeps its setupId name. */
-  setupId: Exclude<SetupId, "sweep/score-2"> | LocalOutputModelId;
+  setupId: PythonSetupId | LocalOutputModelId;
   pythonPath: string;
   workerPath?: string;
   backendOptions?: Record<string, unknown>;
@@ -175,11 +177,12 @@ export class PythonSetupWorker {
     return this.#run("load", {}, Buffer.alloc(0), signal);
   }
 
-  /** Live words after an explicit load; start opens a fresh stream in the worker. */
-  feed(samples: Float32Array, start: boolean, signal?: AbortSignal): Promise<LivePartial> {
+  /** Live words after an explicit load; start opens a fresh stream in the worker, with its settings. */
+  feed(samples: Float32Array, start: boolean, signal?: AbortSignal, settings?: LiveSettings): Promise<LivePartial> {
     try {
       const { body, identity } = canonicalPcm(samples);
-      return this.#run("feed", { ...wireIdentity(identity), start }, body, signal, true);
+      return this.#run("feed", { ...wireIdentity(identity), start, ...(start && settings ? { settings } : {}) },
+        body, signal, true);
     } catch (error) { return Promise.reject(error); }
   }
 
@@ -418,109 +421,140 @@ export class PythonSetupWorker {
   }
 }
 
+type CpuTranscriber = Pick<ChildTranscriber, "prepare" | "transcribe" | "closeAndWait">;
 export type SetupWorkersOptions = {
-  python?: Partial<Record<Exclude<SetupId, "sweep/score-2">, Omit<PythonWorkerOptions, "setupId">>>;
-  /** Supply one dedicated ChildTranscriber constructed with mode: "sweep/score-2". */
-  cpu?: Pick<ChildTranscriber, "prepare" | "transcribe" | "closeAndWait">;
+  python?: Partial<Record<PythonSetupId, Omit<PythonWorkerOptions, "setupId">>>;
+  /** One dedicated ChildTranscriber per CPU setup, constructed with that setup id as its mode. */
+  cpu?: Partial<Record<CpuSetupId, CpuTranscriber>>;
 };
 
 /** Scheduler executor. CPU child ownership and advanced IPC remain in ChildTranscriber. */
 export class SetupWorkers implements SetupExecutor {
   readonly #python = new Map<SetupId, PythonSetupWorker>();
-  readonly #cpu: SetupWorkersOptions["cpu"];
-  #cpuReady: CpuReady | undefined;
-  #cpuUsed = false;
-  #cpuBusy = false;
-  #cpuFinished: Promise<void> | undefined;
+  readonly #cpu = new Map<CpuSetupId, CpuSetup>();
   #closed = false;
 
   constructor(options: SetupWorkersOptions = {}) {
-    this.#cpu = options.cpu;
     for (const [setupId, config] of Object.entries(options.python ?? {})) {
       this.#python.set(setupId as SetupId, new PythonSetupWorker({ ...config,
         setupId: setupId as PythonWorkerOptions["setupId"] }));
+    }
+    for (const [setupId, transcriber] of Object.entries(options.cpu ?? {})) {
+      this.#cpu.set(setupId as CpuSetupId, new CpuSetup(transcriber, () => this.#assertOpen()));
     }
   }
 
   async load(setupId: SetupId, { signal }: SetupExecutionContext): Promise<SetupLoadResult> {
     this.#assertOpen();
-    if (setupId !== "sweep/score-2") return this.#worker(setupId).load(signal);
-    return this.#withCpu(signal, async () => {
-      const ready = await this.#cpu!.prepare();
-      const cold = this.#cpuReady !== ready;
-      if (cold) this.#cpuUsed = false;
-      this.#cpuReady = ready;
-      return { startupMs: cold ? null : 0, loadMs: cold ? ready.load.loadMs : 0, firstUse: !this.#cpuUsed };
-    });
+    return isCpuSetupId(setupId) ? this.#cpuSetup(setupId).load(signal) : this.#worker(setupId).load(signal);
   }
 
   async execute(request: SetupExecution, context: SetupExecutionContext): Promise<SetupExecutionResult> {
     this.#assertOpen();
-    if (request.setupId !== "sweep/score-2") {
-      const result = await this.#worker(request.setupId).execute(request, context);
-      return { text: result.text, processingMs: result.processingMs, workerWallMs: result.workerWallMs,
-        ...(result.decodeMs !== undefined ? { decodeMs: result.decodeMs } : {}),
-        ...(result.rawText !== undefined ? { rawText: result.rawText } : {}),
-        ...(result.diagnostics ? { diagnostics: result.diagnostics } : {}) };
-    }
-    return this.#withCpu(context.signal, async () => {
-      if (!this.#cpuReady || request.operation !== "transcribe") throw new Error("CPU requires explicit load");
-      const result = await this.#cpu!.transcribe(request.pcm.samples);
+    if (isCpuSetupId(request.setupId)) return this.#cpuSetup(request.setupId).execute(request, context.signal);
+    const result = await this.#worker(request.setupId).execute(request, context);
+    return { text: result.text, processingMs: result.processingMs, workerWallMs: result.workerWallMs,
+      ...(result.decodeMs !== undefined ? { decodeMs: result.decodeMs } : {}),
+      ...(result.rawText !== undefined ? { rawText: result.rawText } : {}),
+      ...(result.diagnostics ? { diagnostics: result.diagnostics } : {}) };
+  }
+
+  /** Live words: only the Python setups whose backend streams answer; others reject in the worker. */
+  async feed(setupId: SetupId, samples: Float32Array, start: boolean, { signal }: SetupExecutionContext,
+    settings?: LiveSettings): Promise<LivePartial> {
+    this.#assertOpen();
+    if (isCpuSetupId(setupId)) throw new SetupWorkerError(`${setupId} gives final text only`);
+    return this.#worker(setupId).feed(samples, start, signal, settings);
+  }
+
+  async release(setupId: SetupId): Promise<void> {
+    if (isCpuSetupId(setupId)) return this.#cpu.get(setupId)?.release();
+    return this.#python.get(setupId)?.release();
+  }
+
+  async close(): Promise<void> {
+    this.#closed = true;
+    // Await every child even if a sibling close rejects.
+    const results = await Promise.allSettled([...this.#python.values(), ...this.#cpu.values()].map((worker) => worker.close()));
+    const failure = results.find((result) => result.status === "rejected");
+    if (failure?.status === "rejected") throw failure.reason;
+  }
+
+  #assertOpen(): void { if (this.#closed) throw new SetupWorkerError("workers closed"); }
+  #worker(setupId: PythonSetupId): PythonSetupWorker {
+    const worker = this.#python.get(setupId);
+    if (!worker) throw new SetupWorkerError(`local runtime is not configured for ${setupId}`);
+    return worker;
+  }
+  #cpuSetup(setupId: CpuSetupId): CpuSetup {
+    const setup = this.#cpu.get(setupId);
+    if (!setup) throw new SetupWorkerError("CPU runtime is not configured");
+    return setup;
+  }
+}
+
+/** One fixed list CPU setup: its child, readiness and the one operation it runs at a time. */
+class CpuSetup {
+  readonly #cpu: CpuTranscriber;
+  readonly #assertOpen: () => void;
+  #ready: CpuReady | undefined;
+  #used = false;
+  #busy = false;
+  #finished: Promise<void> | undefined;
+
+  constructor(cpu: CpuTranscriber, assertOpen: () => void) {
+    this.#cpu = cpu;
+    this.#assertOpen = assertOpen;
+  }
+
+  load(signal: AbortSignal): Promise<SetupLoadResult> {
+    return this.#with(signal, async () => {
+      const ready = await this.#cpu.prepare();
+      const cold = this.#ready !== ready;
+      if (cold) this.#used = false;
+      this.#ready = ready;
+      return { startupMs: cold ? null : 0, loadMs: cold ? ready.load.loadMs : 0, firstUse: !this.#used };
+    });
+  }
+
+  execute(request: SetupExecution, signal: AbortSignal): Promise<SetupExecutionResult> {
+    return this.#with(signal, async () => {
+      if (!this.#ready || request.operation !== "transcribe") throw new Error("CPU requires explicit load");
+      const result = await this.#cpu.transcribe(request.pcm.samples);
       if (!result.comparison) throw new Error("CPU executor requires fixed ChildTranscriber mode");
-      this.#cpuUsed = true;
+      this.#used = true;
       return { text: result.text, decodeMs: result.decodeMs, processingMs: result.comparison.processingMs,
         workerWallMs: result.comparison.workerWallMs,
         diagnostics: { modelConstructionMs: result.comparison.modelConstructionMs } };
     });
   }
 
-  /** Live words: only the Python setups whose backend streams answer; others reject in the worker. */
-  async feed(setupId: SetupId, samples: Float32Array, start: boolean, { signal }: SetupExecutionContext): Promise<LivePartial> {
-    this.#assertOpen();
-    if (setupId === "sweep/score-2") throw new SetupWorkerError("sweep/score-2 gives final text only");
-    return this.#worker(setupId).feed(samples, start, signal);
-  }
-
-  async release(setupId: SetupId): Promise<void> {
-    if (setupId !== "sweep/score-2") return this.#python.get(setupId)?.release();
-    if (this.#cpuBusy) throw new SetupWorkerError("CPU worker is busy");
-    this.#cpuReady = undefined;
-    await this.#cpu?.closeAndWait();
+  async release(): Promise<void> {
+    if (this.#busy) throw new SetupWorkerError("CPU worker is busy");
+    this.#ready = undefined;
+    await this.#cpu.closeAndWait();
   }
 
   async close(): Promise<void> {
-    this.#closed = true;
-    this.#cpuReady = undefined;
-    // Await every child even if a sibling close rejects.
-    const activeCpu = this.#cpuFinished;
-    const results = await Promise.allSettled([...this.#python.values()].map((worker) => worker.close())
-      .concat(this.#cpu ? [this.#cpu.closeAndWait()] : []));
-    if (activeCpu) {
-      await activeCpu;
-      await this.#cpu?.closeAndWait();
+    this.#ready = undefined;
+    const active = this.#finished;
+    await this.#cpu.closeAndWait();
+    if (active) {
+      await active;
+      await this.#cpu.closeAndWait();
     }
-    const failure = results.find((result) => result.status === "rejected");
-    if (failure?.status === "rejected") throw failure.reason;
   }
 
-  #assertOpen(): void { if (this.#closed) throw new SetupWorkerError("workers closed"); }
-  #worker(setupId: SetupId): PythonSetupWorker {
-    const worker = this.#python.get(setupId);
-    if (!worker) throw new SetupWorkerError(`local runtime is not configured for ${setupId}`);
-    return worker;
-  }
-
-  async #withCpu<T>(signal: AbortSignal, operation: () => Promise<T>): Promise<T> {
-    if (!this.#cpu) throw new SetupWorkerError("CPU runtime is not configured");
-    if (this.#cpuBusy) throw new SetupWorkerError("CPU worker is busy");
+  async #with<T>(signal: AbortSignal, operation: () => Promise<T>): Promise<T> {
+    if (this.#busy) throw new SetupWorkerError("CPU worker is busy");
     if (signal.aborted) throw new SetupWorkerError("worker cancelled");
-    this.#cpuBusy = true;
+    this.#busy = true;
     let finish!: () => void;
-    this.#cpuFinished = new Promise<void>((resolve) => { finish = resolve; });
+    this.#finished = new Promise<void>((resolve) => { finish = resolve; });
     let retirement: Promise<void> | undefined;
     const cancel = () => {
-      this.#cpuReady = undefined;
-      retirement = this.#cpu!.closeAndWait();
+      this.#ready = undefined;
+      retirement = this.#cpu.closeAndWait();
       // The operation catch below awaits retirement; attach a handler immediately.
       void retirement.catch(() => {});
     };
@@ -531,15 +565,15 @@ export class SetupWorkers implements SetupExecutor {
       this.#assertOpen();
       return result;
     } catch (error) {
-      this.#cpuReady = undefined;
+      this.#ready = undefined;
       await this.#cpu.closeAndWait();
       throw signal.aborted ? new SetupWorkerError("worker cancelled") : error;
     } finally {
       try { await retirement; }
       finally {
         signal.removeEventListener("abort", cancel);
-        this.#cpuBusy = false;
-        this.#cpuFinished = undefined;
+        this.#busy = false;
+        this.#finished = undefined;
         finish();
       }
     }

@@ -14,11 +14,11 @@ export class LiveWords {
     this.serial = 0;
   }
 
-  /** Starts a take led by its pre roll; returns the take's id. */
-  begin(setupId, preRoll) {
+  /** Starts a take on the live model with its settings, led by its pre roll; returns the take's id. */
+  begin(setupId, preRoll, settings) {
     this.end();
     this.takeId = `live-${Date.now()}-${++this.serial}`;
-    this.send(JSON.stringify({ type: "begin", takeId: this.takeId, setupId }));
+    this.send(JSON.stringify({ type: "begin", takeId: this.takeId, setupId, ...(settings ? { settings } : {}) }));
     if (preRoll?.length) this.send(preRoll);
     return this.takeId;
   }
