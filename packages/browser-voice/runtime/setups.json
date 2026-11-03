@@ -245,7 +245,8 @@
       "label": "Hex Parakeet Unified",
       "card": {
         "runtime": "transcribe.cpp 7045d1c, Metal GPU, Hex stream pipeline",
-        "transcript": "partials"
+        "transcript": "partials",
+        "terms": "NVIDIA Open Model License"
       },
       "model": "parakeet-unified-en-0.6b",
       "revision": "826bdbc44c8806630a45c08ed8cef35a36817a17",
@@ -279,7 +280,8 @@
       "label": "Hex Unified with word list",
       "card": {
         "runtime": "transcribe.cpp 7045d1c, Metal GPU, whole take, word list Claude, GPT, Grok, Codex, TM, whoami",
-        "transcript": "final"
+        "transcript": "final",
+        "terms": "NVIDIA Open Model License"
       },
       "model": "parakeet-unified-en-0.6b",
       "revision": "826bdbc44c8806630a45c08ed8cef35a36817a17",

@@ -40,6 +40,8 @@ export const LOCAL_OUTPUT_MODELS = [
     sampleRate: 24_000,
     streaming: "sentence",
     licence: "Apache 2.0 weights and code. misaki's espeak-ng fallback is GPL 3.0. Per voice training provenance and generated audio rights unverified.",
+    /** One short line on the card wherever a licence is not plainly permissive. */
+    terms: "misaki's espeak-ng fallback is GPL 3.0",
     voices: [
       { id: "af_heart", label: "Heart", languages: ["en-US"], speakerId: 0 },
       { id: "am_michael", label: "Michael", languages: ["en-US"], speakerId: 1 },
@@ -54,6 +56,7 @@ export const LOCAL_OUTPUT_MODELS = [
     sampleRate: 24_000,
     streaming: "sentence",
     licence: "CC BY 4.0 weights: attribution required; the model card prohibits voice impersonation without consent. MIT code. Voice bill_boerst from Kyutai's CC0 collection.",
+    terms: "CC BY 4.0, credit required; no voice impersonation without consent",
     voices: [{ id: "bill_boerst", label: "Bill", languages: ["en"], speakerId: 0 }],
   },
   {
@@ -65,6 +68,7 @@ export const LOCAL_OUTPUT_MODELS = [
     sampleRate: 22_050,
     streaming: "sentence",
     licence: "Voice released as public domain. libpiper, and the eSpeak NG it links statically, are GPL 3.0: a runtime licence boundary sherpa does not have, pending packaging review. onnxruntime MIT.",
+    terms: "GPL 3.0 runtime (libpiper, eSpeak NG)",
     voices: [{ id: "kristin", label: "Kristin", languages: ["en-GB"], speakerId: 0 }],
   },
   {

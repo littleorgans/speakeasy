@@ -11,8 +11,9 @@ export function formatBytes(bytes) {
 }
 
 /**
- * Where it runs · size · runtime. The name is the list entry itself; whether
- * words show while you speak is the Live words choice, said once there.
+ * Where it runs · size · runtime · terms where not permissive. The name is the
+ * list entry itself; whether words show while you speak is the Live words
+ * choice, said once there.
  */
 export function inputCard(setup) {
   const ready = setup.readiness?.ready === true;
@@ -20,6 +21,7 @@ export function inputCard(setup) {
     "Local",
     formatBytes(setup.readiness?.sizeBytes) ?? "size unknown",
     setup.card?.runtime ?? "runtime unknown",
+    setup.card?.terms ? `Terms: ${setup.card.terms}` : "",
     ready ? "" : `needs setup: ${setup.readiness?.reason ?? "not configured"}`,
   ].filter(Boolean).join(" · ");
 }
@@ -30,6 +32,7 @@ export function outputCard(model) {
     formatBytes(model.sizeBytes) ?? "size unknown",
     model.runtime ?? "runtime unknown",
     model.streaming === "sentence" ? "streams by sentence" : model.streaming === "pcm" ? "streams audio" : "",
+    model.terms ? `Terms: ${model.terms}` : "",
     model.readiness?.state === "ready" ? "" : `needs setup: ${model.readiness?.reason ?? model.readiness?.state}`,
   ].filter(Boolean).join(" · ");
 }

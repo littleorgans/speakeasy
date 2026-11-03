@@ -51,7 +51,9 @@ Unknown setups or fields are refused at startup.
 1. Add an entry to `runtime/setups.json`. Required: `id`, `label`, `card`,
    `model`, `revision`, `runtime`, `controls`, `operation` (`transcribe`) and
    `maxSamples`. `card.runtime` is the plain text runtime line on the model
-   card; `card.transcript` is `final` or `partials` (Live words below). The card's size is
+   card; `card.transcript` is `final` or `partials` (Live words below);
+   `card.terms` is one short line wherever the licence is not plainly
+   permissive (never drop a model for its licence; show it). The card's size is
    measured from the configured model files. A setup with `baseSetup` also
    loads that setup: it is ready only when its base is, and its size counts both.
 2. Add the id to `SETUP_IDS` in `src/setup-protocol.ts`, in manifest order.
@@ -121,7 +123,8 @@ worker voice: the same Python worker as speech in, answering `speak`.
    `phonemesFrom`; readiness then checks that voice's files too.
 2. Add the browser choice to `LOCAL_OUTPUT_MODELS` in
    `packages/speech-io/src/tts/catalogue.ts`: `id`, `label`, `runtime` (the
-   card's runtime line), voices, sample rate and licence. The card's size is
+   card's runtime line), voices, sample rate and licence, plus `terms`, a
+   short card line, wherever the licence is not plainly permissive. The card's size is
    the sum of the pinned file bytes. A worker voice numbers its `speakerId`s
    from 0 in list order; the worker receives the voice `id`.
 3. Put the payload under the output root and restart.

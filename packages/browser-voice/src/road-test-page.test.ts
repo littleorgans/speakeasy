@@ -42,7 +42,7 @@ test("talk over tracks the noise floor, so steady echo below three times it neve
   assert.equal(detector.push(0.2, time += 0.02)?.type, "onset");
 });
 
-test("model cards are plain text: where it runs, size and runtime", () => {
+test("model cards are plain text: where it runs, size, runtime and terms", () => {
   assert.equal(text.inputCard({ readiness: { ready: true, sizeBytes: 2_509_042_622 },
     card: { runtime: "parakeet-mlx 0.5.3 on MLX, Metal GPU", transcript: "final" } }),
     "Local · 2.5 GB · parakeet-mlx 0.5.3 on MLX, Metal GPU", "the Live words choice says whether words show while you speak");
@@ -51,6 +51,11 @@ test("model cards are plain text: where it runs, size and runtime", () => {
     "Local · size unknown · speech.cpp · needs setup: runtime or model files need setup");
   assert.equal(text.outputCard({ provider: { kind: "local" }, sizeBytes: 63_537_415, runtime: "sherpa-onnx VITS, CPU",
     streaming: "sentence", readiness: { state: "ready" } }), "Local · 64 MB · sherpa-onnx VITS, CPU · streams by sentence");
+  assert.equal(text.inputCard({ readiness: { ready: true, sizeBytes: 731_357_568 },
+    card: { runtime: "transcribe.cpp", transcript: "final", terms: "NVIDIA Open Model License" } }),
+  "Local · 731 MB · transcribe.cpp · Terms: NVIDIA Open Model License", "a terms line where not permissive");
+  assert.equal(text.outputCard({ provider: { kind: "local" }, sizeBytes: 1, runtime: "libpiper", streaming: "sentence",
+    terms: "GPL 3.0 runtime", readiness: { state: "ready" } }), "Local · 1 MB · libpiper · streams by sentence · Terms: GPL 3.0 runtime");
   assert.equal(text.formatDuration(312.4), "312 ms");
   assert.equal(text.formatDuration(1_234), "1.23 s");
   assert.equal(text.formatDuration(null), null);
