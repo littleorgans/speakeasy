@@ -5,7 +5,9 @@ import { trailItems, trailSummary } from "/live-trail.js";
 import { formatDuration, inputCard, liveLine, liveSettingsNote, outputCard, outputLatency, readEvents } from "/road-test-text.js";
 import { chosenSettings, fill, settingColumns } from "/setting-controls.js";
 import { TalkOverDetector } from "/talk-over.js";
+import { VoiceCopy } from "/voice-copy.js";
 import { VoiceReadback } from "/voice-readback.js";
+import { settingsNote, VoiceSettings } from "/voice-settings.js";
 
 /**
  * Road test: pick a local speech in model and voice, hold to speak, see the
@@ -47,8 +49,12 @@ export class RoadTestPage {
       "status", "input-model", "input-card", "output-model", "output-voice", "output-card", "hold", "stop", "level",
       "transcript", "take-models", "input-timings", "output-timings", "interrupt-timings", "replay-take",
       "replay-talk-over", "replay-voice", "echo", "talk-over", "history", "history-head", "history-section", "level-track",
-      "live-model", "live-settings", "live-line", "trail", "trail-summary", "trail-list", "final-settings",
+      "live-model", "live-settings", "live-line", "trail", "trail-summary", "trail-list", "final-settings", "read-again",
     ].map((id) => [id, document.getElementById(id)]));
+    this.voiceSettings = new VoiceSettings({ document, root: document.getElementById("voice-settings"), onChange: () => this.render() });
+    this.voiceCopy = new VoiceCopy({ document, root: document.getElementById("voice-copy"), onChange: () => this.render(),
+      audio: async () => { this.context ??= new AudioContext({ latencyHint: "interactive" }); await this.context.resume(); return this.context; },
+      play: (samples, rate) => this.playSamples(samples, rate) });
     this.setups = [];
     this.voices = [];
     this.liveSelects = new Map();
@@ -109,6 +115,7 @@ export class RoadTestPage {
     this.elements.echo.addEventListener("change", () => void this.reopenMic());
     for (const which of ["take", "talk-over"]) this.elements[`replay-${which}`].addEventListener("click", () => this.replay(which));
     this.elements["replay-voice"].addEventListener("click", () => this.replay("voice"));
+    this.elements["read-again"].addEventListener("click", () => void this.readAgain());
     document.addEventListener("keydown", (event) => {
       if (event.code === "Space") {
         event.preventDefault();
@@ -124,6 +131,7 @@ export class RoadTestPage {
     const model = this.outputModel();
     fill(this.elements["output-voice"], (model?.voices ?? []).map((voice) => ({ value: String(voice.id), label: voice.label })),
       String(model?.defaultVoice ?? ""));
+    this.voiceSettings.show(model);
   }
 
   setup() {
@@ -205,7 +213,8 @@ export class RoadTestPage {
     const interrupt = this.stopVoice(at);
     this.phase = "recording";
     this.run = { setup: this.setup(), liveChoice: this.liveChoice(), finalChoice: this.finalChoice(),
-      selection: this.selection(), voiceLabel: this.voiceLabel(), pressedAt: at, ...(interrupt ? { interrupt } : {}) };
+      selection: this.selection(), voiceLabel: this.voiceLabel(), reading: this.voiceSettings.request(),
+      pressedAt: at, ...(interrupt ? { interrupt } : {}) };
     this.status(LISTENING);
     this.render();
     void this.openAudio().then(() => {
@@ -348,14 +357,21 @@ export class RoadTestPage {
 
   async speak(run) {
     if (!run.selection) { this.phase = "idle"; this.status("Choose a voice to hear the transcript."); return; }
+    const copyMode = run.reading?.settings.copyMode;
+    const copy = this.voiceCopy.request(copyMode);
+    if (copy.error) { this.phase = "idle"; this.status(copy.error); return; }
     this.phase = "speaking";
     this.detector.reset();
     this.status(`Reading back with ${run.voiceLabel}`);
-    const speaking = this.readback.speak({ selection: run.selection, catalogueRevision: this.catalogueRevision, text: run.input.text });
+    const speaking = this.readback.speak({ selection: run.selection, catalogueRevision: this.catalogueRevision, text: run.input.text,
+      settings: run.reading?.settings, reference: copy.reference,
+      restore: async () => (await this.voiceCopy.upload()) ? this.voiceCopy.request(copyMode).reference : null });
     run.voiceRequestedAt = performance.now();
     this.render();
     const output = await speaking;
     run.output = output;
+    // The take row names every setting the host applied off its default.
+    run.voiceLabel = [run.voiceLabel, settingsNote(run.reading?.declared, output.settings, run.reading?.always)].filter(Boolean).join(" · ");
     // Only a stopped reading times its interrupt; a finished one leaves a stop carried from the last take alone.
     if (output.outcome === "stopped" && run.interrupt) run.interrupt.stopMs = output.stopMs;
     run.outputLatency = outputLatency(this.context);
@@ -418,11 +434,27 @@ export class RoadTestPage {
     this.render();
   }
 
+  /** D3: the latest transcript again, in the voice and settings chosen now; the last take moves to Earlier takes. */
+  async readAgain() {
+    const last = this.run;
+    if (!last?.input?.text || this.phase !== "idle" || !this.readback) return;
+    this.stopReplay();
+    this.run = { setup: last.setup, liveChoice: last.liveChoice, live: last.live, input: last.input, take: last.take,
+      selection: this.selection(), voiceLabel: this.voiceLabel(), reading: this.voiceSettings.request() };
+    await this.speak(this.run);
+    this.remember(this.run);
+    this.render();
+  }
+
   /** Replays the latest take, what was said over the voice, or the voice. */
   replay(which) {
     const run = this.run;
     const [samples, rate] = { take: [run?.take, SAMPLE_RATE], "talk-over": [run?.cutInTake, SAMPLE_RATE],
       voice: [run?.output?.samples, run?.output?.sampleRate] }[which];
+    this.playSamples(samples, rate);
+  }
+
+  playSamples(samples, rate) {
     if (!samples?.length || !rate || !this.context) return;
     this.stopReplay();
     const buffer = this.context.createBuffer(1, samples.length, rate);
@@ -471,6 +503,7 @@ export class RoadTestPage {
     const model = this.outputModel();
     this.elements["input-card"].textContent = setup ? inputCard(setup) : "";
     this.elements["output-card"].textContent = model ? outputCard(model) : "";
+    this.voiceCopy.show(model, this.elements["output-voice"].value);
     hold.setAttribute("aria-pressed", String(this.gate.capturing));
     hold.disabled = !setup?.readiness?.ready || this.phase === "cut-in";
     stop.disabled = !this.readback?.active;
@@ -488,6 +521,7 @@ export class RoadTestPage {
     this.elements["replay-take"].disabled = !run?.take;
     this.elements["replay-talk-over"].hidden = !run?.cutInTake;
     this.elements["replay-voice"].disabled = !run?.output?.samples?.length;
+    this.elements["read-again"].disabled = !run?.input?.text || this.phase !== "idle";
     this.renderTimings(run);
     this.renderHistory();
   }

@@ -6,17 +6,21 @@ import { concat, PreRollRing } from "/pre-roll.js";
  * owns. Idle frames feed the pre roll ring; a take holds its pre roll plus
  * every frame until the worklet answers the take's flush, so no frame of one
  * take reaches the next. Every frame also reaches onFrame, for level meters
- * and voice detection.
+ * and voice detection. `rate` (16 kHz unless given) is the frames' sample
+ * rate; `constraints` replace the shared capture constraints, as a voice copy
+ * recording does to keep the voice unprocessed.
  */
 export class MicCapture {
-  constructor({ context, onFrame = () => {} }) {
+  constructor({ context, onFrame = () => {}, rate = 16_000, constraints = CAPTURE_AUDIO_CONSTRAINTS }) {
     this.context = context;
     this.onFrame = onFrame;
+    this.rate = rate;
+    this.constraints = constraints;
     this.node = null;
     this.stream = null;
     this.source = null;
-    this.echoCancellation = CAPTURE_AUDIO_CONSTRAINTS.echoCancellation;
-    this.ring = new PreRollRing();
+    this.echoCancellation = constraints.echoCancellation;
+    this.ring = new PreRollRing(rate);
     this.take = null;
     this.draining = [];
   }
@@ -36,14 +40,14 @@ export class MicCapture {
     this.echoCancellation = echoCancellation;
     if (!this.node) {
       await this.context.audioWorklet.addModule("/capture-worklet.js");
-      this.node = new AudioWorkletNode(this.context, "speak-easy-capture");
+      this.node = new AudioWorkletNode(this.context, "speak-easy-capture", { processorOptions: { targetRate: this.rate } });
       this.node.port.onmessage = (event) => this.frame(event.data);
       const silent = this.context.createGain();
       silent.gain.value = 0;
       this.node.connect(silent).connect(this.context.destination);
     }
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { ...CAPTURE_AUDIO_CONSTRAINTS, echoCancellation },
+      audio: { ...this.constraints, echoCancellation },
     });
     if (this.stream || echoCancellation !== this.echoCancellation) {
       for (const track of stream.getTracks()) track.stop();

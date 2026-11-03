@@ -8,6 +8,9 @@ const STOP_REPLY_MS = 1_000;
  * worklet node in the caller's context. Times are browser estimates on the
  * performance clock: the context's output timestamp maps rendered audio to
  * the moment it reaches the output device. Keeps each reading's PCM for replay.
+ * A reading may carry voice settings and a voice copy reference; the result
+ * keeps the settings the host applied. When the host no longer holds the
+ * reference, `restore` uploads it again, once, and the reading retries.
  */
 export class VoiceReadback {
   constructor({ context, onChange = () => {} }) {
@@ -37,9 +40,9 @@ export class VoiceReadback {
   }
 
   /** Resolves when the reading drains, stops or fails; never rejects. */
-  async speak({ selection, catalogueRevision, text }) {
+  async speak({ selection, catalogueRevision, text, settings, reference, restore }) {
     this.stop();
-    const job = { selection, catalogueRevision, text, requestedAt: performance.now(), tries: 0,
+    const job = { selection, catalogueRevision, text, settings, reference, restore, requestedAt: performance.now(), tries: 0,
       chunks: [], sampleRate: null, firstAudioAt: null };
     job.done = new Promise((resolve) => { job.resolve = resolve; });
     this.job = job;
@@ -111,15 +114,24 @@ export class VoiceReadback {
     if (event.requestId !== job.requestId && event.requestId !== null) return;
     if (event.type === "output-selected") {
       this.socket.send(JSON.stringify({ type: "speak-sample", requestId: job.requestId, catalogueRevision: event.catalogueRevision,
-        selectionRevision: event.selectionRevision, selection: job.selection, text: job.text }));
+        selectionRevision: event.selectionRevision, selection: job.selection, text: job.text,
+        ...(job.settings ? { settings: job.settings } : {}), ...(job.reference ? { reference: job.reference } : {}) }));
     } else if (event.type === "sample-accepted") {
       job.playbackId = event.playbackId;
+      job.applied = event.settings;
     } else if (event.type === "sample-phase") {
       // The host reports a voice load as the voice opens, so a stopped reading keeps it.
       if (Number.isFinite(event.loadMs)) job.loadMs = event.loadMs;
     } else if (event.type === "sample-error") {
       if (event.code === "BUSY" && ++job.tries < BUSY_RETRY_LIMIT) {
         setTimeout(() => { if (this.job === job && !job.stopping) this.request(job); }, BUSY_RETRY_MS);
+      } else if (event.code === "REFERENCE_MISSING" && job.restore && !job.restored) {
+        job.restored = true;
+        void job.restore().then((reference) => {
+          if (this.job !== job || job.stopping) return;
+          if (!reference) this.finish(job, { outcome: "error", message: event.message });
+          else { job.reference = reference; this.request(job); }
+        });
       } else this.finish(job, { outcome: "error", message: event.message });
     } else if (event.type === "sample-complete") {
       const hostFirstAudio = event.timing?.serverFirstAudioReadyMs;
@@ -184,7 +196,8 @@ export class VoiceReadback {
     for (const chunk of job.chunks) { samples.set(chunk, offset); offset += chunk.length; }
     job.resolve({ outcome: result.outcome, message: result.message ?? "", firstAudioMs: since(job.firstAudioAt),
       totalMs: result.outcome === "finished" ? since(job.endAt) : null, stopMs: result.stopMs ?? null,
-      hostFirstAudioMs: job.hostFirstAudioMs ?? null, loadMs: job.loadMs ?? null, samples, sampleRate: job.sampleRate });
+      hostFirstAudioMs: job.hostFirstAudioMs ?? null, loadMs: job.loadMs ?? null, samples, sampleRate: job.sampleRate,
+      settings: job.applied ?? null });
     this.onChange();
   }
 }

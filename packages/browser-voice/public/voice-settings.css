@@ -1,0 +1,32 @@
+/* Voice settings and the voice copy panel under Speech out, on the road test page's grid and type. */
+.voice-settings, .voice-copy { display: grid; gap: 16px; }
+
+.voice-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+
+.voice-settings input, .voice-copy textarea {
+  font: inherit;
+  color: var(--ink);
+  background: var(--tile);
+  border: 1px solid var(--rule-2);
+  border-radius: 6px;
+  min-height: 40px;
+  padding: 0 16px;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.voice-copy textarea { padding: 8px 16px; resize: vertical; }
+
+.voice-settings input:disabled, .voice-settings select:disabled { color: var(--ink-3); border-color: var(--rule); }
+
+.voice-settings .pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+
+.sampling summary { width: fit-content; cursor: pointer; }
+
+.sampling .voice-columns { margin-top: 16px; }
+
+.voice-copy .replay { align-items: center; }
+
+@media (max-width: 640px) {
+  .voice-columns { grid-template-columns: 1fr; }
+}

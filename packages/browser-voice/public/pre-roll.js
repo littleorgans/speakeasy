@@ -8,7 +8,9 @@ export const PRE_ROLL_SAMPLES = (SAMPLE_RATE * PRE_ROLL_MS) / 1_000;
  * the prompt reader.
  */
 export class PreRollRing {
-  constructor() {
+  /** rate: the capture's sample rate, 16 kHz unless the caller records at another. */
+  constructor(rate = SAMPLE_RATE) {
+    this.limit = (rate * PRE_ROLL_MS) / 1_000;
     this.clear();
   }
 
@@ -17,18 +19,18 @@ export class PreRollRing {
     this.samples = 0;
   }
 
-  /** Keeps the last PRE_ROLL_SAMPLES of idle audio, in whole frames. */
+  /** Keeps the last PRE_ROLL_MS of idle audio, in whole frames. */
   push(samples) {
     this.frames.push(samples);
     this.samples += samples.length;
-    while (this.samples - this.frames[0].length >= PRE_ROLL_SAMPLES) {
+    while (this.samples - this.frames[0].length >= this.limit) {
       this.samples -= this.frames.shift().length;
     }
   }
 
-  /** Returns the last PRE_ROLL_SAMPLES and empties the ring. */
+  /** Returns the last PRE_ROLL_MS of samples and empties the ring. */
   take() {
-    const preRoll = concat(this.frames).slice(-PRE_ROLL_SAMPLES);
+    const preRoll = concat(this.frames).slice(-this.limit);
     this.clear();
     return preRoll;
   }
