@@ -394,6 +394,46 @@
       "maxSamples": 1920000
     },
     {
+      "id": "apple/speech",
+      "label": "Apple on device speech",
+      "card": {
+        "runtime": "SpeechAnalyzer and SpeechTranscriber, macOS 27",
+        "transcript": "partials",
+        "size": "system managed",
+        "terms": "Apple macOS licence; system managed weights"
+      },
+      "model": "SpeechTranscriber en-US",
+      "revision": "system managed",
+      "runtime": {
+        "framework": "Speech, macOS 27",
+        "worker": "runtime/apple_speech/worker.swift built by runtime/apple_speech/build.py",
+        "target": "arm64-apple-macos27.0",
+        "weights": "system managed, reserved with AssetInventory"
+      },
+      "quantization": "system managed",
+      "controls": {
+        "locale": "en-US",
+        "transcriptionOptions": [],
+        "reportingOptions": [
+          "volatileResults"
+        ],
+        "attributeOptions": [
+          "audioTimeRange"
+        ],
+        "feedSamples": 2560,
+        "converter": "AnalyzerInputConverter",
+        "priority": "userInitiated",
+        "modelRetention": "processLifetime",
+        "ignoresResourceLimits": false,
+        "finalize": "finalizeAndFinishThroughEndOfInput",
+        "gate": "off",
+        "rewrite": "off",
+        "source": "stt-ux apple (Main.swift, Audio.swift); modelRetention processLifetime in place of whileInUse"
+      },
+      "operation": "transcribe",
+      "maxSamples": 1920000
+    },
+    {
       "id": "mlx-cleanup/qwen-targeted",
       "label": "Ultra plus Qwen cleanup",
       "card": {

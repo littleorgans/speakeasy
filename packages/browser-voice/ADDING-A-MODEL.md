@@ -32,7 +32,8 @@ JSON with absolute server paths only; `road-test-runtime.example.json` in this
 package shows every entry. Omit a setup to leave it unavailable.
 
 - `python.<setup id>`: `pythonPath` (the interpreter that runs
-  `runtime/worker.py`) and `modelPath` (file or snapshot directory), plus
+  `runtime/worker.py`) and `modelPath` (file or snapshot directory; none
+  where the system manages the weights, as for `apple/speech`), plus
   `libraryPath` for `qwen/context` or `runnerPath` for `hex/unified`.
   Optional `loadTimeoutMs` and `operationTimeoutMs`, positive integers,
   default 120000.
@@ -62,7 +63,7 @@ Unknown setups or fields are refused at startup.
 4. Give it a backend. Python backends live in `runtime/<name>.py` with a
    `Backend` class (`load`, `transcribe`, `close`); register it in `BACKENDS` in
    `runtime/worker.py` and `PYTHON_WORKERS` in `src/setup-workers.ts`. A native
-   binary goes behind a Python backend; `runtime/hex_unified.py` is the
+   binary goes behind a Python backend; `runtime/native_asr.py` is the
    example. Every transcribe.cpp setup shares its worker: add it to `SETUPS`
    there with its model pin and worker mode (`--whole=` modes in
    `runtime/hex/whole.rs`). Its build script builds into a directory of its own under
@@ -71,6 +72,8 @@ Unknown setups or fields are refused at startup.
    server keeps the binary it started with.
 5. Teach `src/server-options.ts` its files: a native path beyond the model goes
    in `EXTRA_LOCATIONS`, and `inspectSetupReadiness` checks the files exist.
+   A model the system manages (no file to pin or size) goes in
+   `SYSTEM_MANAGED` and sets `card.size` to the text its card shows.
 6. Add its paths to `models/road-test-runtime.json` and to
    `road-test-runtime.example.json`, restart, and try it in the page.
 

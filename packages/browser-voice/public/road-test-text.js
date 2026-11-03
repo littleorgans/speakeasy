@@ -19,7 +19,7 @@ export function inputCard(setup) {
   const ready = setup.readiness?.ready === true;
   return [
     "Local",
-    formatBytes(setup.readiness?.sizeBytes) ?? "size unknown",
+    formatBytes(setup.readiness?.sizeBytes) ?? setup.card?.size ?? "size unknown",
     setup.card?.runtime ?? "runtime unknown",
     setup.card?.terms ? `Terms: ${setup.card.terms}` : "",
     ready ? "" : `needs setup: ${setup.readiness?.reason ?? "not configured"}`,

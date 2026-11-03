@@ -10,14 +10,14 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import hex_unified as hexu
+import native_asr as hexu
 import worker
 
 
 FAKE_WORKER = """#!{python}
 import json, struct, sys
 mode = sys.argv[2:]
-print(json.dumps({{"kind": "ready", "backend": "metal", "device": "MTL0", "variant": "{variant}", "loadMs": 5}}), flush=True)
+print(json.dumps({{"kind": "ready", "backend": "{backend}", "device": "MTL0", "variant": "{variant}", "loadMs": 5}}), flush=True)
 fed = 0
 while True:
     head = sys.stdin.buffer.read(5)
@@ -42,9 +42,9 @@ class HexUnifiedTest(unittest.TestCase):
         self.model.write_bytes(b"fake gguf")
         self.addCleanup(shutil.rmtree, self.root)
 
-    def runner(self, variant="unified-en-0.6b"):
+    def runner(self, variant="unified-en-0.6b", backend="metal"):
         path = self.root / "worker"
-        path.write_text(FAKE_WORKER.format(python=sys.executable, variant=variant))
+        path.write_text(FAKE_WORKER.format(python=sys.executable, variant=variant, backend=backend))
         os.chmod(path, 0o755)
         return path
 
@@ -55,7 +55,7 @@ class HexUnifiedTest(unittest.TestCase):
         return patch.dict(hexu.SETUPS[setup_id], {"sha256": hashlib.sha256(b"fake gguf").hexdigest()})
 
     def test_worker_routes_the_setup_to_this_backend(self):
-        self.assertEqual(worker.BACKENDS["hex/unified"], "hex_unified")
+        self.assertEqual(worker.BACKENDS["hex/unified"], "native_asr")
 
     def test_options_require_absolute_paths_and_this_setup(self):
         with self.assertRaises(ValueError):
@@ -128,8 +128,24 @@ class HexUnifiedTest(unittest.TestCase):
         cohere.close()
         with self.assertRaisesRegex(RuntimeError, "identity"), self.pinned("cohere/transcribe"):
             self.backend(self.runner(), "cohere/transcribe").load()
-        self.assertEqual(worker.BACKENDS["hex/vocabulary"], "hex_unified")
-        self.assertEqual(worker.BACKENDS["cohere/transcribe"], "hex_unified")
+        self.assertEqual(worker.BACKENDS["hex/vocabulary"], "native_asr")
+        self.assertEqual(worker.BACKENDS["cohere/transcribe"], "native_asr")
+
+    def test_apple_needs_no_model_file_and_streams_with_fast_results_on_request(self):
+        runner = self.runner("speech-transcriber", "apple")
+        with self.assertRaises(ValueError):
+            hexu.Backend({"setupId": "apple/speech", "runnerPath": str(runner), "modelPath": str(self.model)})
+        backend = hexu.Backend({"setupId": "apple/speech", "runnerPath": str(runner)})
+        metadata = backend.load()
+        self.assertEqual((metadata["modelSha256"], metadata["runtime"]), (None, "Apple Speech, system managed weights"))
+        samples = memoryview(array.array("f", [0.1] * 3).tobytes()).cast("f")
+        self.assertEqual(backend.feed(samples, True)["tentative"], " at 0+0", "volatile results by default")
+        self.assertEqual(backend.feed(samples, True, {"fastResults": 1})["tentative"], " at 1+0")
+        with self.assertRaises(ValueError):
+            backend.feed(samples, True, {"lookaheadMs": 480})
+        self.assertEqual(backend.transcribe(samples)["text"], "heard 3")
+        backend.close()
+        self.assertEqual(worker.BACKENDS["apple/speech"], "native_asr")
 
     def test_identity_mismatch_retires_the_worker(self):
         backend = self.backend(self.runner(variant="other"))

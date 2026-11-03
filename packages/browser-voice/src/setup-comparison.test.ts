@@ -81,7 +81,7 @@ test("registry pins every exact immutable identity and rejects arbitrary ids or 
     "ee78f8709547f39bea3b924a16c72403826cac92", "b86784a3a5356cbd126f710b61cd90c5fe5898f1",
     "b86784a3a5356cbd126f710b61cd90c5fe5898f1", "826bdbc44c8806630a45c08ed8cef35a36817a17",
     "826bdbc44c8806630a45c08ed8cef35a36817a17", "dfa4adebb64f3076b7b6b90b721275cc069cb421",
-    "ebe59e5a817142986528bbbee5dba8db7b38ed50", "8b403126fc14f14cfc99bb4cfa72ecbc129ea677",
+    "ebe59e5a817142986528bbbee5dba8db7b38ed50", "system managed", "8b403126fc14f14cfc99bb4cfa72ecbc129ea677",
   ]);
   assert.equal(getSetup(QWEN).controls.prompt, "launch, claude, grok");
   assert.equal(getSetup(CPU).controls.hotwordsScore, 2);
