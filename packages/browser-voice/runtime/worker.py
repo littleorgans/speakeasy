@@ -30,14 +30,22 @@ BACKENDS = {
     "piper-kristin-split": "native_voice",
     "kokoro-coreml": "native_voice",
     "phonon-31m": "phonon",
-    "qwen3-tts-0.6b": "qwen_tts",
+    "qwen3-tts-0.6b": "qwen_speechcpp",
+    "qwen3-tts-1.7b": "qwen_speechcpp",
+    "qwen3-tts-0.6b-base": "qwen_clone",
+    "qwen3-tts-1.7b-base": "qwen_clone",
     "kokoro-ane-heart": "native_voice",
     "kokoro-ane-folded-heart": "native_voice",
 }
 # Speech out voices answer speak with PCM; they never transcribe.
 VOICES = {"kokoro-mlx-bf16", "pocket-18m", "piper-kristin-split", "kokoro-coreml", "phonon-31m", "qwen3-tts-0.6b",
-          "kokoro-ane-heart", "kokoro-ane-folded-heart"}
+          "qwen3-tts-1.7b", "qwen3-tts-0.6b-base", "qwen3-tts-1.7b-base", "kokoro-ane-heart", "kokoro-ane-folded-heart"}
 MIN_SPEED, MAX_SPEED = 0.5, 2.0
+SPEECH_IN_RATES = (16_000,)
+# A voice copy reference arrives at the browser's own capture rate.
+REFERENCE_RATES = range(16_000, 96_001)
+MAX_SETTINGS = 32
+MAX_SETTING_TEXT = 1_000
 
 
 class ProtocolError(ValueError):
@@ -108,12 +116,12 @@ def envelope(header, setup_id, generation):
     return {key: header[key] for key in ("version", "generation", "id", "setupId", "operation")}
 
 
-def validate_identity(identity):
+def validate_identity(identity, rates=SPEECH_IN_RATES):
     if not isinstance(identity, dict):
         raise ProtocolError("missing PCM identity")
     count = identity.get("sampleCount")
     if (not integer(count, 0, MAX_PCM_BYTES // 4)
-            or type(identity.get("sampleRate")) is not int or identity["sampleRate"] != 16_000
+            or type(identity.get("sampleRate")) is not int or identity["sampleRate"] not in rates
             or type(identity.get("channels")) is not int or identity["channels"] != 1
             or type(identity.get("pcmBytes")) is not int or identity["pcmBytes"] != count * 4):
         raise ProtocolError("invalid PCM identity")
@@ -123,8 +131,8 @@ def validate_identity(identity):
         raise ProtocolError("invalid PCM hash")
 
 
-def pcm_samples(header, body):
-    validate_identity(header)
+def pcm_samples(header, body, rates=SPEECH_IN_RATES):
+    validate_identity(header, rates)
     if hashlib.sha256(body).hexdigest() != header["sha256"]:
         raise ProtocolError("PCM hash mismatch")
     if sys.byteorder == "little":
@@ -163,6 +171,36 @@ def speak_request(header):
     if type(speed) not in (int, float) or not math.isfinite(speed) or not MIN_SPEED <= speed <= MAX_SPEED:
         raise ProtocolError("invalid speak speed")
     return text, voice, float(speed)
+
+
+def speak_execution(header, body, backend):
+    """A reading's settings and reference, refused unless the backend declares it takes them."""
+    settings, reference = header.get("settings"), header.get("reference")
+    if settings is not None:
+        if not getattr(backend, "takes_settings", False):
+            raise ProtocolError("this voice takes no settings")
+        if (not isinstance(settings, dict) or len(settings) > MAX_SETTINGS
+                or any(type(value) not in (int, float, str, bool)
+                       or (type(value) is float and not math.isfinite(value))
+                       or (isinstance(value, str) and len(value) > MAX_SETTING_TEXT) for value in settings.values())):
+            raise ProtocolError("invalid speak settings")
+    if reference is None:
+        if body:
+            raise ProtocolError("unexpected body")
+        return settings, None
+    if not getattr(backend, "takes_reference", False):
+        raise ProtocolError("this voice takes no reference")
+    if (not isinstance(reference, dict)
+            or set(reference) != {"sampleRate", "channels", "sampleCount", "pcmBytes", "sha256", "transcript"}):
+        raise ProtocolError("invalid reference identity")
+    transcript = reference["transcript"]
+    if transcript is not None and (not isinstance(transcript, str) or len(transcript.encode("utf-8")) > MAX_TEXT_BYTES):
+        raise ProtocolError("invalid reference transcript")
+    samples = pcm_samples(reference, body, REFERENCE_RATES)
+    if not samples:
+        raise ProtocolError("empty reference")
+    return settings, {"samples": samples, "sampleRate": reference["sampleRate"], "sha256": reference["sha256"],
+                      "transcript": transcript}
 
 
 def audio_reply(result):
@@ -221,7 +259,7 @@ def handle_request(header, body, backend, setup_id, factory):
     operation = header.get("operation")
     cleanup = setup_id == "mlx-cleanup/qwen-targeted"
     voice = setup_id in VOICES
-    if operation not in ("transcribe", "feed") and body:
+    if operation not in ("transcribe", "feed", "speak") and body:
         raise ProtocolError("unexpected body")
     if operation == "load":
         if backend is not None or not isinstance(header.get("options"), dict):
@@ -236,7 +274,10 @@ def handle_request(header, body, backend, setup_id, factory):
     if backend is None:
         raise ProtocolError("backend is not ready")
     if operation == "speak" and voice:
-        return backend, audio_reply(backend.speak(*speak_request(header)))
+        settings, reference = speak_execution(header, body, backend)
+        # Backends without per reading extras keep their three argument speak.
+        extras = (settings, reference) if reference is not None else (settings,) if settings is not None else ()
+        return backend, audio_reply(backend.speak(*speak_request(header), *extras))
     # Only backends whose engine truly streams answer feed; the rest give final text only.
     if operation == "feed" and not cleanup and not voice and hasattr(backend, "feed"):
         if type(header.get("start")) is not bool:

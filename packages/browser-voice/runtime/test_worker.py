@@ -344,6 +344,59 @@ class WorkerTests(unittest.TestCase):
                 self.assertEqual(code, 1)
                 self.assertEqual(replies[-1]["type"], "error")
 
+    def test_voice_speak_carries_settings_and_a_reference_only_to_backends_that_take_them(self):
+        voice_id = "qwen3-tts-0.6b-base"
+        reference_pcm = struct.pack("<2f", 0.5, -0.25)
+        reference = {**identity(reference_pcm), "sampleRate": 48_000, "transcript": "Hello there."}
+        pcm = struct.pack("<f", 0.5)
+
+        class Copy(Backend):
+            takes_settings = True
+            takes_reference = True
+
+            def speak(self, text, voice, speed, settings=None, reference=None):
+                self.calls.append((text, settings, reference and {**reference, "samples": reference["samples"].tolist()}))
+                return {"samples": pcm, "sampleRate": 24_000, "processingMs": 1}
+
+        speak = lambda **fields: frame("speak", 2, setup_id=voice_id, text="Hi.", voice="ref-3s", speed=1, **fields)
+        code, replies, backend, _, _ = self.run_worker(
+            frame("load", setup_id=voice_id, options={}) + speak(body=reference_pcm, settings={"seed": 7}, reference=reference)
+            + frame("speak", 3, setup_id=voice_id, text="Hi.", voice="ref-3s", speed=1, settings={"seed": 1}),
+            setup_id=voice_id, backend=Copy())
+        self.assertEqual(code, 0)
+        self.assertEqual([reply["type"] for reply in replies], ["ready", "audio", "audio"])
+        self.assertEqual(backend.calls, [
+            ("Hi.", {"seed": 7}, {"samples": [0.5, -0.25], "sampleRate": 48_000, "sha256": reference["sha256"],
+                                  "transcript": "Hello there."}),
+            ("Hi.", {"seed": 1}, None)])
+
+        class Plain(Backend):
+            def speak(self, text, voice, speed):
+                return {"samples": pcm, "sampleRate": 24_000, "processingMs": 1}
+
+        class SettingsOnly(Copy):
+            takes_reference = False
+
+        wrong_hash = {**reference, "sha256": "0" * 64}
+        cases = [(Plain(), speak(settings={"seed": 1})),
+                 (Plain(), speak(body=reference_pcm, reference=reference)),
+                 (SettingsOnly(), speak(body=reference_pcm, reference=reference)),
+                 (Copy(), speak(body=reference_pcm)),
+                 (Copy(), speak(body=reference_pcm, reference=wrong_hash)),
+                 (Copy(), speak(body=reference_pcm, reference={**reference, "sampleRate": 8_000})),
+                 (Copy(), speak(body=reference_pcm, reference={**reference, "transcript": 3})),
+                 (Copy(), speak(reference={**identity(b""), "transcript": None})),
+                 (Copy(), speak(settings=[1])),
+                 (Copy(), speak(settings={"seed": [1]})),
+                 (Copy(), speak(settings={"instructions": "x" * 1_001}))]
+        for failing, request in cases:
+            with self.subTest(backend=type(failing).__name__, request=request[-90:]):
+                code, replies, failed, _, _ = self.run_worker(frame("load", setup_id=voice_id, options={}) + request,
+                                                              setup_id=voice_id, backend=failing)
+                self.assertEqual(code, 1)
+                self.assertEqual(replies[-1]["type"], "error")
+                self.assertEqual(failed.calls, [], "refused before the backend speaks")
+
     def test_imports_are_lazy_and_backend_options_have_fixed_setup(self):
         from unittest.mock import patch
         module = type("Module", (), {"Backend": lambda options: options})

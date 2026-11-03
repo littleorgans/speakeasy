@@ -21,7 +21,10 @@ BACKENDS = [
     ("pocket_18m", "pocket-18m", "bill_boerst", {}, "pocket_tts"),
     ("native_voice", "kokoro-coreml", "af_heart", {"runnerPath": "/r"}, None),
     ("phonon", "phonon-31m", "default", {}, "ptts"),
-    ("qwen_tts", "qwen3-tts-0.6b", "ryan", {"runnerPath": "/r"}, None),
+    ("qwen_speechcpp", "qwen3-tts-0.6b", "ryan", {"runnerPath": "/r"}, None),
+    ("qwen_speechcpp", "qwen3-tts-1.7b", "vivian", {"runnerPath": "/r"}, None),
+    ("qwen_clone", "qwen3-tts-0.6b-base", "ref-3s", {}, "qwen_tts"),
+    ("qwen_clone", "qwen3-tts-1.7b-base", "recording", {}, "qwen_tts"),
     ("native_voice", "kokoro-ane-folded-heart", "af_heart", {"runnerPath": "/r"}, None),
 ]
 
@@ -84,7 +87,8 @@ class VoiceBackendTests(unittest.TestCase):
         for module, voice_id, voice, extra in (("pocket_18m", "pocket-18m", "bill_boerst", {}),
                                                ("native_voice", "kokoro-coreml", "af_heart", {"runnerPath": "/r"}),
                                                ("phonon", "phonon-31m", "default", {}),
-                                               ("qwen_tts", "qwen3-tts-0.6b", "ryan", {"runnerPath": "/r"})):
+                                               ("qwen_speechcpp", "qwen3-tts-0.6b", "ryan", {"runnerPath": "/r"}),
+                                               ("qwen_clone", "qwen3-tts-0.6b-base", "ref-3s", {})):
             backend = self.backend(module, voice_id, extra)
             backend._model = backend._metadata = object()
             with self.subTest(module=module), self.assertRaisesRegex(ValueError, "speed"):
