@@ -98,7 +98,7 @@ test("browser payloads leave legacy CLI model defaults intact", () => {
 });
 
 test("worker voices pin their payload but never load through sherpa", () => {
-  for (const id of ["kokoro-mlx-bf16", "pocket-18m"] as const) {
+  for (const id of ["kokoro-mlx-bf16", "pocket-18m", "piper-kristin-split", "kokoro-coreml"] as const) {
     const model = LOCAL_TTS_MODELS[id];
     assert.equal(model.family, "worker");
     for (const file of model.files) {

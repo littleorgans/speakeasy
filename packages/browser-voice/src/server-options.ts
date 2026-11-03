@@ -18,7 +18,9 @@ const EXTRA_LOCATIONS: Partial<Record<PythonSetupId, "libraryPath" | "runnerPath
   "qwen/context": "libraryPath", "hex/unified": "runnerPath",
 };
 /** The one native location a worker voice needs beyond its interpreter. */
-const VOICE_EXTRA_LOCATIONS: Partial<Record<LocalOutputModelId, "runnerPath">> = {};
+const VOICE_EXTRA_LOCATIONS: Partial<Record<LocalOutputModelId, "runnerPath">> = {
+  "piper-kristin-split": "runnerPath", "kokoro-coreml": "runnerPath",
+};
 const DEFAULT_SETUP_TIMEOUT_MS = 120_000;
 /** Gitignored, machine specific; read when no flag or environment value names another. */
 export const DEFAULT_SETUP_RUNTIME = "models/road-test-runtime.json";
@@ -160,7 +162,7 @@ export async function createSetupRuntime(file?: string, { optional = false } = {
     createSynth: (id: LocalOutputModelId, outputRoot: string) => {
       const location = locations.voices?.[id];
       if (!location || !voices.has(id)) return Promise.reject(new Error("Voice runtime is not configured"));
-      return Promise.resolve(createWorkerVoiceSynth(id, location, outputRoot));
+      return createWorkerVoiceSynth(id, location, outputRoot);
     },
   } };
 }

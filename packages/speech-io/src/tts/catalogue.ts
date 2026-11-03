@@ -56,6 +56,31 @@ export const LOCAL_OUTPUT_MODELS = [
     licence: "CC BY 4.0 weights: attribution required; the model card prohibits voice impersonation without consent. MIT code. Voice bill_boerst from Kyutai's CC0 collection.",
     voices: [{ id: "bill_boerst", label: "Bill", languages: ["en"], speakerId: 0 }],
   },
+  {
+    id: "piper-kristin-split",
+    label: "Piper Kristin split decoder",
+    provider: { kind: "local" },
+    runtime: "libpiper (piper1-gpl 10880972), onnxruntime 1.22.0, CPU",
+    defaultVoice: "kristin",
+    sampleRate: 22_050,
+    streaming: "sentence",
+    licence: "Voice released as public domain. libpiper, and the eSpeak NG it links statically, are GPL 3.0: a runtime licence boundary sherpa does not have, pending packaging review. onnxruntime MIT.",
+    voices: [{ id: "kristin", label: "Kristin", languages: ["en-GB"], speakerId: 0 }],
+  },
+  {
+    id: "kokoro-coreml",
+    label: "Kokoro v1.0 Core ML",
+    provider: { kind: "local" },
+    runtime: "FluidAudio e396cf78 on Core ML, CPU and Neural Engine",
+    defaultVoice: "af_heart",
+    sampleRate: 24_000,
+    streaming: "sentence",
+    licence: "Apache 2.0 weights and FluidAudio code; its prebuilt text normalizer is Apache 2.0 per its manifest, unverified at source. Per voice training provenance and generated audio rights unverified.",
+    voices: [
+      { id: "af_heart", label: "Heart", languages: ["en-US"], speakerId: 0 },
+      { id: "am_michael", label: "Michael", languages: ["en-US"], speakerId: 1 },
+    ],
+  },
 ] as const;
 
 export type LocalOutputModel = typeof LOCAL_OUTPUT_MODELS[number];
@@ -112,7 +137,10 @@ export async function getLocalOutputReadiness(
   }
   try {
     await verifyTtsFiles(join(root, model.name), model.files, model.attribution);
-    if (model.family === "worker") return { state: "ready", reason: null };
+    // A phoneme runtime also needs the sherpa voice whose frontend the host borrows.
+    const frontendVoice = model.family === "worker" && "phonemesFrom" in model ? LOCAL_TTS_MODELS[model.phonemesFrom] : undefined;
+    if (frontendVoice) await verifyTtsFiles(join(root, frontendVoice.name), frontendVoice.files, frontendVoice.attribution);
+    if (model.family === "worker" && !frontendVoice) return { state: "ready", reason: null };
     const frontend = resolveTtsFrontendAssets(root);
     await verifyTtsFiles(frontend.dir, [{ name: "cmudict_data.json", sha256: CMU_DICT.sha256, bytes: CMU_DICT.bytes }]);
     return { state: "ready", reason: null };

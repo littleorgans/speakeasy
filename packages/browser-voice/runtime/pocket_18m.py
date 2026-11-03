@@ -1,8 +1,8 @@
 """Kyutai Pocket TTS 18M, from the fast-tts pocket-18m candidate, as a speech out voice.
 
-Backend options are exactly setupId and an absolute local modelPath (the pinned
-kyutai/pocket-tts-without-voice-cloning snapshot). Construction is lazy; load
-attests the snapshot and runtime, loads the model from pocket-english-18m.yaml
+Backend options are exactly setupId, an absolute local modelPath (the
+kyutai/pocket-tts-without-voice-cloning snapshot) and files, its pins from the
+host registry. Construction is lazy; load attests the snapshot and runtime, loads the model from pocket-english-18m.yaml
 with this snapshot's paths and the bill_boerst voice state. speak renders one
 segment on PyTorch CPU; the host's sentence pipeline plans the segments.
 """
@@ -14,7 +14,7 @@ from pathlib import Path
 import tempfile
 import time
 
-from pins import attest_snapshot, runtime_identity
+from pins import attest_snapshot, pinned_files, runtime_identity
 
 
 VOICE_ID = "pocket-18m"
@@ -23,25 +23,20 @@ RUNTIME_VERSIONS = {"pocket-tts": "4.0.1", "torch": "2.15.0", "sentencepiece": "
 CONFIG = Path(__file__).with_name("pocket-english-18m.yaml")
 SAMPLE_RATE = 24_000
 LANGUAGE = "languages/english_18m_2026-10"
-# kyutai/pocket-tts-without-voice-cloning@a7056f505a4a8ca72d8b5fb1440071d6f1a35739
-FILES = {
-    f"{LANGUAGE}/model.safetensors": (111728528, "599329dcea2f2a8d17b575e1c6e11b78822453c9073040d55c26faadf4883188"),
-    f"{LANGUAGE}/tokenizer.model": (59339, "d461765ae179566678c93091c5fa6f2984c31bbe990bf1aa62d92c64d91bc3f6"),
-    f"{LANGUAGE}/embeddings/bill_boerst.safetensors": (4360600, "927a31d7627daf996efce71ee7898a799a9386738077c3bd401bd1445f6f6657"),
-}
 VOICES = ("bill_boerst",)
 
 
 class Backend:
     def __init__(self, options):
-        if not isinstance(options, dict) or set(options) != {"setupId", "modelPath"}:
-            raise ValueError("Pocket options require exactly setupId and modelPath")
+        if not isinstance(options, dict) or set(options) != {"setupId", "modelPath", "files"}:
+            raise ValueError("Pocket options require exactly setupId, modelPath and files")
         if options["setupId"] != VOICE_ID:
             raise ValueError("Pocket backend requires pocket-18m")
         model_path = options["modelPath"]
         if not isinstance(model_path, str) or "\0" in model_path or not Path(model_path).is_absolute():
             raise ValueError("Pocket modelPath must be absolute")
         self._model_path = Path(model_path)
+        self._files = pinned_files(options["files"], "Pocket")
         self._model = None
         self._state = None
         self._metadata = None
@@ -49,7 +44,7 @@ class Backend:
     def load(self):
         if self._metadata is not None:
             return copy.deepcopy(self._metadata)
-        attest_snapshot(self._model_path, FILES, "Pocket")
+        attest_snapshot(self._model_path, self._files, "Pocket")
         runtime = runtime_identity(PYTHON_VERSION, RUNTIME_VERSIONS, "requirements-pocket-18m.txt", "Pocket")
         os.environ["HF_HUB_OFFLINE"] = "1"  # local snapshot only
         start = time.perf_counter()

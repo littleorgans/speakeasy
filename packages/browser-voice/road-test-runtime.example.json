@@ -32,6 +32,14 @@
     },
     "pocket-18m": {
       "pythonPath": "/absolute/path/to/pocket-18m-py3.12/bin/python"
+    },
+    "piper-kristin-split": {
+      "pythonPath": "/absolute/path/to/any/python3.11-or-later",
+      "runnerPath": "/absolute/path/to/piper-split/10880972/bin/piper-split-worker"
+    },
+    "kokoro-coreml": {
+      "pythonPath": "/absolute/path/to/any/python3.11-or-later",
+      "runnerPath": "/absolute/path/to/kokoro-coreml/e396cf78/KokoroAneWorker"
     }
   }
 }

@@ -78,7 +78,10 @@ worker voice: the same Python worker as speech in, answering `speak`.
 1. Pin the payload files (name, bytes, SHA256; names may include a
    subdirectory) in `LOCAL_TTS_MODELS` in `packages/speech-io/src/tts/models.ts`.
    A worker voice uses `family: "worker"` with its `sampleRate`, `numSpeakers`
-   and `attribution`.
+   and `attribution`; these pins are the only ones, as the worker receives
+   them to attest the files before loading. A runtime that takes phonemes
+   names the sherpa voice whose Piper Plus frontend the host borrows in
+   `phonemesFrom`; readiness then checks that voice's files too.
 2. Add the browser choice to `LOCAL_OUTPUT_MODELS` in
    `packages/speech-io/src/tts/catalogue.ts`: `id`, `label`, `runtime` (the
    card's runtime line), voices, sample rate and licence. The card's size is
@@ -88,19 +91,30 @@ worker voice: the same Python worker as speech in, answering `speak`.
 
 A worker voice also needs:
 
-4. A backend in `runtime/<name>.py`: a `Backend` with `load` and
+4. A backend: a `Backend` taking `setupId`, `modelPath` and `files`, with
+   `load` (attest with `runtime/pins.py`, then load) and
    `speak(text, voice, speed)`, returning little endian Float32 `samples`
    bytes, `sampleRate` and `processingMs` for one part. Register it in
-   `BACKENDS` and `VOICES` in `runtime/worker.py`; `runtime/kokoro_mlx.py`
-   is the example. A native binary goes behind such a backend.
-5. A pinned environment: freeze it to `runtime/requirements-<name>.txt` and
-   build it under `~/Library/Caches/speakeasy/browser-voice-switch/environments/`
-   with `uv`, then run `python -m compileall` on its site packages once; the
-   worker starts Python with `-B`, so without compiled bytecode every start
+   `BACKENDS` and `VOICES` in `runtime/worker.py`. A Python runtime gets its
+   own `runtime/<name>.py` (`runtime/kokoro_mlx.py` is the example). A native
+   runner that speaks the fast-tts frame protocol needs only a `spec` line in
+   `runtime/native_voice.py`, its source and a `build.py` under
+   `runtime/<name>/` that builds into `~/Library/Caches/speakeasy/<name>/`,
+   and `runnerPath` in the runtime file.
+5. For a Python runtime, a pinned environment: freeze it to
+   `runtime/requirements-<name>.txt`, build it under
+   `~/Library/Caches/speakeasy/browser-voice-switch/environments/` with `uv`,
+   then run `python -m compileall` on its site packages once; the worker
+   starts Python with `-B`, so without compiled bytecode every start
    recompiles the libraries (30 s instead of 3 s for Kokoro MLX).
 6. Its interpreter under `voices` in `models/road-test-runtime.json` and in
    `road-test-runtime.example.json`; a native runner also needs its id in
-   `VOICE_EXTRA_LOCATIONS` in `src/server-options.ts`.
+   `VOICE_EXTRA_LOCATIONS` in `src/server-options.ts`. The bridge needs only
+   the standard library of Python 3.11 or later.
+
+Every voice streams by sentence, as the pipeline does. A runtime that could
+stream within a sentence (Pocket's frames, libpiper's decoder chunks) still
+returns each part whole: the worker replies once per request.
 
 ## Check
 

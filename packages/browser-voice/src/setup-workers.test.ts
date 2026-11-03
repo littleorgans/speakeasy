@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import { PythonSetupWorker, SetupWorkers, MAX_WORKER_PCM_BYTES, MAX_WORKER_TEXT_BYTES } from "./setup-workers.ts";
+import { createWorkerVoiceSynth } from "./voice-workers.ts";
 import { createCanonicalPcm, sha256, type SetupExecution, type SetupLoadResult } from "./setup-protocol.ts";
 import { CPU_PRESET, type CpuReady } from "./transcriber.ts";
 
@@ -43,7 +44,7 @@ class Fake:
             raise RuntimeError("load failed")
         if mode in ("sendRace", "exitAfterReady"):
             self.mark()
-        return {"revision": "pinned", "loadMs": 2, "pid": os.getpid()}
+        return {"revision": "pinned", "setupId": self.options.get("setupId"), "loadMs": 2, "pid": os.getpid()}
     def transcribe(self, samples):
         self.calls += 1
         if mode == "ignoreTerm":
@@ -67,7 +68,7 @@ class Fake:
     def speak(self, text, voice, speed):
         if mode == "badAudio":
             return {"samples": b"\\0\\0\\xc0\\x7f", "sampleRate": 24000, "processingMs": 1}
-        pcm = struct.pack("<3f", len(text), speed, -0.0)
+        pcm = struct.pack("<4f", len(text), speed, -0.0, len(voice))
         return {"samples": pcm, "sampleRate": 24000, "processingMs": 2}
     def close(self):
         path = self.options.get("closeMarker")
@@ -75,7 +76,7 @@ class Fake:
             with open(path, "w") as target:
                 target.write("closed")
 def factory(setup, options):
-    return Fake(options)
+    return Fake({**options, "setupId": setup})
 def write(target, header, pcm=b""):
     header = dict(header)
     if header["type"] == "audio" and mode == "audioHashMismatch":
@@ -488,7 +489,7 @@ test("a worker voice speaks one segment and returns its exact PCM, checked again
   const worker = voice();
   t.after(() => worker.close());
   const first = await worker.speak("Hi.", "af_heart", 1.5);
-  assert.deepEqual([...first.samples], [3, 1.5, -0]);
+  assert.deepEqual([...first.samples], [3, 1.5, -0, 8]);
   assert.ok(Object.is(first.samples[2], -0));
   assert.equal(first.sampleRate, 24000);
   assert.equal(first.processingMs, 2);
@@ -503,4 +504,16 @@ test("a worker voice speaks one segment and returns its exact PCM, checked again
     t.after(() => failing.close());
     await assert.rejects(failing.speak("Hi.", "af_heart", 1), mode === "badAudio" ? /finite/ : /invalid voice audio/);
   }
+});
+
+test("a worker voice synth maps the pipeline's speaker to the registry voice and passes the pins", async (t) => {
+  const synth = await createWorkerVoiceSynth("kokoro-mlx-bf16", { pythonPath: PYTHON, loadTimeoutMs: 3000 }, directory, fixture);
+  t.after(() => synth.close());
+  assert.equal(synth.numSpeakers, 2);
+  assert.equal(synth.sampleRate, 24000);
+  const michael = await synth.synth({ text: "Hi.", sid: 1, speed: 1 });
+  assert.deepEqual([...michael.samples], [3, 1, -0, "am_michael".length]);
+  assert.equal(michael.audioDurationMs, 4 / 24);
+  assert.equal((await synth.synth({ text: "Hi." })).samples[3], "af_heart".length, "speaker 0 is the default voice");
+  await assert.rejects(synth.synth({ text: "Hi.", sid: 2 }), /Invalid TTS speaker/);
 });

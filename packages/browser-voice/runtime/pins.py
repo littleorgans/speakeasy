@@ -5,6 +5,21 @@ import importlib.metadata
 import platform
 
 
+def pinned_files(value, label):
+    """The host registry's pins for a voice: a list of name, bytes and sha256, as a name to (size, digest) map."""
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{label} options require the pinned files")
+    files = {}
+    for entry in value:
+        if (not isinstance(entry, dict) or set(entry) != {"name", "bytes", "sha256"}
+                or not isinstance(entry["name"], str) or not entry["name"] or ".." in entry["name"].split("/")
+                or entry["name"].startswith("/") or type(entry["bytes"]) is not int or entry["bytes"] <= 0
+                or not isinstance(entry["sha256"], str) or len(entry["sha256"]) != 64):
+            raise ValueError(f"{label} pinned file entries need a relative name, bytes and sha256")
+        files[entry["name"]] = (entry["bytes"], entry["sha256"])
+    return files
+
+
 def attest_snapshot(model_path, files, label):
     """Checks every pinned file's size and SHA256 before any runtime sees the path."""
     if not model_path.is_dir():

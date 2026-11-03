@@ -128,6 +128,10 @@ test("worker voices take an interpreter from the runtime file; only an existing 
     "a sherpa voice has no worker runtime");
   assert.throws(() => parseSetupRuntimeLocations({ voices: { "kokoro-mlx-bf16": { ...python, modelPath: "/m" } } }));
   assert.throws(() => parseSetupRuntimeLocations({ voices: { "kokoro-mlx-bf16": { pythonPath: "relative/python" } } }));
+  assert.throws(() => parseSetupRuntimeLocations({ voices: { "kokoro-coreml": { ...python, runnerPath: "relative" } } }),
+    /absolute/, "a native voice needs an absolute runner");
+  assert.throws(() => parseSetupRuntimeLocations({ voices: { "kokoro-mlx-bf16": { ...python, runnerPath: "/r" } } }),
+    "only native voices take a runner");
   const root = await mkdtemp(join(tmpdir(), "speakeasy-voice-runtime-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   for (const [pythonPath, configured] of [[process.execPath, true], [join(root, "missing-python"), false]] as const) {
