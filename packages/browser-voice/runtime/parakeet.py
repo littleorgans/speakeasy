@@ -85,6 +85,26 @@ def _validate_snapshot(model_path, spec):
     return verified
 
 
+def _framed_stft(x, n_fft, hop_length, win_length, window):
+    """parakeet-mlx's stft with its frames kept inside the padded audio.
+
+    The stock stft (0.5.3, unchanged in 0.6.0) counts frames by win_length but
+    reads n_fft samples per frame, so the last frame reads past the buffer. Its
+    zero window tail hides finite bytes there; NaN or Inf left in a reused
+    Metal buffer, as the live stream's local attention leaves, turns the whole
+    mel to NaN and the final to a run of <unk>. Zeros take their place here:
+    the same frames and values the stock stft gives on clean memory.
+    """
+    import mlx.core as mx
+    tail = n_fft - win_length
+    padding = n_fft // 2
+    padded = mx.concatenate([x[1:padding + 1][::-1], x, x[-(padding + 1):-1][::-1],
+                             mx.zeros((tail,), dtype=x.dtype)])
+    frames = (padded.size - tail - win_length + hop_length) // hop_length
+    framed = mx.as_strided(padded, shape=[frames, n_fft], strides=[hop_length, 1])
+    return mx.fft.rfft(framed * mx.pad(window, [(0, tail)]))
+
+
 def _runtime_identity():
     python_version = platform.python_version()
     if python_version != PYTHON_VERSION:
@@ -125,8 +145,7 @@ class Backend:
         import numpy as np
         import mlx.core as mx
         from mlx.utils import tree_flatten
-        from parakeet_mlx import from_pretrained, DecodingConfig, Greedy
-        from parakeet_mlx.audio import get_logmel
+        from parakeet_mlx import audio, from_pretrained, DecodingConfig, Greedy
         import_ms = (time.perf_counter() - imported) * 1000
         if not mx.metal.is_available() or not mx.is_available(mx.gpu):
             raise ValueError("Parakeet requires Metal and the MLX GPU device")
@@ -141,8 +160,13 @@ class Backend:
             mx.eval(model.parameters())
             mx.synchronize(gpu_stream)
             load_ms = (time.perf_counter() - start) * 1000
-            if model.preprocessor_config.sample_rate != 16000:
+            preprocessing = model.preprocessor_config
+            if preprocessing.sample_rate != 16000:
                 raise ValueError("Parakeet preprocessing must use 16000 Hz")
+            if not 0 < preprocessing.win_length <= preprocessing.n_fft:
+                raise ValueError("Parakeet preprocessing window must fit its FFT")
+            # Both the stream's and the final's get_logmel call this module's stft.
+            audio.stft = _framed_stft
             config = DecodingConfig(decoding=Greedy())
             weights = tree_flatten(model.parameters())
             dtypes = sorted({str(value.dtype) for _, value in weights})
@@ -153,7 +177,7 @@ class Backend:
         self._model = model
         self._gpu_stream = gpu_stream
         self._decoding_config = config
-        self._get_logmel = get_logmel
+        self._get_logmel = audio.get_logmel
         self._metadata = {
             "setupId": self._setup_id,
             "repo": self._spec["repo"],

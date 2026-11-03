@@ -65,6 +65,7 @@ class FakeRuntime:
         self.now = 0.0
         self.text = "  launch, Claude\n"
         self.sample_rate = 16000
+        self.win_length = 400
         self.mel_shape = (1, 4, 128)
         self.mel_dtype = "mlx.core.float32"
         self.weight_dtype = "mlx.core.bfloat16"
@@ -104,6 +105,8 @@ class FakeRuntime:
         self.api.DecodingConfig = self.decoding_config
         self.audio_api = types.ModuleType("parakeet_mlx.audio")
         self.audio_api.get_logmel = self.get_logmel
+        self.audio_api.stft = "stock-stft"
+        self.api.audio = self.audio_api
         self.utils = types.ModuleType("mlx.utils")
         self.utils.tree_flatten = lambda parameters: [
             (str(index), types.SimpleNamespace(dtype=self.weight_dtype))
@@ -156,7 +159,8 @@ class FakeRuntime:
         self.stock_attention = ("stock-pos", [object(), object()])
         model = types.SimpleNamespace(
             parameters=lambda: "model-parameters",
-            preprocessor_config=types.SimpleNamespace(sample_rate=self.sample_rate),
+            preprocessor_config=types.SimpleNamespace(sample_rate=self.sample_rate, win_length=self.win_length,
+                                                      n_fft=512),
             generate=self.generate,
             encoder=types.SimpleNamespace(pos_enc="stock-pos",
                                           layers=[types.SimpleNamespace(self_attn=attention)
@@ -210,6 +214,38 @@ class FakeRuntime:
             yield
 
 
+class FakeVector:
+    """A list backed MLX vector: as_strided raises on any read past the buffer, as Metal does not."""
+
+    def __init__(self, values, dtype="mlx.core.float32"):
+        self.values, self.dtype = list(values), dtype
+
+    @property
+    def size(self):
+        return len(self.values)
+
+    def __getitem__(self, index):
+        return FakeVector(self.values[index], self.dtype)
+
+    def __rmul__(self, frames):
+        return [[value * weight for value, weight in zip(frame, self.values, strict=True)] for frame in frames]
+
+
+def fake_stft_mx():
+    def as_strided(vector, *, shape, strides):
+        (count, width), (step, one) = shape, strides
+        if one != 1 or (count - 1) * step + width > vector.size:
+            raise IndexError("frame reads past the padded audio")
+        return [vector.values[start:start + width] for start in range(0, count * step, step)]
+    mx = types.ModuleType("mlx.core")
+    mx.concatenate = lambda parts: FakeVector(value for part in parts for value in part.values)
+    mx.zeros = lambda shape, *, dtype: FakeVector([0.0] * shape[0], dtype)
+    mx.as_strided = as_strided
+    mx.pad = lambda vector, widths: FakeVector([0.0] * widths[0][0] + vector.values + [0.0] * widths[0][1])
+    mx.fft = types.SimpleNamespace(rfft=lambda frames: frames)
+    return mx
+
+
 class BackendTests(unittest.TestCase):
     def backend(self, setup_id=SETUP_IDS[0]):
         return parakeet.Backend({"setupId": setup_id, "modelPath": "/local/pinned/snapshot"})
@@ -259,7 +295,28 @@ parakeet.Backend({'setupId': 'mlx-parakeet/v3-greedy', 'modelPath': '/missing/sn
                 self.assertIsNone(metadata["warmupMs"])
                 self.assertAlmostEqual(metadata["loadMs"], 207.0)
                 self.assertNotIn("generate", [event[0] for event in runtime.events])
+                self.assertIs(runtime.audio_api.stft, parakeet._framed_stft,
+                              "the stream's and the final's get_logmel both frame inside the audio")
                 json.dumps(metadata, allow_nan=False)
+
+    def test_stft_frames_stay_inside_the_padded_audio(self):
+        # Parakeet's preprocessing: n_fft 512, hop 160, a 400 sample Hann window. The stock stft
+        # counts frames by win_length, so its last frame reads n_fft - win_length samples on.
+        n_fft, hop, width = 512, 160, 400
+        for count in (6_000, 65_388):
+            audio = [math.sin(index / 7) for index in range(count)]
+            window = [1.0 + index for index in range(width)]
+            padded = audio[256:0:-1] + audio + audio[-2:-258:-1]
+            frames = (len(padded) - width + hop) // hop
+            with self.subTest(count=count), patch.dict(sys.modules, {"mlx": types.ModuleType("mlx"),
+                                                                      "mlx.core": fake_stft_mx()}):
+                self.assertGreater((frames - 1) * hop + n_fft, len(padded), "the stock framing overruns")
+                result = parakeet._framed_stft(FakeVector(audio), n_fft, hop, width, FakeVector(window))
+            self.assertEqual(len(result), frames)
+            for index in (0, frames // 2, frames - 1):
+                stock = padded[index * hop:index * hop + width]
+                self.assertEqual(result[index][:width], [value * weight for value, weight in zip(stock, window)])
+                self.assertEqual(result[index][width:], [0.0] * (n_fft - width))
 
     def test_snapshot_validation_precedes_native_imports(self):
         with patch.object(parakeet, "_validate_snapshot", side_effect=ValueError("bad snapshot")), \
@@ -270,7 +327,7 @@ parakeet.Backend({'setupId': 'mlx-parakeet/v3-greedy', 'modelPath': '/missing/sn
 
     def test_load_rejects_runtime_and_model_drift(self):
         for field, value in [("metal_available", False), ("gpu_available", False),
-                             ("stream_device", "cpu"), ("sample_rate", 8000),
+                             ("stream_device", "cpu"), ("sample_rate", 8000), ("win_length", 513),
                              ("weight_dtype", "mlx.core.float32"), ("weight_count", 696)]:
             runtime = FakeRuntime()
             setattr(runtime, field, value)
