@@ -28,6 +28,7 @@ type FakeRuntime = WhistleRuntime & {
   threads: number[];
   calls: { samples: number; language: string | undefined }[];
   maxConcurrent: number;
+  released: number;
 };
 
 /** A runtime whose recognizer answers from `results` in order. */
@@ -43,6 +44,7 @@ function fakeRuntime(
     threads: [],
     calls: [],
     maxConcurrent: 0,
+    released: 0,
     createRecognizer: async (files, { threads }) => {
       if (failures-- > 0) throw new Error("load failed");
       runtime.created.push(files);
@@ -58,7 +60,9 @@ function fakeRuntime(
           if (result instanceof Error) throw result;
           return result;
         },
-        release: async () => {},
+        release: async () => {
+          runtime.released += 1;
+        },
       };
     },
   };
@@ -226,6 +230,16 @@ test("a failed load is retried on the next open", async () => {
   await assert.rejects(engine.open(), /load failed/);
   await engine.open();
   assert.equal(runtime.created.length, 1);
+});
+
+test("release frees the recognizer once and the next open loads it again", async () => {
+  const runtime = fakeRuntime();
+  const engine = await engineWith(runtime);
+  await engine.open();
+  await Promise.all([engine.release(), engine.release()]);
+  assert.equal(runtime.released, 1);
+  await engine.open();
+  assert.equal(runtime.created.length, 2);
 });
 
 test("open rejects a sample rate other than 16 kHz", async () => {

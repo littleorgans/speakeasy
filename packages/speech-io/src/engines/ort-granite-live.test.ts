@@ -65,6 +65,7 @@ for (const id of Object.keys(GRANITE_MODELS) as GraniteModelId[]) {
         once(session, "empty").then(() => "empty"),
       ]);
       await session.end();
+      await engine.release();
       t.diagnostic(`label: ${engine.label}`);
       t.diagnostic(`decodeMs (cold, warm, warm): ${decodeMs.join(", ")}`);
       t.diagnostic(`2 s of zeros: ${silence}`);

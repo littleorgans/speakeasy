@@ -1,8 +1,8 @@
 import { join } from "node:path";
-import { assertSampleRate, SPEECH_SAMPLE_RATE } from "../audio/pcm.js";
 import type { STTConfig, STTSession, VoiceToText } from "../contract.ts";
 import { ensureAsset, type FileSetSpec } from "./assets.ts";
-import { BufferedOfflineSession, type SilenceGate } from "./offline-session.ts";
+import { OfflineLifecycle } from "./offline-engine.ts";
+import type { SilenceGate } from "./offline-session.ts";
 import { resultText, type ResultDetail } from "./result.ts";
 import {
   resolveWhistleFiles,
@@ -59,15 +59,35 @@ export class OrtWhistleEngine implements VoiceToText {
   readonly model: WhistleModel;
   readonly paths: FileSetSpec;
   readonly #runtime: WhistleRuntime;
-  readonly #silenceGate: SilenceGate | undefined;
-  #recognizer: Promise<WhistleRecognizer> | undefined;
-  #decoding: Promise<unknown> = Promise.resolve();
+  readonly #lifecycle: OfflineLifecycle<void, WhistleRecognizer>;
 
   constructor(options: OrtWhistleEngineOptions) {
     this.model = resolveWhistleModel(options.model);
     this.paths = resolveWhistleFiles(this.model, options.modelRoot);
     this.#runtime = options.runtime;
-    this.#silenceGate = options.silenceGate;
+    // A failed load is retried on the next open.
+    this.#lifecycle = new OfflineLifecycle({
+      name: "OrtWhistleEngine",
+      maxAudioMs: this.model.maxAudioMs,
+      silenceGate: options.silenceGate,
+      prepare: "preflight",
+      serial: true,
+      preflight: () => ensureAsset(this.paths),
+      load: () =>
+        this.#runtime.createRecognizer(
+          {
+            encoder: this.#file(this.model.encoder),
+            decoder: this.#file(this.model.decoder),
+            pack: this.#file(this.model.pack),
+          },
+          { threads: this.threads },
+        ),
+      release: (recognizer) => recognizer.release(),
+      decoder: (recognizer, config) => {
+        const language = supportedLanguage(this.model, config?.language);
+        return async (audio) => whistleDetail(await recognizer.transcribe(audio, language));
+      },
+    });
   }
 
   get label(): string {
@@ -78,51 +98,21 @@ export class OrtWhistleEngine implements VoiceToText {
     return ortThreads(this.model);
   }
 
-  async prepare(): Promise<void> {
-    await ensureAsset(this.paths);
+  prepare(): Promise<void> {
+    return this.#lifecycle.prepare();
   }
 
-  async open(config?: STTConfig): Promise<STTSession> {
-    assertSampleRate("OrtWhistleEngine", config);
-    const recognizer = await this.#load();
-    const language = supportedLanguage(this.model, config?.language);
-    const maxSamples = (this.model.maxAudioMs * SPEECH_SAMPLE_RATE) / 1_000;
-    return new BufferedOfflineSession(
-      maxSamples,
-      (audio) =>
-        this.#serialized(async () =>
-          whistleDetail(await recognizer.transcribe(audio, language)),
-        ),
-      this.#silenceGate,
-    );
+  open(config?: STTConfig): Promise<STTSession> {
+    return this.#lifecycle.open(config);
   }
 
-  #load(): Promise<WhistleRecognizer> {
-    this.#recognizer ??= this.prepare().then(() =>
-      this.#runtime.createRecognizer(
-        {
-          encoder: this.#file(this.model.encoder),
-          decoder: this.#file(this.model.decoder),
-          pack: this.#file(this.model.pack),
-        },
-        { threads: this.threads },
-      ),
-    );
-    // A failed load is retried on the next open.
-    this.#recognizer.catch(() => {
-      this.#recognizer = undefined;
-    });
-    return this.#recognizer;
+  /** Free the recognizer's native sessions; a later open() loads them again. */
+  release(): Promise<void> {
+    return this.#lifecycle.release();
   }
 
   #file(name: string): string {
     return join(this.paths.dir, name);
-  }
-
-  #serialized<T>(work: () => Promise<T>): Promise<T> {
-    const result = this.#decoding.then(work, work);
-    this.#decoding = result.catch(() => undefined);
-    return result;
   }
 }
 

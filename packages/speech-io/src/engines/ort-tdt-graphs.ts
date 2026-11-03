@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { concatFrames } from "../audio/pcm.js";
+import { releaseAll } from "./offline-engine.ts";
 import {
   frontendChunks,
   logMel,
@@ -232,10 +233,6 @@ async function loadSplitGraphs(
     },
     release: () => releaseAll(frontend, encoder, decoder, joint),
   };
-}
-
-async function releaseAll(...graphs: OrtGraph[]): Promise<void> {
-  await Promise.all(graphs.map((graph) => graph.release()));
 }
 
 function output(outputs: Record<string, OrtTensor>, name: string): OrtTensor {

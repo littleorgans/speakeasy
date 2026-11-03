@@ -32,6 +32,7 @@ type Fake = {
   runs: Record<string, Feeds[]>;
   steps: Float32Array[];
   created: string[];
+  released: string[];
   /** Intra op threads per graph file. */
   threads: Record<string, number>;
   failure?: Error;
@@ -122,7 +123,12 @@ function fakeBinding(fake: Fake): OrtBinding {
       fake.created.push(basename(path));
       fake.threads[basename(path)] = threads;
       const run = fakeGraph(basename(path), fake);
-      const graph: OrtGraph = { run: async (feeds) => run(feeds), release: async () => {} };
+      const graph: OrtGraph = {
+        run: async (feeds) => run(feeds),
+        release: async () => {
+          fake.released.push(basename(path));
+        },
+      };
       return graph;
     },
     tensor: (type, data, dims) => tensor(type, data, dims),
@@ -160,7 +166,7 @@ async function seededRoot(id: OrtTdtModelId): Promise<string> {
 }
 
 async function openSession(id: OrtTdtModelId, steps: Float32Array[] = [], silenceGate?: SilenceGate) {
-  const fake: Fake = { runs: {}, steps, created: [], threads: {} };
+  const fake: Fake = { runs: {}, steps, created: [], released: [], threads: {} };
   const engine = new OrtTdtEngine({
     model: id,
     modelRoot: await seededRoot(id),
@@ -303,4 +309,12 @@ test("the engine loads each graph once across sessions and refuses other rates",
     "preprocessor-model.onnx",
   ]);
   await assert.rejects(engine.open({ sampleRate: 48_000 }), /16000 Hz/);
+});
+
+test("release frees every graph once and the next open loads them again", async () => {
+  const { engine, fake } = await openSession("en-fluid-speech-mini");
+  await Promise.all([engine.release(), engine.release()]);
+  assert.deepEqual(fake.released.sort(), ["decoder.onnx", "encoder.onnx", "frontend.onnx", "joint.onnx"]);
+  await engine.open();
+  assert.equal(fake.created.length, 8);
 });

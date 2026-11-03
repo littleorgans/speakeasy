@@ -27,6 +27,7 @@ type FakeRuntime = CtcRuntime & {
   /** Argmax id per output frame for the next run; missing frames are blank. */
   script: (number[] | Error)[];
   failLoads: number;
+  released: number;
 };
 
 function fakeRuntime(script: (number[] | Error)[] = []): FakeRuntime {
@@ -37,6 +38,7 @@ function fakeRuntime(script: (number[] | Error)[] = []): FakeRuntime {
     runs: [],
     script,
     failLoads: 0,
+    released: 0,
     async loadGraph(path, { threads }) {
       fake.loads.push(path);
       fake.threads.push(threads);
@@ -53,7 +55,9 @@ function fakeRuntime(script: (number[] | Error)[] = []): FakeRuntime {
           const ids = Array.from({ length: outFrames }, (_, frame) => next[frame] ?? 0);
           return logitsFor(ids, VOCAB_SIZE);
         },
-        async release() {},
+        async release() {
+          fake.released += 1;
+        },
       };
     },
   };
@@ -151,6 +155,14 @@ test("one graph serves every session; a failed load is retried", async () => {
   assert.deepEqual(runtime.threads, [ORT_THREADS, ORT_THREADS]);
   assert.equal(engine.threads, ORT_THREADS);
   assert.equal(engine.label, "onnxruntime-node-fake:granite-speech-5.0-470m-turboctc-onnx-int8");
+});
+
+test("release frees the graph once and the next open loads it again", async () => {
+  const { engine, runtime } = await openSession();
+  await Promise.all([engine.release(), engine.release()]);
+  assert.equal(runtime.released, 1);
+  await engine.open();
+  assert.equal(runtime.loads.length, 2);
 });
 
 test("the engine refuses other sample rates and unknown models", async () => {

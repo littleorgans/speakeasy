@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import * as ort from "onnxruntime-node";
+import { releaseAll } from "./offline-engine.ts";
 import { createCpuSession, ORT_VERSION } from "./ort-runtime.ts";
 import type { WhistleFiles, WhistleRecognizer, WhistleRuntime } from "./ort-whistle.ts";
 import { OrtBackend } from "./vendor/whistle/backend.js";
@@ -46,8 +47,6 @@ async function createWhistleRecognizer(
   return {
     transcribe: (pcm, language) =>
       transcribe(backend, context, pcm, { timestamps: true, language }),
-    release: async () => {
-      await Promise.all([encoder.release(), decoder.release()]);
-    },
+    release: () => releaseAll(encoder, decoder),
   };
 }

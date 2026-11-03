@@ -1,7 +1,7 @@
-import { assertSampleRate, SPEECH_SAMPLE_RATE } from "../audio/pcm.js";
 import type { STTConfig, STTSession, VoiceToText } from "../contract.ts";
 import { ensureAsset, type FileSetSpec } from "./assets.ts";
-import { BufferedOfflineSession, type SilenceGate } from "./offline-session.ts";
+import { OfflineLifecycle } from "./offline-engine.ts";
+import type { SilenceGate } from "./offline-session.ts";
 import { greedyTdt, tdtResult } from "./ort-tdt-decode.ts";
 import { loadTdtGraphs, type OrtBinding, type TdtGraphs } from "./ort-tdt-graphs.ts";
 import {
@@ -37,14 +37,23 @@ export class OrtTdtEngine implements VoiceToText {
   readonly model: OrtTdtModel;
   readonly paths: FileSetSpec;
   readonly #binding: OrtBinding;
-  readonly #silenceGate: SilenceGate | undefined;
-  #graphs: Promise<TdtGraphs> | undefined;
+  readonly #lifecycle: OfflineLifecycle<void, TdtGraphs>;
 
   constructor(options: OrtTdtEngineOptions) {
     this.model = resolveOrtTdtModel(options.model);
     this.paths = resolveOrtTdtPaths(this.model, options.modelRoot);
     this.#binding = options.binding;
-    this.#silenceGate = options.silenceGate;
+    // One set of graphs serves every session; a failed load is retried.
+    this.#lifecycle = new OfflineLifecycle({
+      name: "OrtTdtEngine",
+      maxAudioMs: this.model.maxAudioMs,
+      silenceGate: options.silenceGate,
+      prepare: "preflight",
+      preflight: () => ensureAsset(this.paths),
+      load: () => loadTdtGraphs(this.model, this.paths.dir, this.#binding, this.threads),
+      release: (graphs) => graphs.release(),
+      decoder: (graphs) => (audio) => this.#decode(graphs, audio),
+    });
   }
 
   get label(): string {
@@ -55,37 +64,17 @@ export class OrtTdtEngine implements VoiceToText {
     return ortThreads(this.model);
   }
 
-  async prepare(): Promise<void> {
-    await ensureAsset(this.paths);
+  prepare(): Promise<void> {
+    return this.#lifecycle.prepare();
   }
 
-  async open(config?: STTConfig): Promise<STTSession> {
-    assertSampleRate("OrtTdtEngine", config);
-    const graphs = await this.#load();
-    const maxSamples = (this.model.maxAudioMs * SPEECH_SAMPLE_RATE) / 1_000;
-    return new BufferedOfflineSession(
-      maxSamples,
-      (audio) => this.#decode(graphs, audio),
-      this.#silenceGate,
-    );
+  open(config?: STTConfig): Promise<STTSession> {
+    return this.#lifecycle.open(config);
   }
 
   /** Free the native sessions; a later open() loads them again. */
-  async release(): Promise<void> {
-    const graphs = this.#graphs;
-    this.#graphs = undefined;
-    await (await graphs)?.release();
-  }
-
-  #load(): Promise<TdtGraphs> {
-    // One set of graphs serves every session; a failed load is retried.
-    this.#graphs ??= this.prepare()
-      .then(() => loadTdtGraphs(this.model, this.paths.dir, this.#binding, this.threads))
-      .catch((err: unknown) => {
-        this.#graphs = undefined;
-        throw err;
-      });
-    return this.#graphs;
+  release(): Promise<void> {
+    return this.#lifecycle.release();
   }
 
   async #decode(graphs: TdtGraphs, audio: Float32Array): Promise<ResultDetail> {
