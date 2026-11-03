@@ -42,6 +42,7 @@ async function roomHarness(mode: "hold" | "natural") {
     createElement: element,
   };
   const workletPorts: PagePort[] = [];
+  const nodes: AudioWorkletNode[] = [];
   const contexts: AudioContext[] = [];
   const audioWaits: { mic?: Promise<unknown>; module?: Promise<void>; resume?: Promise<void> } = {};
   class AudioContext {
@@ -55,8 +56,9 @@ async function roomHarness(mode: "hold" | "natural") {
     createMediaStreamSource() { return { connect: (node: unknown) => node, disconnect() {} }; }
   }
   class AudioWorkletNode {
-    port: PagePort = { postMessage() {} };
-    constructor() { workletPorts.push(this.port); }
+    posted: unknown[] = [];
+    port: PagePort = { postMessage: (data) => this.posted.push(data) };
+    constructor() { workletPorts.push(this.port); nodes.push(this); }
     connect(node: unknown) { return node; }
     disconnect() {}
   }
@@ -94,7 +96,9 @@ async function roomHarness(mode: "hold" | "natural") {
     window: { setTimeout, clearTimeout, addEventListener(type: string, callback: (event: any) => void) { listeners.set(type, callback); } },
   });
   vm.runInContext(readFileSync(new URL("../public/capture-constraints.js", import.meta.url), "utf8").replace(/^export /gm, ""), context);
-  vm.runInContext(readFileSync(new URL("../public/capture-session.js", import.meta.url), "utf8").replace(/^import .*;$/gm, "").replace(/^export /gm, ""), context);
+  for (const name of ["capture-session.js", "room-audio.js"]) {
+    vm.runInContext(readFileSync(new URL(`../public/${name}`, import.meta.url), "utf8").replace(/^import .*;$/gm, "").replace(/^export /gm, ""), context);
+  }
   vm.runInContext(readFileSync(new URL("../public/speech-observations.js", import.meta.url), "utf8").replace(/^export /gm, ""), context);
   vm.runInContext(readFileSync(new URL("../public/speech-output-controls.js", import.meta.url), "utf8").replace(/^import .*;$/gm, "").replace(/^export /gm, ""), context);
   vm.runInContext(source, context);
@@ -117,7 +121,7 @@ async function roomHarness(mode: "hold" | "natural") {
   const audio = () => sent.filter((data) => data instanceof ArrayBuffer).map((data) => new Float32Array(data as ArrayBuffer));
   const commands = () => sent.filter((data) => typeof data === "string").map((data) => JSON.parse(data as string));
   const acknowledge = (changes = {}, target = socket) => target.event({ ...commands().findLast((command: any) => command.type === "select-output"), type: "output-selected", selectionRevision: 11, ...changes });
-  return { room, frame, sent, audio, elements, listeners, socket, sockets, commands, acknowledge, track, audioWaits, contexts, nativeTarget: new HTMLElement() };
+  return { room, frame, sent, audio, elements, listeners, socket, sockets, commands, acknowledge, track, audioWaits, contexts, nodes, nativeTarget: new HTMLElement() };
 }
 
 const samplesOf = (buffers: Float32Array[]) => preRoll.concat(buffers);
@@ -155,6 +159,24 @@ test("natural mode streams every frame with no pre roll", async () => {
   frame(1);
   frame(2);
   assert.deepEqual(audio().map((samples) => samples[0]), [1, 2]);
+});
+
+test("host playback commands and audio packets reach the playback worklet, and its drain reaches the host", async () => {
+  const { socket, nodes, commands } = await roomHarness("natural");
+  const playback = nodes[1]!;
+  socket.event({ type: "playback", action: "start", playbackId: 7, sampleRate: 24_000 });
+  const packet = new ArrayBuffer(9 + 8);
+  const header = new DataView(packet);
+  header.setUint8(0, 1);
+  header.setUint32(1, 7, true);
+  header.setUint32(5, 24_000, true);
+  new Uint8Array(packet, 9).set(new Uint8Array(Float32Array.of(0.25, -0.5).buffer));
+  socket.listeners.get("message")!({ data: packet });
+  socket.listeners.get("message")!({ data: new ArrayBuffer(4) });
+  assert.equal(JSON.stringify(playback.posted), JSON.stringify([{ kind: "start", playbackId: 7, sampleRate: 24_000 },
+    { kind: "audio", playbackId: 7, sampleRate: 24_000, samples: { 0: 0.25, 1: -0.5 } }]), "a short packet plays nothing");
+  playback.port.onmessage!({ data: { kind: "drained", playbackId: 7, audioEndMs: 120 } });
+  assert.deepEqual(commands(), [{ type: "playback-drained", playbackId: 7, audioEndMs: 120 }]);
 });
 
 test("room Space preserves focused native controls and releases only its keyboard hold", async () => {
@@ -242,7 +264,7 @@ for (const phase of ["mic", "module", "resume", "connect", "selection"] as const
   assert.equal(h.commands().some((command) => command.type === "start"), false);
   assert.equal(h.commands().filter((command) => command.type === "select-output").length, phase === "selection" ? 1 : 0);
   assert.equal(h.track.stopped, true);
-  assert.equal(h.room.capture, null);
+  assert.equal(h.room.audio.open, false);
   assert.ok(h.contexts.every((context) => context.state === "closed"));
 });
 
@@ -433,7 +455,7 @@ for (const kind of ["cartesia", "openai"]) test(`guard failure during ${kind} ro
     await settle();
     assert.equal(h.captured.context!.speechOutputContext!.signal!.aborted, true);
     assert.equal(h.room.sessionPhase, "stopped");
-    assert.equal(h.room.capture, null);
+    assert.equal(h.room.audio.open, false);
     assert.equal(h.lease.active, undefined);
     assert.equal(h.transports, 0);
     assert.equal(h.events.some((event) => event.phase === "ready"), false);
@@ -491,7 +513,7 @@ for (const failedRetirement of [false, true]) test(`guard failure between actual
       await assert.rejects(h.session.close());
     } else {
       assert.equal(h.room.sessionPhase, "stopped");
-      assert.equal(h.room.capture, null);
+      assert.equal(h.room.audio.open, false);
       assert.equal(h.lease.active, undefined);
     }
     assert.throws(() => h.captured.context!.speechOutputContext!.getKey!());

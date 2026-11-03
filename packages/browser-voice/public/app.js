@@ -1,18 +1,16 @@
-import { CaptureSession } from "/capture-session.js";
 import { HoldReleaseGate } from "/hold-release.js";
+import { RoomAudio } from "/room-audio.js";
 import { SpeechOutputControls, loadRoomSettings, clampPause, SETTINGS_KEY } from "/speech-output-controls.js";
-
-const AUDIO_HEADER_BYTES = 9;
-const AUDIO_PACKET_KIND = 1;
 
 class SpeakEasyRoom {
   constructor() {
     this.socket = null;
     this.socketPromise = null;
     this.roomAttempt = null;
-    this.audioContext = null;
-    this.capture = null;
-    this.playbackNode = null;
+    this.audio = new RoomAudio({
+      onFrame: (data) => this.captureFrame(data),
+      onDrained: ({ playbackId, audioEndMs }) => this.send({ type: "playback-drained", playbackId, audioEndMs }),
+    });
     this.sessionPhase = "stopped";
     this.state = "idle";
     this.muted = false;
@@ -203,7 +201,7 @@ class SpeakEasyRoom {
   beginHold() {
     if (!this.usesHoldMode() || this.sessionPhase !== "ready" || !this.hold.press()) return;
     if (this.state === "thinking" || this.state === "speaking") this.interrupt();
-    if (this.capture) this.sendAudio(this.capture.takePreRoll());
+    this.sendAudio(this.audio.takePreRoll());
   }
 
   endHold() {
@@ -243,7 +241,7 @@ class SpeakEasyRoom {
     socket.addEventListener("message", (event) => {
       if (this.socket !== socket) return;
       if (event.data instanceof ArrayBuffer) {
-        this.acceptAudioPacket(event.data);
+        this.audio.play(event.data);
         return;
       }
       try {
@@ -300,7 +298,7 @@ class SpeakEasyRoom {
         else console.info(`[speak-easy] ${event.message}`);
         break;
       case "playback":
-        this.handlePlayback(event);
+        this.audio.command(event);
         break;
     }
   }
@@ -489,45 +487,10 @@ class SpeakEasyRoom {
     this.currentAssistant = null;
   }
 
-  handlePlayback(event) {
-    this.playbackId = event.playbackId;
-    this.playbackNode?.port.postMessage({ kind: event.action, playbackId: event.playbackId, sampleRate: event.sampleRate });
-  }
-
-  acceptAudioPacket(packet) {
-    if (packet.byteLength < AUDIO_HEADER_BYTES || !this.playbackNode) return;
-    const header = new DataView(packet);
-    if (header.getUint8(0) !== AUDIO_PACKET_KIND) return;
-    const playbackId = header.getUint32(1, true);
-    const sampleRate = header.getUint32(5, true);
-    const payload = packet.slice(AUDIO_HEADER_BYTES);
-    if (payload.byteLength % Float32Array.BYTES_PER_ELEMENT !== 0) return;
-    const samples = new Float32Array(payload);
-    this.playbackNode.port.postMessage(
-      { kind: "audio", playbackId, sampleRate, samples },
-      [samples.buffer],
-    );
-  }
-
   async setupAudio(attempt = this.roomAttempt) {
     await this.teardownAudio();
     if (this.roomAttempt !== attempt) return;
-    const context = new AudioContext({ latencyHint: "interactive" });
-    this.audioContext = context;
-    const capture = new CaptureSession({ context, deviceId: this.settings.microphoneId, onFrame: (data) => this.captureFrame(data) });
-    this.capture = capture;
-    await Promise.all([capture.start(), context.audioWorklet.addModule("/playback-worklet.js")]);
-    if (this.roomAttempt !== attempt) return;
-    this.playbackNode = new AudioWorkletNode(context, "speak-easy-playback", {
-      outputChannelCount: [2],
-    });
-    this.playbackNode.connect(context.destination);
-    this.playbackNode.port.onmessage = (event) => {
-      if (event.data?.kind === "drained") {
-        this.send({ type: "playback-drained", playbackId: event.data.playbackId, audioEndMs: event.data.audioEndMs });
-      }
-    };
-    await context.resume();
+    await this.audio.start(this.settings.microphoneId);
     if (this.roomAttempt !== attempt) return;
     await this.refreshDevices();
   }
@@ -545,13 +508,7 @@ class SpeakEasyRoom {
 
   async teardownAudio() {
     this.level = 0;
-    this.capture?.close();
-    this.capture = null;
-    this.playbackNode?.disconnect();
-    this.playbackNode = null;
-    const context = this.audioContext;
-    this.audioContext = null;
-    if (context && context.state !== "closed") await context.close();
+    await this.audio.close();
   }
 
   openSettings() {
