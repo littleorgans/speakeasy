@@ -360,14 +360,14 @@ export class RoadTestPage {
   async speak(run) {
     if (!run.selection) { this.phase = "idle"; this.status("Choose a voice to hear the transcript."); return; }
     const copyMode = run.reading?.settings.copyMode;
-    const copy = this.voiceCopy.request(copyMode);
+    const copy = this.voiceCopy.request(copyMode, run.selection.voice);
     if (copy.error) { this.phase = "idle"; this.status(copy.error); return; }
     this.phase = "speaking";
     this.detector.reset();
     this.status(`Reading back with ${run.voiceLabel}`);
     const speaking = this.readback.speak({ selection: run.selection, catalogueRevision: this.catalogueRevision, text: run.input.text,
       settings: run.reading?.settings, reference: copy.reference,
-      restore: async () => (await this.voiceCopy.upload()) ? this.voiceCopy.request(copyMode).reference : null });
+      restore: copy.restore });
     run.voiceRequestedAt = performance.now();
     this.render();
     const output = await speaking;

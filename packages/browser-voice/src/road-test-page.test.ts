@@ -900,6 +900,31 @@ test("replacing a reading while its playback clear is pending settles both readi
   assert.equal(result?.outcome, "stopped", "replacing a job must resolve the reading it displaced");
 });
 
+test("a reading keeps its selected reference and retry transcript when the voice copy panel changes", async () => {
+  const harness = pageHarness({ models: QWEN_MODELS });
+  const { page, spoken } = harness;
+  await page.start();
+  await pickModel(harness, "qwen3-tts-0.6b-base");
+  harness.elements.get("output-voice").value = "recording";
+  page.render();
+  page.voiceCopy.recording = { samples: new Float32Array(48_000), rate: 48_000, id: "a".repeat(64) };
+  page.voiceCopy.transcript.value = "The original words.";
+  page.transcribe = async () => {
+    harness.elements.get("output-voice").value = "ref-10s";
+    page.render();
+    return { text: "Hello.", finalMs: 1 };
+  };
+  await take(page, 100);
+  await until(() => page.run?.output);
+  assert.equal(spoken[0].selection.voice, "recording");
+  assert.equal(spoken[0].reference?.id, "a".repeat(64), "the panel's new voice must not replace the take's reference");
+  page.voiceCopy.fetch = async () => ({ ok: true, json: async () => ({ id: "b".repeat(64) }) });
+  page.voiceCopy.transcript.value = "Edited after sending.";
+  assert.equal(JSON.stringify(await spoken[0].restore()), JSON.stringify({ id: "b".repeat(64), transcript: "The original words." }));
+  page.voiceCopy.recording = null;
+  assert.equal(await spoken[0].restore(), null, "Forget must prevent a retry from restoring that recording");
+});
+
 test("readings that overlap while the speech socket opens share one connection", async () => {
   const { readback, sockets } = readbackHarness();
   let connected!: () => void;

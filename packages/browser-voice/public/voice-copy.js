@@ -119,8 +119,7 @@ export class VoiceCopy {
   }
 
   /** Sends the recording to the host; resolves with its id, or null with the reason shown. */
-  async upload() {
-    const recording = this.recording;
+  async upload(recording = this.recording) {
     if (!recording) return null;
     try {
       const response = await this.fetch(`/speech-output/references?sampleRate=${recording.rate}`, { method: "POST",
@@ -161,12 +160,17 @@ export class VoiceCopy {
    * recording's id and transcript for My recording, or an error to show
    * instead of sending. Words and voice needs the transcript.
    */
-  request(copyMode) {
-    if (this.voice?.id !== RECORDING) return {};
-    if (!this.recording?.id) return { error: "Record a reference first." };
+  request(copyMode, voiceId = this.voice?.id) {
+    if (voiceId !== RECORDING) return {};
+    const recording = this.recording;
+    if (!recording?.id) return { error: "Record a reference first." };
     const transcript = this.transcript.value.trim();
     if (copyMode !== "voice-only" && !transcript) return { error: "Type the words you read, or choose Copy: Voice only." };
-    return { reference: { id: this.recording.id, transcript } };
+    return { reference: { id: recording.id, transcript }, restore: async () => {
+      if (this.recording !== recording) return null;
+      const id = await this.upload(recording);
+      return id && this.recording === recording ? { id, transcript } : null;
+    } };
   }
 
   refresh() {
