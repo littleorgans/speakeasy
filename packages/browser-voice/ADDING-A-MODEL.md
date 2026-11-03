@@ -23,7 +23,8 @@ It serves `http://127.0.0.1:4870/` with no further setup:
 
 Flags after `pnpm road-test --` or environment values override either default:
 `--setup-runtime` / `SPEAKEASY_SETUP_RUNTIME` and `--output-root` /
-`SPEAKEASY_OUTPUT_ROOT`.
+`SPEAKEASY_OUTPUT_ROOT`. The port works the same way, `pnpm road-test -- --port 4873`:
+a flag given twice takes its last value.
 
 ### The setup runtime file
 

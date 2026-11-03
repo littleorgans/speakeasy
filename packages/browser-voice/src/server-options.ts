@@ -37,8 +37,8 @@ export function readBrowserVoiceOptions(
   env: NodeJS.ProcessEnv,
 ): { port: number; runtimeConfig: RuntimeConfig; promptReader?: PromptReaderConfig; hotwordsPath?: string;
   setupRuntimeFile: string; setupRuntimeDefault: boolean; outputRoot: string; home: "room" | "road-test" } {
-  const portFlag = argv.indexOf("--port");
-  const port = portFlag === -1 ? 4317 : Number(argv[portFlag + 1]);
+  const portFlag = readFlag(argv, "--port");
+  const port = portFlag === undefined ? 4317 : Number(portFlag);
   if (!Number.isInteger(port) || port < 0 || port > 65_535) {
     throw new Error("--port must be an integer from 0 to 65535");
   }
@@ -247,8 +247,9 @@ async function modelBytes(path: string): Promise<number> {
   return total;
 }
 
+/** The last occurrence wins, so flags after `pnpm road-test --` override the script's own. */
 function readFlag(argv: string[], flag: string): string | undefined {
-  const index = argv.indexOf(flag);
+  const index = argv.lastIndexOf(flag);
   if (index === -1) return undefined;
   const value = argv[index + 1];
   if (!value || value.startsWith("--")) throw new Error(`${flag} needs a value`);

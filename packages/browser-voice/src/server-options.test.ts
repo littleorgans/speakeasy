@@ -191,3 +191,14 @@ test("bootstrap constructs actual lazy transport and reports missing files witho
   assert.equal(runtime.readiness().find((entry) => entry.setupId === "sweep/score-2")!.ready, false);
   await runtime.executor.close();
 });
+
+test("flags after pnpm road-test -- win over the script's own, which stay the default", () => {
+  const script = ["--road-test", "--port", "4870"];
+  assert.equal(readBrowserVoiceOptions(script, {}).port, 4870);
+  // pnpm 12 passes the separator through: the server sees "--" then the override.
+  const options = readBrowserVoiceOptions([...script, "--", "--port", "4873", "--setup-runtime", "/a.json",
+    "--setup-runtime", "/b.json", "--output-root", "/x", "--output-root", "/y"], {});
+  assert.deepEqual([options.port, options.home, options.setupRuntimeFile, options.outputRoot], [4873, "road-test", "/b.json", "/y"]);
+  assert.throws(() => readBrowserVoiceOptions([...script, "--", "--port"], {}), /--port needs a value/);
+  assert.throws(() => readBrowserVoiceOptions([...script, "--port", "70000"], {}), /--port must be an integer/);
+});
