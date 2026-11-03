@@ -148,6 +148,8 @@ footer { padding-top: 24px; border-top: 1px solid var(--rule); }
   .talk { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 8px; }
   .talk button { min-height: 48px; padding: 0 8px; white-space: nowrap; }
   .level { grid-column: 1 / -1; }
+  .replay { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .replay:has(#replay-talk-over:not([hidden])) #replay-voice { grid-column: 1 / -1; }
   /* Each earlier take stacks into labelled lines, so every timing stays on screen. */
   .history thead { display: none; }
   .history table, .history tbody { display: block; }
