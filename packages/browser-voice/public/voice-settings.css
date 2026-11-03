@@ -21,7 +21,7 @@
 
 .voice-settings .pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 
-.sampling summary { width: fit-content; cursor: pointer; }
+.sampling summary { display: list-item; width: fit-content; cursor: pointer; }
 
 .sampling .voice-columns { margin-top: 16px; }
 

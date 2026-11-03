@@ -181,6 +181,39 @@ Every voice streams by sentence, as the pipeline does. A runtime that could
 stream within a sentence (Pocket's frames, libpiper's decoder chunks) still
 returns each part whole: the worker replies once per request.
 
+### Voice settings
+
+A voice with per reading controls declares them as `settings` on its
+`LOCAL_OUTPUT_MODELS` entry (`packages/speech-io/src/settings.ts` holds the
+kinds: choice, text, integer; `src/tts/qwen-voices.ts` is the example): each
+an id, label, one line note, offered values and default, which is today's
+behaviour. Offer only values a reading has shown to work. `group: "sampling"`
+puts a control under the page's closed Sampling disclosure, `disabledBy`
+names a boolean setting that makes it step aside, and `pipeline` marks one the
+host's sentence planner consumes (`firstClause`) rather than the voice.
+
+Settings travel beside the portable selection, never in it, and are never
+saved. The page sends only values off their default on `speak-sample`; the
+host refuses unknown ids or unoffered values (`SETTINGS_INVALID`), fills the
+defaults, echoes them on `sample-accepted` and binds them into every segment's
+request. The backend declares `takes_settings = True` and gains
+`speak(text, voice, speed, settings)`; the worker refuses settings for a
+backend without it. Map a setting at its default to exactly the request the
+backend sent before, so a reading with nothing changed stays byte identical.
+
+### Voice copy references
+
+A voice copy model lists synthetic picks, each with its pinned `file` in the
+payload and exact `transcript`, and a `recording` voice. The host reads a
+pick's WAV, checks its pin and sends it as the reference; the owner's
+recording uploads to `POST /speech-output/references?sampleRate=` (Float32
+mono, 1 to 30 s, 16 to 96 kHz), stays in host memory only (four at most,
+`DELETE /speech-output/references/<id>` forgets it) and a reading names it by
+id with its transcript (`REFERENCE_MISSING` once the host no longer holds it).
+The backend declares `takes_reference = True` and gains
+`speak(text, voice, speed, settings, reference)`, where reference holds
+`samples`, `sampleRate`, `sha256` and `transcript` (null when none applies).
+
 ## Check
 
 `pnpm typecheck && pnpm test` from the repo root. The registry tests pin the

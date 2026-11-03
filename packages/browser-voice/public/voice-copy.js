@@ -53,7 +53,7 @@ export class VoiceCopy {
     buttons.append(this.record, this.listen, this.forget, this.status);
     this.words = make("label", "setting");
     this.transcript = make("textarea");
-    this.transcript.rows = 2;
+    this.transcript.rows = 3;
     this.transcript.value = READ_THIS;
     this.transcript.addEventListener("input", () => this.onChange());
     this.words.append(make("span", "label", "Transcript: read this aloud, or type exactly what you said"), this.transcript);
