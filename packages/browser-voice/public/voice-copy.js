@@ -73,7 +73,7 @@ export class VoiceCopy {
     const mine = this.voice?.id === RECORDING;
     for (const node of [this.record, this.forget, this.words]) node.hidden = !mine;
     this.record.textContent = this.capture ? "Stop" : this.recording ? "Record again" : "Record reference";
-    this.record.disabled = Boolean(this.starting);
+    this.record.disabled = Boolean(this.starting || this.stopping);
     this.forget.disabled = !this.recording;
     this.listen.disabled = mine ? !this.recording : !this.voice?.origin;
     if (!this.capture) {
@@ -83,7 +83,7 @@ export class VoiceCopy {
   }
 
   async start() {
-    if (this.starting || this.capture) return;
+    if (this.starting || this.stopping || this.capture) return;
     this.starting = true;
     this.problem = "";
     this.refresh();
@@ -115,8 +115,11 @@ export class VoiceCopy {
     if (!capture) return;
     clearInterval(this.ticker);
     this.capture = null;
-    const take = await capture.endTake();
-    capture.stop();
+    this.stopping = true;
+    this.refresh();
+    let take;
+    try { take = await capture.endTake(); }
+    finally { capture.stop(); this.stopping = false; }
     const rate = capture.rate;
     const samples = take?.samples.slice(0, Math.round(rate * MAX_RECORDING_MS / 1_000)) ?? new Float32Array();
     if (samples.length < rate * MIN_RECORDING_MS / 1_000) {

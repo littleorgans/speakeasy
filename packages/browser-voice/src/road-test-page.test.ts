@@ -982,6 +982,24 @@ test("reference recording reuses its stopped capture graph across repeated recor
   assert.equal(harness.microphones[0].open, false, "the stopped graph retains no microphone stream");
 });
 
+test("reference capture waits for the previous worklet flush before it can record again", async (t) => {
+  const harness = pageHarness({ models: QWEN_MODELS });
+  await harness.page.start();
+  const copy = harness.page.voiceCopy;
+  t.after(() => clearInterval(copy.ticker));
+  await copy.start();
+  const capture = copy.capture;
+  let flushed!: (take: unknown) => void;
+  capture.endTake = () => new Promise((resolve) => { flushed = resolve; });
+  const stopped = copy.stop();
+  let restarted = false;
+  capture.beginTake = () => { restarted = true; };
+  await copy.start();
+  flushed({ samples: new Float32Array(8_000) });
+  await stopped;
+  assert.equal(restarted, false, "a pending flush still owns the capture graph");
+});
+
 test("reference recording failures stay visible after the panel refreshes", async () => {
   const harness = pageHarness({ models: QWEN_MODELS });
   await harness.page.start();
