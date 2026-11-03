@@ -534,7 +534,7 @@ test("the trail marks inserted, replaced and removed words, and counts only chan
     "+900 ms [+Clear]", "+1.70 s Clear [+the scream]", "+2.50 s Clear the [-scream] [+screen]", "Final Clear the screen."]);
 });
 
-test("the live words line names the live model and the settings the host applied", () => {
+test("the live words line names the live model, the settings the host applied, and a final model that gives final text only", () => {
   const ultra = { id: "mlx-parakeet/ultra-greedy", label: "Parakeet Ultra MLX" };
   const stream = liveStream(ultra.id)!;
   assert.equal(text.liveLine({ setup: ultra, stream, settings: { updateMs: 800 } }, ultra),
@@ -545,6 +545,11 @@ test("the live words line names the live model and the settings the host applied
   assert.equal(text.liveLine({ setup: { id: "hex/unified", label: "Hex Parakeet Unified" }, stream: liveStream("hex/unified")!,
     settings: { lookaheadMs: 2_080 } }), "Live words: Hex Parakeet Unified stream, 2.08 s lookahead, written words never change.");
   assert.equal(text.liveLine(null), "Live words off.");
+  const qwen = { id: "qwen/context", label: "Qwen3 ASR with known words", card: { transcript: "final" } };
+  assert.equal(text.liveLine(null, qwen), "Live words off. Qwen3 ASR with known words gives final text only.");
+  assert.equal(text.liveLine(null, { ...ultra, card: { transcript: "partials" } }), "Live words off.");
+  assert.equal(text.liveLine({ setup: ultra, stream, settings: { updateMs: 800 } }, qwen),
+    "Live words: Parakeet Ultra MLX stream, updates every 800 ms, the last 5.12 s may change. Qwen3 ASR with known words writes the final text only.");
 });
 
 test("live words default to the setup's own stream; another live model and its settings reach the channel, and each figure names its model", async () => {
