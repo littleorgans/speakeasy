@@ -13,6 +13,10 @@
       "modelPath": "/absolute/path/to/Qwen3-ASR-0.6B-Q8_0.gguf",
       "libraryPath": "/absolute/path/to/speech.cpp-0.10.0/libspeech.4.dylib"
     },
+    "nemotron/streaming": {
+      "pythonPath": "/absolute/path/to/kokoro-mlx-py3.12/bin/python",
+      "modelPath": "/absolute/path/to/hf/models--nvidia--nemotron-speech-streaming-en-0.6b/snapshots/ebe59e5a817142986528bbbee5dba8db7b38ed50"
+    },
     "hex/unified": {
       "pythonPath": "/absolute/path/to/any/python3",
       "modelPath": "/absolute/path/to/parakeet-unified-en-0.6b-Q8_0.gguf",

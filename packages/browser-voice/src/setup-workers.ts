@@ -18,6 +18,7 @@ const WORKER_PATH = fileURLToPath(new URL("../runtime/worker.py", import.meta.ur
 const PYTHON_WORKERS = new Set<string>([
   "mlx-parakeet/v3-greedy", "mlx-parakeet/ultra-greedy",
   "mlx-cleanup/qwen-targeted", "qwen/context", "hex/unified", "hex/vocabulary", "cohere/transcribe",
+  "nemotron/streaming",
   ...LOCAL_OUTPUT_MODELS.map((model) => model.id).filter(isWorkerOutput),
 ]);
 

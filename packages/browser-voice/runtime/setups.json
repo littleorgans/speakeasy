@@ -357,6 +357,43 @@
       "maxSamples": 1920000
     },
     {
+      "id": "nemotron/streaming",
+      "label": "NVIDIA Nemotron streaming",
+      "card": {
+        "runtime": "mlx-audio 0.6.3 on MLX, Metal GPU",
+        "transcript": "partials",
+        "terms": "NVIDIA Open Model License"
+      },
+      "model": "nvidia/nemotron-speech-streaming-en-0.6b",
+      "revision": "ebe59e5a817142986528bbbee5dba8db7b38ed50",
+      "runtime": {
+        "python": "3.12.5",
+        "mlx-audio": "0.6.3",
+        "mlx": "0.32.4",
+        "numpy": "2.5.4",
+        "device": "GPU Metal",
+        "environment": "requirements-kokoro-mlx.txt"
+      },
+      "quantization": {
+        "onDisk": "safetensors as published",
+        "lowBitQuantization": false
+      },
+      "controls": {
+        "session": "create_streaming_session, fresh per take",
+        "temperature": 0,
+        "language": "en",
+        "delayMs": 560,
+        "feedSamples": 2560,
+        "decodeBudget": 256,
+        "drain": "step while audio is queued or encoded, then close and step to done",
+        "gate": "off",
+        "rewrite": "off",
+        "source": "stt-ux mlx-stream (pins.json, replay.py); mlx-audio 0.6.3 in place of source 65b6a39"
+      },
+      "operation": "transcribe",
+      "maxSamples": 1920000
+    },
+    {
       "id": "mlx-cleanup/qwen-targeted",
       "label": "Ultra plus Qwen cleanup",
       "card": {

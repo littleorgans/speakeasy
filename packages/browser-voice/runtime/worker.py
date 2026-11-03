@@ -23,6 +23,7 @@ BACKENDS = {
     "hex/unified": "hex_unified",
     "hex/vocabulary": "hex_unified",
     "cohere/transcribe": "hex_unified",
+    "nemotron/streaming": "nemotron",
     "kokoro-mlx-bf16": "kokoro_mlx",
     "pocket-18m": "pocket_18m",
     "piper-kristin-split": "native_voice",
