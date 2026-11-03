@@ -42,6 +42,9 @@ export function outputCard(model) {
   ].filter(Boolean).join(" · ");
 }
 
+/** Kept on one line at any width. */
+const FINAL_ONLY = "final\u00a0text\u00a0only";
+
 /**
  * What makes a take's live words, from the stream and settings the host
  * applied: "Live words: Parakeet Ultra MLX stream, updates every 800 ms, the
@@ -50,11 +53,11 @@ export function outputCard(model) {
  */
 export function liveLine(live, final) {
   const finalOnly = final?.card?.transcript === "final";
-  if (!live) return finalOnly ? `Live words off. ${final.label} gives final text only.` : "Live words off.";
+  if (!live) return finalOnly ? `Live words off. ${final.label} gives ${FINAL_ONLY}.` : "Live words off.";
   const phrases = live.stream.settings.map((setting) =>
     setting.options.find((option) => option.value === live.settings[setting.id])?.phrase).filter(Boolean);
   const replaced = final && final.id !== live.setup.id
-    ? ` ${final.label} writes the final text${finalOnly ? " only" : ""}.` : "";
+    ? ` ${final.label} writes the ${finalOnly ? FINAL_ONLY : "final text"}.` : "";
   return `Live words: ${[`${live.setup.label} stream`, ...phrases].join(", ")}.${replaced}`;
 }
 

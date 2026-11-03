@@ -485,9 +485,15 @@ export class RoadTestPage {
     this.renderHistory();
   }
 
-  /** The line naming what made the latest take's live words (or would make the next), and its trail. */
+  /**
+   * The line naming what made the latest take's live words while the selects
+   * still name that take, else what the next take would use; the trail stays
+   * with the take.
+   */
   renderLive(run) {
-    this.elements["live-line"].textContent = liveLine(run ? appliedLive(run) : this.liveChoice(), run?.setup ?? this.setup());
+    const choice = this.liveChoice();
+    const take = run && sameChoice(run, this.setup(), choice) ? run : null;
+    this.elements["live-line"].textContent = liveLine(take ? appliedLive(take) : choice, take?.setup ?? this.setup());
     const updates = run?.live?.updates ?? [];
     this.elements.trail.hidden = updates.length === 0;
     this.elements["trail-summary"].textContent = updates.length ? trailSummary(updates) : "";
@@ -579,6 +585,13 @@ function pressToFirstWords(run) {
 function appliedLive(run) {
   const choice = run.liveChoice;
   return choice && { ...choice, settings: run.live?.stream?.settings ?? choice.settings };
+}
+
+/** Whether a take used this speech in and this live choice, settings included. */
+function sameChoice(run, setup, choice) {
+  const used = run.liveChoice;
+  if (run.setup.id !== setup?.id || Boolean(used) !== Boolean(choice)) return false;
+  return !used || (used.setup.id === choice.setup.id && JSON.stringify(used.settings) === JSON.stringify(choice.settings));
 }
 
 /** An earlier take's live words: the live model where it differs from the final one, and its settings. */

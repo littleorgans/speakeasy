@@ -555,10 +555,11 @@ test("the live words line names the live model, the settings the host applied, a
     settings: { lookaheadMs: 2_080 } }), "Live words: Hex Parakeet Unified stream, 2.08 s lookahead, written words never change.");
   assert.equal(text.liveLine(null), "Live words off.");
   const qwen = { id: "qwen/context", label: "Qwen3 ASR with known words", card: { transcript: "final" } };
-  assert.equal(text.liveLine(null, qwen), "Live words off. Qwen3 ASR with known words gives final text only.");
+  assert.equal(text.liveLine(null, qwen), "Live words off. Qwen3 ASR with known words gives final\u00a0text\u00a0only.");
   assert.equal(text.liveLine(null, { ...ultra, card: { transcript: "partials" } }), "Live words off.");
   assert.equal(text.liveLine({ setup: ultra, stream, settings: { updateMs: 800 } }, qwen),
-    "Live words: Parakeet Ultra MLX stream, updates every 800 ms, the last 5.12 s may change. Qwen3 ASR with known words writes the final text only.");
+    "Live words: Parakeet Ultra MLX stream, updates every 800 ms, the last 5.12 s may change. Qwen3 ASR with known words writes the final\u00a0text\u00a0only.",
+    "final text only never wraps inside itself");
   assert.equal(text.liveSettingsNote({ stream, settings: { updateMs: 1_600 } }), "Updates every 1.6 s",
     "Earlier takes name the setting by its label");
 });
@@ -607,6 +608,24 @@ test("live words default to the setup's own stream; another live model and its s
   assert.equal(row.children[2].children.at(-1).children[0].textContent, "2 updates, no corrections", "earlier takes keep the trail");
   elements.get("input-model").listeners.get("change")!();
   assert.equal(elements.get("live-model").value, "mlx-parakeet/v3-greedy", "a new speech in choice restores its own pairing");
+});
+
+test("after a take, the live words line follows a new speech in or live words choice, and returns to the take", async () => {
+  const { page, elements } = pageHarness({ transcript: "partials" });
+  await page.start();
+  await take(page, 1_000);
+  const taken = "Live words: Parakeet v3 MLX stream, updates every 800 ms, the last 5.12 s may change.";
+  assert.equal(elements.get("live-line").textContent, taken);
+  elements.get("live-model").value = "off";
+  elements.get("live-model").listeners.get("change")!();
+  assert.equal(elements.get("live-line").textContent, "Live words off.", "a new live words choice");
+  elements.get("live-model").value = "mlx-parakeet/v3-greedy";
+  elements.get("live-model").listeners.get("change")!();
+  assert.equal(elements.get("live-line").textContent, taken, "the take's own choice again");
+  elements.get("input-model").value = "hex/unified";
+  elements.get("input-model").listeners.get("change")!();
+  assert.equal(elements.get("live-line").textContent,
+    "Live words: Hex Parakeet Unified stream, 2.08 s lookahead, written words never change.", "a new speech in choice");
 });
 
 test("with live words off nothing streams, no first words figure shows, and the line says so once", async () => {
