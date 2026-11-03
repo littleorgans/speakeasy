@@ -3,6 +3,7 @@ import { LiveWords } from "/live-words.js";
 import { MicCapture } from "/mic-capture.js";
 import { trailItems, trailSummary } from "/live-trail.js";
 import { formatDuration, inputCard, liveLine, liveSettingsNote, outputCard, outputLatency, readEvents } from "/road-test-text.js";
+import { chosenSettings, fill, settingColumns } from "/setting-controls.js";
 import { TalkOverDetector } from "/talk-over.js";
 import { VoiceReadback } from "/voice-readback.js";
 
@@ -12,8 +13,10 @@ import { VoiceReadback } from "/voice-readback.js";
  * key or by talking over it, and replay both sides. A model that truly
  * streams, the setup's own or another the owner picks, shows words while the
  * owner speaks, one tone quieter, until the final text replaces them in
- * place; a collapsed trail lists each revision. Final text arrives as one
- * comparison row; the voice uses the speech output channel.
+ * place; a collapsed trail lists each revision. A setup with final settings
+ * (Cohere's names bias) shows them under Speech in; each take sends them.
+ * Final text arrives as one comparison row; the voice uses the speech output
+ * channel.
  */
 
 const SAMPLE_RATE = 16_000;
@@ -27,7 +30,7 @@ const LISTENING = "Listening. Release when you finish.";
 const DONE = "Done";
 /** Earlier takes columns; the transcript spans a line of its own, and narrow screens label each cell with these. */
 const HISTORY_COLUMNS = [
-  { label: "Speech in", cell: (run) => [run.setup.label, liveNote(run)] },
+  { label: "Speech in", cell: (run) => [run.setup.label, [finalNote(run), liveNote(run)].filter(Boolean).join(" · ")] },
   { label: "Voice", cell: (run) => [run.output ? run.voiceLabel : null] },
   { label: "Transcript", kind: "said-cell", cell: (run) => [run.input.error || run.input.text || "Nothing heard"], trail: true },
   { label: "Press to first words", kind: "num", cell: (run) => [formatDuration(pressToFirstWords(run))] },
@@ -44,11 +47,12 @@ export class RoadTestPage {
       "status", "input-model", "input-card", "output-model", "output-voice", "output-card", "hold", "stop", "level",
       "transcript", "take-models", "input-timings", "output-timings", "interrupt-timings", "replay-take",
       "replay-talk-over", "replay-voice", "echo", "talk-over", "history", "history-head", "history-section", "level-track",
-      "live-model", "live-settings", "live-line", "trail", "trail-summary", "trail-list",
+      "live-model", "live-settings", "live-line", "trail", "trail-summary", "trail-list", "final-settings",
     ].map((id) => [id, document.getElementById(id)]));
     this.setups = [];
     this.voices = [];
     this.liveSelects = new Map();
+    this.finalSelects = new Map();
     this.historyRows = new WeakMap();
     this.catalogueRevision = null;
     this.context = null;
@@ -126,8 +130,16 @@ export class RoadTestPage {
     return this.setups.find((setup) => setup.id === this.elements["input-model"].value);
   }
 
-  /** Live words default to today's pairing for the chosen setup: its own stream, its base's, or off. */
+  /**
+   * Live words default to today's pairing for the chosen setup: its own
+   * stream, its base's, or off. Its final settings, if any, start at today's.
+   */
   resetLive() {
+    const final = this.setup()?.final?.settings ?? [];
+    const { columns, selects } = settingColumns(final, () => this.render());
+    this.finalSelects = selects;
+    this.elements["final-settings"].replaceChildren(...columns);
+    this.elements["final-settings"].hidden = columns.length === 0;
     fill(this.elements["live-model"], [{ value: "off", label: "Off" }, ...this.setups.filter((setup) => setup.live)
       .map((setup) => ({ value: setup.id, label: setup.label, disabled: setup.readiness?.ready !== true }))],
     this.setup()?.liveDefault ?? "off");
@@ -136,23 +148,8 @@ export class RoadTestPage {
 
   /** One column per setting of the chosen live model, each at today's value with its one line note. */
   fillLiveSettings() {
-    this.liveSelects.clear();
-    const columns = (this.liveModel()?.live.settings ?? []).map((setting) => {
-      const column = document.createElement("label");
-      column.className = "setting";
-      const label = document.createElement("span");
-      label.className = "label";
-      label.textContent = setting.label;
-      const select = document.createElement("select");
-      fill(select, setting.options.map((option) => ({ value: String(option.value), label: option.label })), String(setting.default));
-      select.addEventListener("change", () => this.render());
-      const note = document.createElement("span");
-      note.className = "quiet";
-      note.textContent = setting.note;
-      column.append(label, select, note);
-      this.liveSelects.set(setting.id, select);
-      return column;
-    });
+    const { columns, selects } = settingColumns(this.liveModel()?.live.settings ?? [], () => this.render());
+    this.liveSelects = selects;
     this.elements["live-settings"].replaceChildren(...columns);
   }
 
@@ -164,8 +161,13 @@ export class RoadTestPage {
   liveChoice() {
     const setup = this.liveModel();
     if (!setup) return null;
-    return { setup, stream: setup.live, settings: Object.fromEntries(setup.live.settings.map((setting) =>
-      [setting.id, Number(this.liveSelects.get(setting.id)?.value ?? setting.default)])) };
+    return { setup, stream: setup.live, settings: chosenSettings(setup.live.settings, this.liveSelects) };
+  }
+
+  /** The final settings a press sends with its take; null where the setup has none. */
+  finalChoice() {
+    const final = this.setup()?.final;
+    return final ? chosenSettings(final.settings, this.finalSelects) : null;
   }
 
   outputModel() {
@@ -202,8 +204,8 @@ export class RoadTestPage {
     // A press over the voice stops it like Esc; the new take shows that stop.
     const interrupt = this.stopVoice(at);
     this.phase = "recording";
-    this.run = { setup: this.setup(), liveChoice: this.liveChoice(), selection: this.selection(), voiceLabel: this.voiceLabel(),
-      pressedAt: at, ...(interrupt ? { interrupt } : {}) };
+    this.run = { setup: this.setup(), liveChoice: this.liveChoice(), finalChoice: this.finalChoice(),
+      selection: this.selection(), voiceLabel: this.voiceLabel(), pressedAt: at, ...(interrupt ? { interrupt } : {}) };
     this.status(LISTENING);
     this.render();
     void this.openAudio().then(() => {
@@ -293,13 +295,15 @@ export class RoadTestPage {
 
   /** One comparison row for one setup. Waits while the voice releases the host. */
   async transcribe(run, samples, from, onText = (text) => this.showTranscript(text)) {
-    const result = { text: "", finalMs: null, finalAt: null, loadMs: null, firstUse: false, processingMs: null, error: "" };
+    const result = { text: "", finalMs: null, finalAt: null, loadMs: null, firstUse: false, processingMs: null, error: "",
+      settings: null };
     const setupIds = JSON.stringify([run.setup.id]);
+    const settings = run.finalChoice ? { settings: JSON.stringify({ [run.setup.id]: run.finalChoice }) } : {};
     for (let tries = 0; ; tries++) {
       const requestId = `road-${Date.now()}-${++this.serial}`;
       let response;
       try {
-        response = await fetch(`/prompt-reader/comparisons?${new URLSearchParams({ requestId, setupIds })}`, {
+        response = await fetch(`/prompt-reader/comparisons?${new URLSearchParams({ requestId, setupIds, ...settings })}`, {
           method: "POST", headers: { "content-type": "application/octet-stream" }, body: samples.buffer.slice(0) });
       } catch (error) { return { ...result, error: `Transcription failed: ${error.message}` }; }
       if ((response.status === 409 || response.status === 429) && tries < BUSY_RETRY_LIMIT) {
@@ -331,6 +335,8 @@ export class RoadTestPage {
           // Observed here: the host's load figure leaves out worker process startup.
           result.loadMs = row.timings.firstUse ? startMs : null;
           result.processingMs = row.timings.processingMs;
+          // The final settings the host applied, for the take's record.
+          result.settings = row.settings ?? null;
           onText(result.text);
         } else if (["error", "cancelled", "skipped"].includes(row.status)) {
           result.error = `${run.setup.label} failed: ${row.error?.message ?? row.status}`;
@@ -476,7 +482,8 @@ export class RoadTestPage {
       this.elements.transcript.classList.toggle("partial", Boolean(run));
     }
     // Names the models that produced the latest take, so changed selects never claim its figures.
-    this.elements["take-models"].textContent = run ? [run.setup.label, run.selection && run.voiceLabel].filter(Boolean).join(" · ") : "";
+    this.elements["take-models"].textContent = run ? [run.setup.label, finalNote(run), run.selection && run.voiceLabel]
+      .filter(Boolean).join(" · ") : "";
     this.renderLive(run);
     this.elements["replay-take"].disabled = !run?.take;
     this.elements["replay-talk-over"].hidden = !run?.cutInTake;
@@ -601,6 +608,12 @@ function liveNote(run) {
     .filter(Boolean).join(" · ");
 }
 
+/** A take's final settings as the host applied them: "Names gentle"; null before its text or without any. */
+function finalNote(run) {
+  const settings = run.input?.settings;
+  return settings && run.setup.final ? liveSettingsNote({ stream: run.setup.final, settings }) : null;
+}
+
 /** Whether another model than the final one made the take's live words. */
 function liveDiffers(run) {
   return Boolean(run.liveChoice && run.liveChoice.setup.id !== run.setup.id);
@@ -646,15 +659,6 @@ function describe(list, entries) {
     return row;
   });
   list.replaceChildren(...rows);
-}
-
-function fill(select, entries, value) {
-  select.replaceChildren(...entries.map((entry) => {
-    const option = new Option(entry.label, entry.value);
-    option.disabled = Boolean(entry.disabled);
-    return option;
-  }));
-  if (entries.some((entry) => entry.value === value)) select.value = value;
 }
 
 async function json(url) {

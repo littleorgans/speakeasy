@@ -11,7 +11,8 @@
 //! stream and `F` feeds it, each answered with the stream's partial text. `S`
 //! carries the stream's chunk and lookahead, two i32 LE ms, before its samples:
 //! a pair from transcribe.cpp's Unified menu. Any other request ends the live
-//! stream unfinalized. End of input exits.
+//! stream unfinalized. End of input exits. `B` is a `T` take with Cohere's names
+//! bias, one f32 LE, before its samples.
 //! stdout: one JSON line at ready, then one JSON line per request. No network
 //! client, no files written.
 //!
@@ -39,7 +40,7 @@ pub struct Partial { stable: String, tentative: String }
 
 /// A live stream's (chunk, right) in ms; Hex's own stream keeps the model default.
 type Lookahead = (i32, i32);
-enum Request { Take(Vec<f32>), Feed { start: Option<Lookahead>, samples: Vec<f32> } }
+enum Request { Take { samples: Vec<f32>, names_bias: f32 }, Feed { start: Option<Lookahead>, samples: Vec<f32> } }
 
 fn read_request(input: &mut impl Read) -> Result<Option<Request>, Box<dyn Error>> {
     let mut head = [0u8; 5];
@@ -52,12 +53,16 @@ fn read_request(input: &mut impl Read) -> Result<Option<Request>, Box<dyn Error>
     if head[0] == b'S' { input.read_exact(&mut lookahead)?; }
     let lookahead = (i32::from_le_bytes([lookahead[0], lookahead[1], lookahead[2], lookahead[3]]),
         i32::from_le_bytes([lookahead[4], lookahead[5], lookahead[6], lookahead[7]]));
+    let mut bias = [0u8; 4];
+    if head[0] == b'B' { input.read_exact(&mut bias)?; }
+    let names_bias = f32::from_le_bytes(bias);
+    if !names_bias.is_finite() { return Err("nonfinite names bias".into()); }
     let mut bytes = vec![0u8; count * 4];
     input.read_exact(&mut bytes)?;
     let samples: Vec<f32> = bytes.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
     if samples.iter().any(|x| !x.is_finite()) { return Err("nonfinite sample".into()); }
     match head[0] {
-        b'T' if count > 0 => Ok(Some(Request::Take(samples))),
+        b'T' | b'B' if count > 0 => Ok(Some(Request::Take { samples, names_bias })),
         b'S' => Ok(Some(Request::Feed { start: Some(lookahead), samples })),
         b'F' => Ok(Some(Request::Feed { start: None, samples })),
         _ => Err("unknown request".into()),
@@ -129,9 +134,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut input = io::stdin().lock();
     if let Some(mode) = whole {
         while let Some(next) = read_request(&mut input)? {
-            let Request::Take(samples) = next else { return Err("whole take mode has no live stream".into()) };
+            let Request::Take { samples, names_bias } = next else {
+                return Err("whole take mode has no live stream".into());
+            };
             let started = Instant::now();
-            let mut reply = match mode.run(&model, limit, &samples) {
+            let mut reply = match mode.run(&model, limit, &samples, names_bias) {
                 Ok(result) => result,
                 Err(error) => { emit(&mut out, json!({"kind":"error", "error":error}))?; continue; }
             };
@@ -147,7 +154,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             // A feed with no stream open starts one at Hex's own lookahead.
             Request::Feed { start, samples } => live(&model, &options, &session_options, start.unwrap_or((1040, 1040)),
                 samples, &mut input, &mut out)?,
-            Request::Take(samples) => {
+            Request::Take { names_bias, .. } if names_bias != 0.0 => {
+                emit(&mut out, json!({"kind":"error", "error":"names bias is Cohere only"}))?;
+                read_request(&mut input)?
+            }
+            Request::Take { samples, .. } => {
                 let started = Instant::now();
                 // Hex recreates its session for every dictation.
                 let mut session = model.session_with(&session_options)?;

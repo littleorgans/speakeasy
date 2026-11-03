@@ -1,0 +1,422 @@
+diff --git a/bindings/rust/sys/src/transcribe_sys.rs b/bindings/rust/sys/src/transcribe_sys.rs
+index e1db0c9..7ad8a3e 100644
+--- a/bindings/rust/sys/src/transcribe_sys.rs
++++ b/bindings/rust/sys/src/transcribe_sys.rs
+@@ -16,6 +16,7 @@ pub const TRANSCRIBE_BACKEND_MASK_CUDA: u32 = 8;
+ pub const TRANSCRIBE_BACKEND_MASK_ROCM: u32 = 16;
+ pub const TRANSCRIBE_BACKEND_MASK_OTHER: u32 = 2147483648;
+ pub const TRANSCRIBE_BACKEND_MASK_ALL: u32 = 4294967295;
++pub const TRANSCRIBE_EXT_KIND_COHERE_SEQUENCE_BIAS: u32 = 1112754243;
+ pub const TRANSCRIBE_EXT_KIND_MOONSHINE_STREAMING_STREAM: u32 = 1414746957;
+ pub const TRANSCRIBE_EXT_KIND_PARAKEET_STREAM: u32 = 1414744912;
+ pub const TRANSCRIBE_EXT_KIND_PARAKEET_BUFFERED_STREAM: u32 = 1396853584;
+@@ -1598,6 +1599,33 @@ const _: () = {
+ unsafe extern "C" {
+     pub fn transcribe_parakeet_vocabulary_ext_init(ext: *mut transcribe_parakeet_vocabulary_ext);
+ }
++#[repr(C)]
++#[derive(Debug, Copy, Clone)]
++pub struct transcribe_cohere_sequence_bias_ext {
++    pub ext: transcribe_ext,
++    pub bias: f32,
++    pub tokens: *const i32,
++    pub lengths: *const i32,
++    pub n_sequences: i32,
++}
++#[allow(clippy::unnecessary_operation, clippy::identity_op)]
++const _: () = {
++    ["Size of transcribe_cohere_sequence_bias_ext"]
++        [::std::mem::size_of::<transcribe_cohere_sequence_bias_ext>() - 48usize];
++    ["Alignment of transcribe_cohere_sequence_bias_ext"]
++        [::std::mem::align_of::<transcribe_cohere_sequence_bias_ext>() - 8usize];
++    ["Offset of field: transcribe_cohere_sequence_bias_ext::bias"]
++        [::std::mem::offset_of!(transcribe_cohere_sequence_bias_ext, bias) - 16usize];
++    ["Offset of field: transcribe_cohere_sequence_bias_ext::tokens"]
++        [::std::mem::offset_of!(transcribe_cohere_sequence_bias_ext, tokens) - 24usize];
++    ["Offset of field: transcribe_cohere_sequence_bias_ext::lengths"]
++        [::std::mem::offset_of!(transcribe_cohere_sequence_bias_ext, lengths) - 32usize];
++    ["Offset of field: transcribe_cohere_sequence_bias_ext::n_sequences"]
++        [::std::mem::offset_of!(transcribe_cohere_sequence_bias_ext, n_sequences) - 40usize];
++};
++unsafe extern "C" {
++    pub fn transcribe_cohere_sequence_bias_ext_init(ext: *mut transcribe_cohere_sequence_bias_ext);
++}
+ impl transcribe_sortformer_preset {
+     pub const TRANSCRIBE_SORTFORMER_PRESET_DEFAULT: transcribe_sortformer_preset =
+         transcribe_sortformer_preset(0);
+diff --git a/bindings/rust/transcribe-cpp/src/family.rs b/bindings/rust/transcribe-cpp/src/family.rs
+index 368b1a8..b6f67ad 100644
+--- a/bindings/rust/transcribe-cpp/src/family.rs
++++ b/bindings/rust/transcribe-cpp/src/family.rs
+@@ -58,6 +58,20 @@ pub struct ParakeetVocabularyOptions {
+     pub sounds_like: Vec<(usize, String)>,
+ }
+ 
++/// Cohere sequence bias (run slot, offline `run` only): every nonempty
++/// prefix of each token sequence gains `bias` in logits when the generated
++/// tokens before it match the rest of that prefix. `0.0` turns it off.
++#[derive(Debug, Clone, Default, PartialEq)]
++#[cfg_attr(
++    feature = "serde",
++    derive(serde::Serialize, serde::Deserialize),
++    serde(default)
++)]
++pub struct CohereSequenceBiasOptions {
++    pub bias: f32,
++    pub sequences: Vec<Vec<i32>>,
++}
++
+ /// Moonshine-streaming stream-extension knobs (stream slot).
+ #[derive(Debug, Clone, Default, PartialEq, Eq)]
+ #[cfg_attr(
+@@ -198,6 +212,7 @@ impl DiarizeExtension {
+ pub enum RunExtension {
+     Whisper(WhisperRunOptions),
+     ParakeetVocabulary(ParakeetVocabularyOptions),
++    CohereSequenceBias(CohereSequenceBiasOptions),
+ }
+ 
+ /// A family extension for the stream slot.
+@@ -226,6 +241,11 @@ pub(crate) enum RunExtRaw {
+         _pointers: Vec<*const std::os::raw::c_char>,
+         _terms: Vec<i32>,
+     },
++    CohereSequenceBias {
++        ext: Box<sys::transcribe_cohere_sequence_bias_ext>,
++        _tokens: Vec<i32>,
++        _lengths: Vec<i32>,
++    },
+ }
+ 
+ impl RunExtRaw {
+@@ -238,6 +258,9 @@ impl RunExtRaw {
+             RunExtRaw::ParakeetVocabulary { ext, .. } => {
+                 (&**ext) as *const sys::transcribe_parakeet_vocabulary_ext as *const sys::transcribe_ext
+             }
++            RunExtRaw::CohereSequenceBias { ext, .. } => {
++                (&**ext) as *const sys::transcribe_cohere_sequence_bias_ext as *const sys::transcribe_ext
++            }
+         }
+     }
+ }
+@@ -299,6 +322,27 @@ impl RunExtension {
+                     _terms: terms,
+                 })
+             }
++            RunExtension::CohereSequenceBias(o) => {
++                let mut ext: sys::transcribe_cohere_sequence_bias_ext = unsafe { std::mem::zeroed() };
++                unsafe { sys::transcribe_cohere_sequence_bias_ext_init(&mut ext) };
++                ext.bias = o.bias;
++                let tokens: Vec<i32> = o.sequences.concat();
++                let lengths: Vec<i32> = o
++                    .sequences
++                    .iter()
++                    .map(|ids| i32::try_from(ids.len()).unwrap_or(i32::MAX))
++                    .collect();
++                if !lengths.is_empty() {
++                    ext.tokens = tokens.as_ptr();
++                    ext.lengths = lengths.as_ptr();
++                    ext.n_sequences = i32::try_from(lengths.len()).unwrap_or(i32::MAX);
++                }
++                Ok(RunExtRaw::CohereSequenceBias {
++                    ext: Box::new(ext),
++                    _tokens: tokens,
++                    _lengths: lengths,
++                })
++            }
+         }
+     }
+ }
+diff --git a/bindings/rust/transcribe-cpp/src/lib.rs b/bindings/rust/transcribe-cpp/src/lib.rs
+index cfc8ab4..0ea779b 100644
+--- a/bindings/rust/transcribe-cpp/src/lib.rs
++++ b/bindings/rust/transcribe-cpp/src/lib.rs
+@@ -71,7 +71,7 @@ pub use cancel::CancelToken;
+ pub use diarize::{DiarizeInfo, DiarizeOptions, DiarizeSession, DiarizeSessionOptions};
+ pub use error::{Error, ErrorKind, ErrorReport, Result};
+ pub use family::{
+-    DiarizeExtension, MoonshineStreamingOptions, ParakeetBufferedStreamOptions,
++    CohereSequenceBiasOptions, DiarizeExtension, MoonshineStreamingOptions, ParakeetBufferedStreamOptions,
+     ParakeetStreamOptions, ParakeetVocabularyOptions, RunExtension, SortformerDiarizeOptions, SortformerPreset,
+     StreamExtension, VoxtralRealtimeStreamOptions, WhisperRunOptions,
+ };
+diff --git a/include/transcribe/cohere.h b/include/transcribe/cohere.h
+new file mode 100644
+index 0000000..49e2c31
+--- /dev/null
++++ b/include/transcribe/cohere.h
+@@ -0,0 +1,47 @@
++/*
++ * include/transcribe/cohere.h - Cohere ASR family public extension surface.
++ *
++ * Includes transcribe.h; safe to include in C or C++ TUs.
++ */
++
++#ifndef TRANSCRIBE_COHERE_H
++#define TRANSCRIBE_COHERE_H
++
++#include "transcribe.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/* 'CHSB' little-endian = 0x42534843 */
++#define TRANSCRIBE_EXT_KIND_COHERE_SEQUENCE_BIAS 0x42534843u
++
++/*
++ * Sequence bias for the greedy decoder (run slot; transcribe_run only,
++ * transcribe_run_batch rejects it). Every nonempty prefix of each sequence
++ * is a rule, shared prefixes once: a token gains `bias` in logits for each
++ * rule it completes after the generated tokens before it (the Transformers
++ * `sequence_bias` meaning). Prompt tokens are not history.
++ *
++ *   bias         Logits added per matching rule. 0 turns biasing off and
++ *                keeps the GPU argmax path.
++ *   tokens       All sequences' token ids, concatenated.
++ *   lengths      Each sequence's length, > 0.
++ *   n_sequences  Number of sequences.
++ */
++struct transcribe_cohere_sequence_bias_ext {
++    struct transcribe_ext ext;
++    float                 bias;
++    const int32_t *       tokens;
++    const int32_t *       lengths;
++    int32_t               n_sequences;
++};
++
++/* Fills ext.size/kind, bias = 0 (off), and no sequences. */
++TRANSCRIBE_API void transcribe_cohere_sequence_bias_ext_init(struct transcribe_cohere_sequence_bias_ext * ext);
++
++#ifdef __cplusplus
++} /* extern "C" */
++#endif
++
++#endif /* TRANSCRIBE_COHERE_H */
+diff --git a/include/transcribe/extensions.h b/include/transcribe/extensions.h
+index 4939c23..639e491 100644
+--- a/include/transcribe/extensions.h
++++ b/include/transcribe/extensions.h
+@@ -14,6 +14,7 @@
+ #define TRANSCRIBE_EXTENSIONS_H
+ 
+ #include "transcribe.h"
++#include "transcribe/cohere.h"
+ #include "transcribe/diarize.h"
+ #include "transcribe/langid.h"
+ #include "transcribe/moonshine_streaming.h"
+diff --git a/src/arch/cohere/decoder.cpp b/src/arch/cohere/decoder.cpp
+index 4ef7d11..e60515f 100644
+--- a/src/arch/cohere/decoder.cpp
++++ b/src/arch/cohere/decoder.cpp
+@@ -793,7 +793,8 @@ StepBuild build_step_graph(ggml_context *        ctx,
+                            CohereKvCache &       kv_cache,
+                            int                   max_n_kv,
+                            int                   T_enc,
+-                           bool                  use_flash) {
++                           bool                  use_flash,
++                           bool                  keep_logits) {
+     StepBuild sb{};
+     sb.max_n_kv = max_n_kv;
+ 
+@@ -888,6 +889,10 @@ StepBuild build_step_graph(ggml_context *        ctx,
+         logits = ggml_add(ctx, logits, w.head.bias);
+     }
+ 
++    if (keep_logits) {
++        sb.logits_raw = logits;
++        ggml_set_output(logits);
++    }
+     sb.argmax_out = ggml_argmax(ctx, logits);
+     ggml_set_name(sb.argmax_out, "step.argmax");
+     ggml_set_output(sb.argmax_out);
+diff --git a/src/arch/cohere/decoder.h b/src/arch/cohere/decoder.h
+index 05b7589..eec35cd 100644
+--- a/src/arch/cohere/decoder.h
++++ b/src/arch/cohere/decoder.h
+@@ -99,6 +99,7 @@ struct StepBuild {
+     ggml_tensor * pos_id_in   = nullptr;  // i32 [1]
+     ggml_tensor * kv_idx_in   = nullptr;  // i64 [1]
+     ggml_tensor * mask_in     = nullptr;  // f16 [max_n_kv, 1]
++    ggml_tensor * logits_raw  = nullptr;  // names bias readback (SequenceBias)
+     ggml_tensor * argmax_out  = nullptr;  // i32 [1]
+     int           max_n_kv    = 0;
+     ggml_cgraph * graph       = nullptr;
+@@ -110,7 +111,8 @@ StepBuild build_step_graph(ggml_context *        compute_ctx,
+                            CohereKvCache &       kv_cache,
+                            int                   max_n_kv,
+                            int                   T_enc,
+-                           bool                  use_flash = true);
++                           bool                  use_flash = true,
++                           bool                  keep_logits = false);
+ 
+ // ---------------------------------------------------------------------------
+ // Offline batched decode (B utterances at once).
+diff --git a/src/arch/cohere/model.cpp b/src/arch/cohere/model.cpp
+index e7f9e05..3b712ac 100644
+--- a/src/arch/cohere/model.cpp
++++ b/src/arch/cohere/model.cpp
+@@ -6,6 +6,7 @@
+ // on the ggml graph (not host-side like Parakeet's LSTM).
+ 
+ #include "cohere.h"
++#include "transcribe/cohere.h"
+ #include "decoder.h"
+ #include "encoder.h"
+ #include "ggml-alloc.h"
+@@ -46,6 +47,61 @@ namespace transcribe::cohere {
+ 
+ extern const Arch arch;
+ 
++// Names bias (TRANSCRIBE_EXT_KIND_COHERE_SEQUENCE_BIAS): every nonempty
++// prefix of each supplied token sequence, shared prefixes deduplicated; a
++// token whose preceding generated tokens complete a prefix gains `amount`
++// once per matching prefix. Bias zero keeps the GPU argmax and never reads
++// logits back.
++struct SequenceBias {
++    float amount = 0.0f;
++    std::vector<std::vector<int>> sequences;
++
++    static transcribe_status from_params(const transcribe_run_params * params, int vocab, SequenceBias & out) {
++        out = SequenceBias{};
++        if (params == nullptr || params->family == nullptr) return TRANSCRIBE_OK;
++        if (const transcribe_status st = transcribe_ext_check(params->family, TRANSCRIBE_EXT_KIND_COHERE_SEQUENCE_BIAS,
++                                                              sizeof(struct transcribe_cohere_sequence_bias_ext));
++            st != TRANSCRIBE_OK) {
++            return st;
++        }
++        const auto * ext = reinterpret_cast<const transcribe_cohere_sequence_bias_ext *>(params->family);
++        if (!std::isfinite(ext->bias) || ext->n_sequences < 0 ||
++            (ext->n_sequences > 0 && (ext->tokens == nullptr || ext->lengths == nullptr))) {
++            return TRANSCRIBE_ERR_INVALID_ARG;
++        }
++        if (ext->bias == 0.0f) return TRANSCRIBE_OK;
++        const int32_t * next = ext->tokens;
++        for (int32_t s = 0; s < ext->n_sequences; ++s) {
++            if (ext->lengths[s] <= 0) return TRANSCRIBE_ERR_INVALID_ARG;
++            std::vector<int> ids(next, next + ext->lengths[s]);
++            next += ext->lengths[s];
++            for (int id : ids) if (id < 0 || id >= vocab) return TRANSCRIBE_ERR_INVALID_ARG;
++            for (size_t end = 1; end <= ids.size(); ++end) {
++                std::vector<int> prefix(ids.begin(), ids.begin() + end);
++                if (std::find(out.sequences.begin(), out.sequences.end(), prefix) == out.sequences.end())
++                    out.sequences.push_back(std::move(prefix));
++            }
++        }
++        if (out.sequences.empty()) return TRANSCRIBE_ERR_INVALID_ARG;
++        out.amount = ext->bias;
++        return TRANSCRIBE_OK;
++    }
++
++    int select(ggml_tensor * logits, size_t offset, const std::vector<int> & generated) const {
++        const size_t vocab = static_cast<size_t>(logits->ne[0]);
++        std::vector<float> scores(vocab), bias(vocab, 0.0f);
++        ggml_backend_tensor_get(logits, scores.data(), offset * vocab * sizeof(float), vocab * sizeof(float));
++        for (const auto & ids : sequences) {
++            const size_t prefix = ids.size() - 1;
++            if (static_cast<size_t>(ids.back()) < vocab && generated.size() >= prefix &&
++                std::equal(ids.begin(), ids.end() - 1, generated.end() - prefix))
++                bias[ids.back()] += amount;
++        }
++        for (size_t i = 0; i < vocab; ++i) scores[i] += bias[i];
++        return static_cast<int>(std::max_element(scores.begin(), scores.end()) - scores.begin());
++    }
++};
++
+ static_assert(std::is_base_of_v<transcribe_model, CohereModel>);
+ static_assert(std::is_base_of_v<transcribe_session, CohereSession>);
+ 
+@@ -661,6 +717,11 @@ transcribe_status run(transcribe_session *          session,
+     if (cm == nullptr || cm->plan.scheduler_list.empty()) {
+         return TRANSCRIBE_ERR_INVALID_ARG;
+     }
++    SequenceBias sequence_bias;
++    if (const transcribe_status st = SequenceBias::from_params(params, cm->hparams.vocab_size, sequence_bias);
++        st != TRANSCRIBE_OK) {
++        return st;
++    }
+ 
+     // Pre-run abort check (cohere is single-chunk today).
+     if (cc->poll_abort()) {
+@@ -1079,6 +1140,9 @@ transcribe_status run(transcribe_session *          session,
+             }
+         }
+ 
++        if (sequence_bias.amount != 0.0f)
++            next_token = sequence_bias.select(db.dumps.logits_raw, prompt_len - 1, {});
++
+         std::vector<int> generated_ids;
+         if (next_token != eos_id) {
+             generated_ids.push_back(next_token);
+@@ -1156,7 +1220,7 @@ transcribe_status run(transcribe_session *          session,
+                 return TRANSCRIBE_ERR_OOM;
+             }
+             StepBuild sb = build_step_graph(cc->compute_ctx, cm->weights, cm->hparams, cc->kv_cache, max_n_kv, T_enc,
+-                                            cc->decoder_use_flash);
++                                            cc->decoder_use_flash, sequence_bias.amount != 0.0f);
+             if (sb.graph == nullptr || sb.argmax_out == nullptr) {
+                 log_msg(TRANSCRIBE_LOG_LEVEL_ERROR, "cohere run: build_step_graph failed");
+                 commit_result();
+@@ -1223,7 +1287,8 @@ transcribe_status run(transcribe_session *          session,
+ 
+                 int32_t argmax_id = 0;
+                 ggml_backend_tensor_get(sb.argmax_out, &argmax_id, 0, sizeof(int32_t));
+-                next_token = argmax_id;
++                next_token = sequence_bias.amount != 0.0f
++                    ? sequence_bias.select(sb.logits_raw, 0, generated_ids) : argmax_id;
+ 
+                 if (next_token != eos_id) {
+                     generated_ids.push_back(next_token);
+@@ -1308,7 +1373,8 @@ transcribe_status run(transcribe_session *          session,
+ 
+                 int32_t argmax_id = 0;
+                 ggml_backend_tensor_get(db_step.argmax_out, &argmax_id, 0, sizeof(int32_t));
+-                next_token = argmax_id;
++                next_token = sequence_bias.amount != 0.0f
++                    ? sequence_bias.select(db_step.dumps.logits_raw, 0, generated_ids) : argmax_id;
+ 
+                 if (next_token != eos_id) {
+                     generated_ids.push_back(next_token);
+@@ -1484,6 +1550,10 @@ transcribe_status run_batch(transcribe_session *          session,
+     if (cm == nullptr || cm->plan.scheduler_list.empty() || !cm->mel.has_value()) {
+         return TRANSCRIBE_ERR_INVALID_ARG;
+     }
++    // The names bias runs only through the offline single take run.
++    if (params != nullptr && params->family != nullptr) {
++        return TRANSCRIBE_ERR_INVALID_ARG;
++    }
+ 
+     // Batched decode requires the flash step path; fall back to serial for
+     // n==1, the CPU/manual path, or when debug dumping is active.
+@@ -1771,8 +1841,22 @@ transcribe_status run_batch(transcribe_session *          session,
+     return TRANSCRIBE_OK;
+ }
+ 
++// Run slot: the names bias, offline run only.
++bool accepts_ext_kind(const transcribe_model * model, transcribe_ext_slot slot, uint32_t kind) {
++    return model != nullptr && slot == TRANSCRIBE_EXT_SLOT_RUN && kind == TRANSCRIBE_EXT_KIND_COHERE_SEQUENCE_BIAS;
++}
++
+ }  // namespace
+ 
++extern "C" void transcribe_cohere_sequence_bias_ext_init(struct transcribe_cohere_sequence_bias_ext * p) {
++    if (p == nullptr) {
++        return;
++    }
++    std::memset(p, 0, sizeof(*p));
++    p->ext.size = sizeof(*p);
++    p->ext.kind = TRANSCRIBE_EXT_KIND_COHERE_SEQUENCE_BIAS;
++}
++
+ extern const Arch arch = {
+     /* .name             = */ "cohere_asr",
+     /* .load             = */ load,
+@@ -1784,7 +1868,7 @@ extern const Arch arch = {
+     /* .stream_feed      = */ nullptr,
+     /* .stream_finalize  = */ nullptr,
+     /* .stream_reset     = */ nullptr,
+-    /* .accepts_ext_kind = */ nullptr,
++    /* .accepts_ext_kind = */ accepts_ext_kind,
+ };
+ 
+ }  // namespace transcribe::cohere

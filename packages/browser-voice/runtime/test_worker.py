@@ -122,6 +122,24 @@ class WorkerTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(worker.ProtocolError):
                 worker.validate_partial(bad)
 
+    def test_transcribe_passes_final_settings_only_when_given(self):
+        class Final(Backend):
+            def transcribe(self, samples, settings=None):
+                self.calls.append((samples.tobytes(), settings))
+                return {"text": "", "processingMs": 0}
+
+        body = struct.pack("<2f", 0.5, -0.25)
+        fields = {k: v for k, v in identity(body).items() if k != "pcmBytes"}
+        data = (frame("load", options={}) + frame("transcribe", 2, body, settings={"namesBias": 2.5}, **fields)
+                + frame("transcribe", 3, body, **fields))
+        code, replies, backend, _, _ = self.run_worker(data, backend=Final())
+        self.assertEqual(code, 0)
+        self.assertEqual([r["type"] for r in replies], ["ready", "result", "result"])
+        self.assertEqual(backend.calls, [(body, {"namesBias": 2.5}), (body, None)])
+        code, replies, backend, _, _ = self.run_worker(
+            frame("load", options={}) + frame("transcribe", 2, body, settings=[2.5], **fields), backend=Final())
+        self.assertEqual((code, replies[-1]["type"], backend.calls), (1, "error", []))
+
     def test_cleanup_exact_text_empty_and_base_identity(self):
         setup = "mlx-cleanup/qwen-targeted"
         for text in ("", "  café\n{\"A\":\"launch\"}  "):

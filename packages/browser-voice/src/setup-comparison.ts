@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { resolveFinalSettings, type FinalSettings } from "./final-settings.ts";
 import { LiveTake, type LiveTakeEvent } from "./live-take.ts";
 import { getSetup, parseSetupSelection } from "./setup-registry.ts";
 import {
@@ -15,10 +16,12 @@ export class ComparisonBusyError extends Error {
 
 export type ComparisonRequest = {
   samples: Float32Array | Uint8Array; setupIds?: readonly SetupId[]; comparisonId?: string;
+  /** Final settings by setup id (final-settings.ts); omitted ones take their defaults. */
+  settings?: FinalSettings;
   signal?: AbortSignal; onEvent?(event: ComparisonEvent): void;
 };
 type Job = {
-  id: string; pcm: CanonicalPcm; ids: readonly SetupId[]; admitted: number;
+  id: string; pcm: CanonicalPcm; ids: readonly SetupId[]; settings: FinalSettings; admitted: number;
   controller: AbortController; rows: Map<SetupId, SetupRow>; onEvent?: ComparisonRequest["onEvent"];
   /** Live takes this comparison stopped; it runs after their last calls settle. */
   live: Promise<unknown>;
@@ -73,6 +76,7 @@ export class SetupComparison {
     if (this.#closed) throw new Error("comparison service is closed");
     if (this.#active && this.#queued) throw new ComparisonBusyError();
     const ids = parseSetupSelection(request.setupIds);
+    const settings = resolveFinalSettings(ids, request.settings);
     const id = request.comparisonId ?? randomUUID();
     if (typeof id !== "string" || !/^[a-zA-Z0-9_.:-]{1,128}$/.test(id)) throw new Error("invalid comparison id");
     if (this.#active?.id === id || this.#queued?.id === id) throw new Error("comparison id already admitted");
@@ -81,7 +85,7 @@ export class SetupComparison {
     const live = Promise.all([...this.#takes].map((take) => take.stop()));
     let resolve!: Job["resolve"];
     const done = new Promise<ComparisonResult>((r) => { resolve = r; });
-    const job: Job = { id, pcm, ids, admitted: this.#now(), controller: new AbortController(),
+    const job: Job = { id, pcm, ids, settings, admitted: this.#now(), controller: new AbortController(),
       rows: new Map(), onEvent: request.onEvent, live, resolve, done: false, detach() {} };
     const queued = this.#active !== undefined;
     if (queued) this.#queued = job;
@@ -93,6 +97,7 @@ export class SetupComparison {
     for (const setupId of ids) job.rows.set(setupId, {
       setupId, status: "queued", text: null, pcm: pcmIdentity(pcm), timings: blankTimings(),
       ...(setupId === CLEANUP_SETUP_ID ? { dependency: ULTRA_SETUP_ID } : {}),
+      ...(settings[setupId] ? { settings: settings[setupId] } : {}),
     });
     this.#emit(job, { type: "accepted", comparisonId: id, queued, setupIds: ids, pcm: pcmIdentity(pcm) });
     for (const row of job.rows.values()) this.#publish(job, row);
@@ -234,7 +239,8 @@ export class SetupComparison {
         assertBoundedText(base.result.text, "Ultra text");
         request = { operation: "cleanup", requestId: job.id, setupId, base: pcmIdentity(job.pcm),
           baseTextSha256: sha256(base.result.text), A: base.result.text, B: null };
-      } else request = { operation: "transcribe", requestId: job.id, setupId, pcm: job.pcm };
+      } else request = { operation: "transcribe", requestId: job.id, setupId, pcm: job.pcm,
+        ...(job.settings[setupId] ? { settings: job.settings[setupId] } : {}) };
       code = "load";
       this.#phase(job, setupId, "loading", timings);
       if (signal.aborted) throw new Error("comparison cancelled");

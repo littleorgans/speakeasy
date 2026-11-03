@@ -78,6 +78,33 @@ test("a live take transcribes without a prompt reader; saved takes still need on
   assert.equal(saved.status, 404);
 });
 
+test("a Cohere take carries its names setting to the executor and its row; values not offered are refused", async (t) => {
+  const { server, executor } = await host(t, { home: "road-test" });
+  const metadata = await (await fetch(server.url + "/prompt-reader/setups")).json() as { setups: any[] };
+  assert.deepEqual(metadata.setups.filter((setup) => setup.final).map((setup) => setup.id), ["cohere/transcribe"]);
+  assert.equal(metadata.setups.find((setup) => setup.id === "cohere/transcribe").final.settings[0].label, "Names");
+  const samples = Float32Array.from({ length: 1_600 }, (_, index) => Math.sin(index / 8) / 4);
+  const post = (settings?: unknown, setupIds = ["cohere/transcribe"]) => fetch(`${server.url}/prompt-reader/comparisons?${new URLSearchParams({
+    requestId: `road-${executor.calls.length}-${Math.random().toString(36).slice(2)}`, setupIds: JSON.stringify(setupIds),
+    ...(settings === undefined ? {} : { settings: JSON.stringify(settings) }) })}`, { method: "POST",
+    headers: { origin: server.url, "content-type": "application/octet-stream" }, body: new Blob([samples.buffer]) });
+  const gentle = await post({ "cohere/transcribe": { namesBias: 1.25 } });
+  assert.equal(gentle.status, 200);
+  const rows = (await gentle.text()).trim().split("\n").map((line) => JSON.parse(line)).filter((event) => event.type === "row");
+  assert.deepEqual(rows.at(-1).row.settings, { namesBias: 1.25 }, "the row records the value used");
+  assert.deepEqual(executor.calls.map((call) => call.operation === "transcribe" && call.settings), [{ namesBias: 1.25 }]);
+  await (await post()).text();
+  const off = executor.calls.at(-1)!;
+  assert.deepEqual(off.operation === "transcribe" && off.settings, { namesBias: 0 }, "Off unless chosen");
+  for (const [settings, setupIds] of [[{ "cohere/transcribe": { namesBias: 1 } }, ["cohere/transcribe"]],
+    [{ "cohere/transcribe": { namesBias: 2.5 } }, ["hex/unified"]], [[2.5], ["cohere/transcribe"]]] as const) {
+    const refused = await post(settings, [...setupIds]);
+    assert.equal(refused.status, 400, JSON.stringify(settings));
+    await refused.text();
+  }
+  assert.equal(executor.calls.length, 2, "refused takes never run");
+});
+
 test("every speech in setup carries a model card, and metadata adds the measured size", async (t) => {
   for (const setup of SETUPS) {
     assert.ok(setup.card.runtime.trim(), setup.id);

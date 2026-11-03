@@ -248,7 +248,12 @@ def handle_request(header, body, backend, setup_id, factory):
         validate_partial(result)
         return backend, {"type": "partial", "partial": result}
     if operation == "transcribe" and not cleanup and not voice:
-        result = backend.transcribe(pcm_samples(header, body))
+        # Final settings (src/final-settings.ts) go only to a backend that offers them.
+        settings = header.get("settings")
+        if settings is not None and not isinstance(settings, dict):
+            raise ProtocolError("transcribe settings are an object")
+        samples = pcm_samples(header, body)
+        result = backend.transcribe(samples) if settings is None else backend.transcribe(samples, settings)
     elif operation == "cleanup" and cleanup:
         result = backend.cleanup(cleanup_text(header))
     else:

@@ -25,7 +25,7 @@ export type CanonicalPcm = PcmIdentity & Readonly<{ samples: Float32Array; bytes
 
 export type SetupExecution =
   | Readonly<{ operation: "transcribe"; requestId: string; setupId: Exclude<SetupId, typeof CLEANUP_SETUP_ID>;
-      pcm: CanonicalPcm }>
+      pcm: CanonicalPcm; settings?: LiveSettings }>
   | Readonly<{ operation: "cleanup"; requestId: string; setupId: typeof CLEANUP_SETUP_ID;
       base: PcmIdentity; baseTextSha256: string; A: string; B: null }>;
 export type SetupLoadResult = { startupMs: number | null; loadMs: number | null; firstUse: boolean };
@@ -36,7 +36,10 @@ export type SetupExecutionResult = {
 export type SetupExecutionContext = Readonly<{ signal: AbortSignal }>;
 /** Live words while the owner speaks: settled text, then text the model may still change. */
 export type LivePartial = { stable: string; tentative: string; processingMs: number };
-/** Streaming settings by name, applied when a live stream starts (live-settings.ts). */
+/**
+ * Settings by name: streaming ones applied when a live stream starts
+ * (live-settings.ts), final ones with each take (final-settings.ts).
+ */
 export type LiveSettings = Readonly<Record<string, number>>;
 
 /**
@@ -68,7 +71,7 @@ export type SetupRowStatus = "queued" | "loading" | "processing" | "complete" | 
 export type SetupRow = {
   setupId: SetupId; status: SetupRowStatus; text: string | null; rawText?: string; decodeMs?: number | null;
   pcm: PcmIdentity; timings: SetupTimings; error?: SetupFailure; dependency?: typeof ULTRA_SETUP_ID;
-  activeSetupId?: SetupId;
+  activeSetupId?: SetupId; settings?: LiveSettings;
 };
 export type ComparisonEvent =
   | { type: "accepted"; comparisonId: string; queued: boolean; setupIds: readonly SetupId[]; pcm: PcmIdentity }
@@ -85,7 +88,7 @@ export type SetupWorkerRequest = {
   version: 1; generation: string; requestId: string; setupId: SetupId;
   operation: "transcribe" | "cleanup" | "feed"; sampleRate: 16000; channels: 1;
   sampleCount: number; pcmBytes: number; pcmSha256: string;
-  A?: string; B?: null; base?: PcmIdentity; baseTextSha256?: string; start?: boolean;
+  A?: string; B?: null; base?: PcmIdentity; baseTextSha256?: string; start?: boolean; settings?: LiveSettings;
 };
 export type SetupWorkerReply =
   | { type: "ready"; version: 1; generation: string; setupId: SetupId;

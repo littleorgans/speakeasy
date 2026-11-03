@@ -56,6 +56,7 @@ const STATIC_FILES = new Map([
   ["/live-trail.js", "live-trail.js"],
   ["/talk-over.js", "talk-over.js"],
   ["/road-test-text.js", "road-test-text.js"],
+  ["/setting-controls.js", "setting-controls.js"],
 ]);
 const PROMPT_READER_API = "/prompt-reader/";
 const PROMPT_READER_TAKES = "/prompt-reader/takes/";

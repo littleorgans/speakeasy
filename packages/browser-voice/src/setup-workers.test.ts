@@ -45,7 +45,7 @@ class Fake:
         if mode in ("sendRace", "exitAfterReady"):
             self.mark()
         return {"revision": "pinned", "setupId": self.options.get("setupId"), "loadMs": 2, "pid": os.getpid()}
-    def transcribe(self, samples):
+    def transcribe(self, samples, settings=None):
         self.calls += 1
         if mode == "ignoreTerm":
             signal.signal(signal.SIGTERM, signal.SIG_IGN)
@@ -62,7 +62,8 @@ class Fake:
             os.write(2, b"x" * 50000)
         raw = samples.tobytes()
         return {"text": hashlib.sha256(raw).hexdigest(), "processingMs": 3, "decodeMs": 1,
-                "diagnostics": {"hex": raw.hex(), "count": len(samples), "pid": os.getpid(), "calls": self.calls}}
+                "diagnostics": {"hex": raw.hex(), "count": len(samples), "pid": os.getpid(), "calls": self.calls,
+                                **({"settings": settings} if settings is not None else {})}}
     def cleanup(self, text):
         return {"text": text, "rawText": text, "processingMs": 0}
     def feed(self, samples, start, settings):
@@ -418,6 +419,9 @@ test("scheduler executor loads explicitly, verifies canonical identity, and pres
   const cleaned = await executor.execute(cleanup, context);
   assert.equal(cleaned.text, "");
   await assert.rejects(executor.execute({ ...cleanup, baseTextSha256: "0".repeat(64) }, context), /identity/);
+  assert.equal(result.diagnostics!.settings, undefined, "a take without final settings sends none");
+  const biased = await executor.execute({ ...request, settings: { namesBias: 2.5 } }, context);
+  assert.deepEqual(biased.diagnostics!.settings, { namesBias: 2.5 }, "a take's final settings reach the backend");
   await executor.release(request.setupId);
   await assert.rejects(executor.execute(request, context), /explicit load required/);
   await executor.load(request.setupId, context);
