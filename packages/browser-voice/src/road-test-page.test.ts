@@ -555,6 +555,8 @@ test("the live words line names the live model, the settings the host applied, a
   assert.equal(text.liveLine(null, { ...ultra, card: { transcript: "partials" } }), "Live words off.");
   assert.equal(text.liveLine({ setup: ultra, stream, settings: { updateMs: 800 } }, qwen),
     "Live words: Parakeet Ultra MLX stream, updates every 800 ms, the last 5.12 s may change. Qwen3 ASR with known words writes the final text only.");
+  assert.equal(text.liveSettingsNote({ stream, settings: { updateMs: 1_600 } }), "Updates every 1.6 s",
+    "Earlier takes name the setting by its label");
 });
 
 test("live words default to the setup's own stream; another live model and its settings reach the channel, and each figure names its model", async () => {
@@ -596,7 +598,8 @@ test("live words default to the setup's own stream; another live model and its s
   assert.equal(elements.get("trail-list").children.length, 3, "two updates, then the final");
   await take(page, 5_000);
   const row = elements.get("history").children[0];
-  assert.equal(row.children[0].children.map((cell: any) => cell.textContent).join(" | "), "Parakeet v3 MLX | Live words Hex Parakeet Unified");
+  assert.equal(row.children[0].children.map((cell: any) => cell.textContent).join(" | "), "Parakeet v3 MLX | Live words Hex Parakeet Unified · Lookahead 480 ms",
+    "an earlier take names its live model and the setting the host applied");
   assert.equal(row.children[2].children.at(-1).children[0].textContent, "2 updates, no corrections", "earlier takes keep the trail");
   elements.get("input-model").listeners.get("change")!();
   assert.equal(elements.get("live-model").value, "mlx-parakeet/v3-greedy", "a new speech in choice restores its own pairing");

@@ -2,7 +2,7 @@ import { HoldReleaseGate } from "/hold-release.js";
 import { LiveWords } from "/live-words.js";
 import { MicCapture } from "/mic-capture.js";
 import { trailItems, trailSummary } from "/live-trail.js";
-import { formatDuration, inputCard, liveLine, outputCard, outputLatency, readEvents } from "/road-test-text.js";
+import { formatDuration, inputCard, liveLine, liveSettingsNote, outputCard, outputLatency, readEvents } from "/road-test-text.js";
 import { TalkOverDetector } from "/talk-over.js";
 import { VoiceReadback } from "/voice-readback.js";
 
@@ -27,7 +27,7 @@ const LISTENING = "Listening. Release when you finish.";
 const DONE = "Done";
 /** Earlier takes columns; the transcript spans a line of its own, and narrow screens label each cell with these. */
 const HISTORY_COLUMNS = [
-  { label: "Speech in", cell: (run) => [run.setup.label, liveDiffers(run) ? `Live words ${run.liveChoice.setup.label}` : null] },
+  { label: "Speech in", cell: (run) => [run.setup.label, liveNote(run)] },
   { label: "Voice", cell: (run) => [run.output ? run.voiceLabel : null] },
   { label: "Transcript", kind: "said-cell", cell: (run) => [run.input.error || run.input.text || "Nothing heard"], trail: true },
   { label: "Press to first words", kind: "num", cell: (run) => [formatDuration(pressToFirstWords(run))] },
@@ -487,10 +487,7 @@ export class RoadTestPage {
 
   /** The line naming what made the latest take's live words (or would make the next), and its trail. */
   renderLive(run) {
-    const choice = run ? run.liveChoice : this.liveChoice();
-    const applied = run?.live?.stream;
-    this.elements["live-line"].textContent = liveLine(choice && { ...choice, settings: applied?.settings ?? choice.settings },
-      run?.setup ?? this.setup());
+    this.elements["live-line"].textContent = liveLine(run ? appliedLive(run) : this.liveChoice(), run?.setup ?? this.setup());
     const updates = run?.live?.updates ?? [];
     this.elements.trail.hidden = updates.length === 0;
     this.elements["trail-summary"].textContent = updates.length ? trailSummary(updates) : "";
@@ -576,6 +573,19 @@ function pressToFirstWords(run) {
   if (!run?.liveChoice) return null;
   const firstWordsAt = run.live?.firstWordsAt ?? (run.input?.text?.trim() ? run.input.finalAt : null);
   return firstWordsAt != null && run.pressedAt != null ? firstWordsAt - run.pressedAt : null;
+}
+
+/** A take's live choice with the settings the host applied, where it reported them; null with live words off. */
+function appliedLive(run) {
+  const choice = run.liveChoice;
+  return choice && { ...choice, settings: run.live?.stream?.settings ?? choice.settings };
+}
+
+/** An earlier take's live words: the live model where it differs from the final one, and its settings. */
+function liveNote(run) {
+  if (!run.liveChoice) return null;
+  return [liveDiffers(run) ? `Live words ${run.liveChoice.setup.label}` : null, liveSettingsNote(appliedLive(run))]
+    .filter(Boolean).join(" · ");
 }
 
 /** Whether another model than the final one made the take's live words. */

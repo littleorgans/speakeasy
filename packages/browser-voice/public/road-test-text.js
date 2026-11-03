@@ -53,6 +53,14 @@ export function liveLine(live, final) {
   return `Live words: ${[`${live.setup.label} stream`, ...phrases].join(", ")}.${replaced}`;
 }
 
+/** A take's live settings by their labels, so Earlier takes rows at different settings differ: "Lookahead 480 ms". */
+export function liveSettingsNote(live) {
+  return live.stream.settings.map((setting) => {
+    const option = setting.options.find((entry) => entry.value === live.settings[setting.id]);
+    return option && `${setting.label} ${option.label.toLowerCase()}`;
+  }).filter(Boolean).join(", ");
+}
+
 /** The browser's reported output path delays in ms; null where it reports none. */
 export function outputLatency(context) {
   const ms = (seconds) => Number.isFinite(seconds) ? seconds * 1_000 : null;
