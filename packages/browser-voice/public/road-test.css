@@ -40,7 +40,8 @@ h1 { flex: none; font-size: var(--text); font-weight: 600; }
 
 .quiet, .label, kbd, th, dt, footer { font-size: var(--small); color: var(--ink-3); }
 
-.label { display: flex; justify-content: space-between; gap: 16px; color: var(--ink-2); font-weight: 500; }
+/* A side note that does not fit moves whole to its own line, at the left edge. */
+.label { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 16px; color: var(--ink-2); font-weight: 500; }
 
 .head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
 
@@ -144,10 +145,11 @@ footer { padding-top: 24px; border-top: 1px solid var(--rule); }
 @media (max-width: 640px) {
   .pair { grid-template-columns: 1fr; }
   .timings { grid-template-columns: 1fr; }
-  /* Two equal buttons on one line, the level line under both. */
+  /* Two equal buttons on one line; the level line meters inside Hold to speak. */
   .talk { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 8px; }
   .talk button { min-height: 48px; padding: 0 8px; white-space: nowrap; }
-  .level { grid-column: 1 / -1; }
+  .hold, .level { grid-area: 1 / 1; }
+  .level { align-self: end; margin: 0 16px 8px; pointer-events: none; }
   .replay { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .replay:has(#replay-talk-over:not([hidden])) #replay-voice { grid-column: 1 / -1; }
   /* Each earlier take stacks into labelled lines, so every timing stays on screen. */
