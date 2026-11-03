@@ -254,7 +254,8 @@ export class RoadTestPage {
     this.render();
     const output = await speaking;
     run.output = output;
-    if (run.interrupt) run.interrupt.stopMs = output.stopMs;
+    // Only a stopped reading times its interrupt; a finished one leaves a stop carried from the last take alone.
+    if (output.outcome === "stopped" && run.interrupt) run.interrupt.stopMs = output.stopMs;
     run.outputLatency = outputLatency(this.context);
     if (this.run !== run && this.phase !== "cut-in") return;
     if (output.outcome === "error") this.status(`Voice failed: ${output.message}`);

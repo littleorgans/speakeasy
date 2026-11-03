@@ -193,7 +193,7 @@ test("mic capture leads a take with pre roll and ends it at the worklet's flush 
 /**
  * The page with real gate, detector and text helpers; the mic and voice are
  * scripted fakes. With holdVoice the voice plays until stopped, then reports
- * a 41 ms stop. Each mic take is one sample longer than the last, so replays
+ * a 41 ms stop; clearing the readback's hold lets later readings finish. Each mic take is one sample longer than the last, so replays
  * show which take they play.
  */
 function pageHarness({ holdVoice = false } = {}, rows: unknown[] = [
@@ -221,10 +221,10 @@ function pageHarness({ holdVoice = false } = {}, rows: unknown[] = [
   class Mic { open = true; recording = false; async start() {} beginTake() { this.recording = true; return 0; }
     async endTake() { this.recording = false; return { samples: new Float32Array(8_000 + takes++).fill(0.1), preRollSamples: 0 }; } }
   const voice = { firstAudioMs: 120, samples: new Float32Array(4), sampleRate: 22_050 };
-  class Readback { active = false; playing = false; stopped?: (result: unknown) => void; async prepare() {}
+  class Readback { active = false; playing = false; hold = holdVoice; stopped?: (result: unknown) => void; async prepare() {}
     speak(request: any) {
       spoken.push(request);
-      if (!holdVoice) return Promise.resolve({ ...voice, outcome: "finished", totalMs: 900 });
+      if (!this.hold) return Promise.resolve({ ...voice, outcome: "finished", totalMs: 900 });
       this.active = this.playing = true;
       return new Promise((resolve) => { this.stopped = resolve; });
     }
@@ -312,16 +312,23 @@ test("model start sums every load phase, so a cleanup row counts its own model a
   } finally { performance.now = clock; }
 });
 
-test("Space over the voice stops it like Esc, and the new take shows the stop time", async () => {
+test("Space over the voice stops it like Esc, and the new take keeps the stop time through its own readback", async () => {
   const { page, elements } = pageHarness({ holdVoice: true });
   await page.start();
   await take(page, 100);
   const first = page.run;
+  page.readback.hold = false;
   page.press(3_000);
   assert.notEqual(page.run, first, "the press starts a new take");
   assert.equal(first.interrupt.kind, "stop");
   await until(() => page.history.includes(first));
   assert.ok(listed(elements.get("interrupt-timings")).includes("Stop to silence: 41 ms"));
+  const second = page.run;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  page.release(3_400);
+  await until(() => second.output?.outcome === "finished" && page.phase === "idle");
+  assert.ok(listed(elements.get("interrupt-timings")).includes("Stop to silence: 41 ms"),
+    "a readback that finished leaves the carried stop time alone");
 });
 
 test("after a talk over both recordings replay, each under its own button", async () => {
