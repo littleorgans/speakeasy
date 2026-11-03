@@ -74,6 +74,38 @@ export function payloadDir(model: TtsModel | WorkerTtsModel, root: string): stri
   return join("hub" in model && model.hub ? TTS_CACHE_ROOT : root, model.name);
 }
 
+/** mattmireles/kokoro-coreml's hosted bundle at 034f7741, shared by both ANE generators; Core ML compiles into compiled-v2/ beside it. */
+const KOKORO_ANE_FILES = [
+  { name: ".kokoro-hosted-version", bytes: 48, sha256: "3ad2f3d0bb893dac817df3b6b9b1f4864c798557431a5b999cd9efe39a048450" },
+  { name: "KokoroRuntimeManifest.json", bytes: 7_106, sha256: "9fd44cba02b555ffc7dd12ee71249d816c2eab1a9d2cb6bdde42e4a8fbc42195" },
+  { name: "coreml/hybrid/adain.bin", bytes: 9_547_776, sha256: "42c1298ba5a158f37f0070eb4e5039c709a56c2c313e5d810bf612f46f129287" },
+  { name: "coreml/hybrid/hybrid_generator_r6.mlpackage/Data/com.apple.CoreML/model.mlmodel", bytes: 77_831, sha256: "cb832370277fa55b7c2162c7102741cbc416fbc47c4424b7270dbb28674cdfce" },
+  { name: "coreml/hybrid/hybrid_generator_r6.mlpackage/Data/com.apple.CoreML/weights/weight.bin", bytes: 39_543_916, sha256: "922e85e22e09e6bbea2839514022f4508126153a05ec4af8edbf94c9d08b765f" },
+  { name: "coreml/hybrid/hybrid_generator_r6.mlpackage/Manifest.json", bytes: 617, sha256: "57df0f5adf4745ebf48e9a93e694672e90ef6d821d508f2933dd0a748daf63b2" },
+  { name: "coreml/hybrid/plan.json", bytes: 8_770, sha256: "1b36e2b10238337b117515711a3c73726c7f825806f8af3d891d14d9525044de" },
+  { name: "coreml/kokoro_decoder_pre_15s.mlpackage/Data/com.apple.CoreML/model.mlmodel", bytes: 97_206, sha256: "0804b194becf5603b808b361914758fc733a2c002400376c9e6b7d1c996026fc" },
+  { name: "coreml/kokoro_decoder_pre_15s.mlpackage/Data/com.apple.CoreML/weights/weight.bin", bytes: 67_196_224, sha256: "e99083362de70b2e9186fd954126f1cc5158a1b49ead202af84489abf181e6ff" },
+  { name: "coreml/kokoro_decoder_pre_15s.mlpackage/Manifest.json", bytes: 617, sha256: "f05977607c2183070e6b9537cfe39fdfa8f3331ad1be60c6a864f3f76983ea06" },
+  { name: "coreml/kokoro_duration_ane_front_t128.mlpackage/Data/com.apple.CoreML/model.mlmodel", bytes: 338_221, sha256: "ac32c1c6dff98c783a2eee0aedb1e2482558fb027f1917207e5b2b9d4c5bd88a" },
+  { name: "coreml/kokoro_duration_ane_front_t128.mlpackage/Data/com.apple.CoreML/weights/weight.bin", bytes: 20_161_600, sha256: "65eb22bb1ab26021f820496ec1af0c38539932e8401125f21fb85e1b65f725bc" },
+  { name: "coreml/kokoro_duration_ane_front_t128.mlpackage/Manifest.json", bytes: 617, sha256: "877cce0d5b014b3ca0e0dbbe86911f6453f58444d568768ccb565c980dfd39a6" },
+  { name: "coreml/kokoro_duration_back_t128.mlpackage/Data/com.apple.CoreML/model.mlmodel", bytes: 60_994, sha256: "1c2cb706455a540fffb5ddacf33273d763b81428ad447da290111403db20bf6f" },
+  { name: "coreml/kokoro_duration_back_t128.mlpackage/Data/com.apple.CoreML/weights/weight.bin", bytes: 18_693_824, sha256: "44adfe24c59f4d5ab0ba21e31a65ca68a9af5fc56c82289f41e15f7ecc1896a7" },
+  { name: "coreml/kokoro_duration_back_t128.mlpackage/Manifest.json", bytes: 617, sha256: "62b84fe30171d79d88f060cb09eea8a5c721c705dab713337ca953a6b16da057" },
+  { name: "coreml/kokoro_f0ntrain_ane_back_t600.mlpackage/Data/com.apple.CoreML/model.mlmodel", bytes: 103_768, sha256: "8f9d0c935317c03502dd914d7211619876ede4bd310e32aefce7066c0e70d73b" },
+  { name: "coreml/kokoro_f0ntrain_ane_back_t600.mlpackage/Data/com.apple.CoreML/weights/weight.bin", bytes: 13_151_936, sha256: "640ed6a4a11ba47d97850e35ba1c41453478c67053d80d5278e469ef2e9f0ea1" },
+  { name: "coreml/kokoro_f0ntrain_ane_back_t600.mlpackage/Manifest.json", bytes: 617, sha256: "5adabb487996af3a2f90918dc15f06c5635117cca5aecd97f08879818ab2843d" },
+  { name: "coreml/kokoro_f0ntrain_front_t600.mlpackage/Data/com.apple.CoreML/model.mlmodel", bytes: 11_489, sha256: "986e3571285db4e6790b137850cdd5ad322ea47d7ea4213a604c210c21c1765d" },
+  { name: "coreml/kokoro_f0ntrain_front_t600.mlpackage/Data/com.apple.CoreML/weights/weight.bin", bytes: 3_677_632, sha256: "321678b57ec85361f22b85b8d2f6a92102238085991ced40d9bca44999ece4a0" },
+  { name: "coreml/kokoro_f0ntrain_front_t600.mlpackage/Manifest.json", bytes: 617, sha256: "92715683a208b585ad381a90a006e73453defed8a7581ffa7c00dfef27ce7059" },
+  { name: "coreml/kokoro_generator_fold_poly_15s.mlpackage/Data/com.apple.CoreML/model.mlmodel", bytes: 541_779, sha256: "5afe5608dd74570da5d0ac0c9d76bfd898fa53eb62cd5e3594ec788b5e65c65e" },
+  { name: "coreml/kokoro_generator_fold_poly_15s.mlpackage/Data/com.apple.CoreML/weights/weight.bin", bytes: 44_333_740, sha256: "0f4126e01236cb54e8116be75fc68a0628d2355ae30a7e483a20045c810190dc" },
+  { name: "coreml/kokoro_generator_fold_poly_15s.mlpackage/Manifest.json", bytes: 617, sha256: "ac23057ed9ad2b25bf8b57f8e76f81de5cadaf95891a01fd6b5e93eb8465b0ec" },
+  { name: "runtime/hnsf_weights.json", bytes: 336, sha256: "de73b717732da77b31736f67a108d35c478ab116b0a188e9787019b0408c0226" },
+  { name: "runtime/kokoro-vocab.json", bytes: 1_159, sha256: "353ca94410fde4575cb091a0ba32b8e99077fde4f38fded506f4f041d22571a3" },
+  { name: "voices/af_heart.bin", bytes: 522_240, sha256: "d583ccff3cdca2f7fae535cb998ac07e9fcb90f09737b9a41fa2734ec44a8f0b" },
+] as const;
+
 /** Payload pins from the approved local research records. Explicit provisioning only. */
 export const LOCAL_TTS_MODELS = {
   "piper-kristin-medium": {
@@ -240,6 +272,24 @@ export const LOCAL_TTS_MODELS = {
       { name: "README.md", bytes: 7_634, sha256: "cb6328d302edd8b282b347b8f4fa6f5469f2f42cf3693924408edd132eb596c3" },
     ],
     attribution: ["README.md"],
+  },
+  "kokoro-ane-heart": {
+    name: "kokoro-coreml-mattmireles-034f7741",
+    note: "Kokoro v1.0 Core ML, mattmireles/kokoro-coreml b23caa8 bundle 034f7741, hybrid generator (Neural Engine and GPU), af_heart",
+    family: "worker",
+    sampleRate: 24_000,
+    numSpeakers: 1,
+    files: KOKORO_ANE_FILES,
+    attribution: [],
+  },
+  "kokoro-ane-folded-heart": {
+    name: "kokoro-coreml-mattmireles-034f7741",
+    note: "Kokoro v1.0 Core ML, mattmireles/kokoro-coreml b23caa8 bundle 034f7741, folded generator (Neural Engine only), af_heart",
+    family: "worker",
+    sampleRate: 24_000,
+    numSpeakers: 1,
+    files: KOKORO_ANE_FILES,
+    attribution: [],
   },
 } as const satisfies Record<string, TtsModel | WorkerTtsModel>;
 

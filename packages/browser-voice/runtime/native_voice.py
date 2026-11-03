@@ -2,8 +2,9 @@
 
 Backend options are exactly setupId, an absolute modelPath (the voice's
 snapshot), files (its pins from the host registry) and an absolute runnerPath
-(the binary its runtime/<voice>/build.py built). Construction starts nothing; load attests the snapshot and starts the
-default voice's runner. speak sends one request line and gathers its frames.
+(the binary its runtime/<voice>/build.py built). Construction starts nothing; load attests the snapshot, starts the
+default voice's runner and, where its spec asks, warms it with one short request. speak sends one request line and
+gathers its frames.
 
 Runner protocol (experiments/fast-tts/candidates/NATIVE.md): a request is one
 line on stdin, `S<TAB>part<US>part...`; `Q` quits. Replies on stdout are frames
@@ -31,8 +32,10 @@ SEPARATORS = ("\t", "\n", "\r")
 SPECS = {}
 
 
-def spec(voice_id, *, label, sample_rate, voices, args, per_voice):
-    SPECS[voice_id] = {"label": label, "sampleRate": sample_rate, "voices": voices, "args": args, "perVoice": per_voice}
+def spec(voice_id, *, label, sample_rate, voices, args, per_voice, warmup=None):
+    """warmup: a short request load sends first, for a runner whose first synthesis loads its models."""
+    SPECS[voice_id] = {"label": label, "sampleRate": sample_rate, "voices": voices, "args": args, "perVoice": per_voice,
+                       "warmup": warmup}
 
 
 # Kristin with libpiper's split decoder; the host sends Piper Plus phoneme characters, one part per sentence.
@@ -41,6 +44,12 @@ spec("piper-kristin-split", label="Piper split", sample_rate=22_050, voices=("kr
 # Kokoro v1.0 through FluidAudio's legacy Core ML route; the voice is a launch argument.
 spec("kokoro-coreml", label="Kokoro Core ML", sample_rate=24_000, voices=("af_heart", "am_michael"), per_voice=True,
      args=lambda model, voice: [str(model), voice, "legacy"])
+# Kokoro v1.0 on mattmireles/kokoro-coreml (experiments/kokoro-ane): the third argument picks the generator.
+# Its first synthesis loads the Core ML models, about 1 s, so load warms it up as the experiment advises.
+spec("kokoro-ane-heart", label="Kokoro ANE hybrid", sample_rate=24_000, voices=("af_heart",), per_voice=False,
+     args=lambda model, voice: [str(model), voice, "hybrid"], warmup="Hello.")
+spec("kokoro-ane-folded-heart", label="Kokoro ANE folded", sample_rate=24_000, voices=("af_heart",), per_voice=False,
+     args=lambda model, voice: [str(model), voice, "folded"], warmup="Hello.")
 
 
 class Backend:
@@ -68,7 +77,9 @@ class Backend:
         if not self._runner.is_file():
             raise ValueError(f"{self._spec['label']} runner is missing")
         start = time.perf_counter()
-        ready = self._process(self._spec["voices"][0])[1]
+        process, ready = self._process(self._spec["voices"][0])
+        if self._spec["warmup"]:
+            self._synthesize(process, self._spec["warmup"])
         self._metadata = {"setupId": self._voice_id, "runtime": ready, "sampleRate": self._spec["sampleRate"],
                           "loadMs": (time.perf_counter() - start) * 1000}
         return copy.deepcopy(self._metadata)
@@ -108,8 +119,14 @@ class Backend:
             raise ValueError(f"{self._spec['label']} has no speed control; speak at 1")
         if any(separator in text for separator in SEPARATORS):
             raise ValueError("speak text contains a runner protocol separator")
-        process = self._process(voice)[0]
         start = time.perf_counter()
+        audio = self._synthesize(self._process(voice)[0], text)
+        elapsed = (time.perf_counter() - start) * 1000
+        if not math.isfinite(elapsed):
+            raise ValueError("Native voice timing must be finite")
+        return {"samples": bytes(audio), "sampleRate": self._spec["sampleRate"], "processingMs": elapsed}
+
+    def _synthesize(self, process, text):
         process.stdin.write(f"S\t{text}\n".encode("utf-8"))
         process.stdin.flush()
         audio = bytearray()
@@ -123,10 +140,7 @@ class Backend:
                 break
             else:
                 raise RuntimeError(f"{self._spec['label']} runner: {payload}")
-        elapsed = (time.perf_counter() - start) * 1000
-        if not math.isfinite(elapsed):
-            raise ValueError("Native voice timing must be finite")
-        return {"samples": bytes(audio), "sampleRate": self._spec["sampleRate"], "processingMs": elapsed}
+        return audio
 
     def close(self):
         processes, self._processes = self._processes, {}

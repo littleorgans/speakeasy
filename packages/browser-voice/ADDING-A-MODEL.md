@@ -143,7 +143,8 @@ A worker voice also needs:
    `BACKENDS` and `VOICES` in `runtime/worker.py`. A Python runtime gets its
    own `runtime/<name>.py` (`runtime/kokoro_mlx.py` is the example). A native
    runner that speaks the fast-tts frame protocol needs only a `spec` line in
-   `runtime/native_voice.py`, its source and a `build.py` under
+   `runtime/native_voice.py` (with `warmup` text where its first synthesis
+   loads its models, so Model start counts that load), its source and a `build.py` under
    `runtime/<name>/` that builds into `~/Library/Caches/speakeasy/<name>/`,
    and `runnerPath` in the runtime file.
 5. For a Python runtime, a pinned environment: freeze it to

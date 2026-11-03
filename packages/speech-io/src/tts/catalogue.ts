@@ -110,6 +110,28 @@ export const LOCAL_OUTPUT_MODELS = [
       { id: "aiden", label: "Aiden", languages: ["en"], speakerId: 1 },
     ],
   },
+  {
+    id: "kokoro-ane-heart",
+    label: "Kokoro ANE hybrid",
+    provider: { kind: "local" },
+    runtime: "kokoro-coreml b23caa8 on Core ML, Neural Engine and GPU",
+    defaultVoice: "af_heart",
+    sampleRate: 24_000,
+    streaming: "sentence",
+    licence: "Apache 2.0 weights (hexgrad/Kokoro-82M), kokoro-coreml SDK and MisakiSwift. The hosted bundle's own card licence and the full transitive review are unchecked. Generated audio rights unverified.",
+    voices: [{ id: "af_heart", label: "Heart", languages: ["en-US"], speakerId: 0 }],
+  },
+  {
+    id: "kokoro-ane-folded-heart",
+    label: "Kokoro ANE folded",
+    provider: { kind: "local" },
+    runtime: "kokoro-coreml b23caa8 on Core ML, Neural Engine only",
+    defaultVoice: "af_heart",
+    sampleRate: 24_000,
+    streaming: "sentence",
+    licence: "Apache 2.0 weights (hexgrad/Kokoro-82M), kokoro-coreml SDK and MisakiSwift. The hosted bundle's own card licence and the full transitive review are unchecked. Generated audio rights unverified.",
+    voices: [{ id: "af_heart", label: "Heart", languages: ["en-US"], speakerId: 0 }],
+  },
 ] as const;
 
 export type LocalOutputModel = typeof LOCAL_OUTPUT_MODELS[number];

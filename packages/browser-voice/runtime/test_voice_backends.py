@@ -19,6 +19,7 @@ BACKENDS = [
     ("native_voice", "kokoro-coreml", "af_heart", {"runnerPath": "/r"}, None),
     ("phonon", "phonon-31m", "default", {}, "ptts"),
     ("qwen_tts", "qwen3-tts-0.6b", "ryan", {"runnerPath": "/r"}, None),
+    ("native_voice", "kokoro-ane-folded-heart", "af_heart", {"runnerPath": "/r"}, None),
 ]
 
 # A runner speaking the native frame protocol: READY, then per request one AUDIO frame per part and END.
@@ -110,6 +111,27 @@ class VoiceBackendTests(unittest.TestCase):
                 backend.close()
             self.assertTrue(all(process.poll() is not None for process in processes))
         self.assertFalse(native_voice.SPECS["piper-kristin-split"]["perVoice"])
+
+    def test_a_runner_that_loads_its_models_on_first_synthesis_is_warmed_inside_load(self):
+        with tempfile.TemporaryDirectory() as root:
+            runner = Path(root) / "runner"
+            # The frame runner, also logging each request's parts to requests.log beside it.
+            runner.write_text(FAKE_RUNNER.format(python=sys.executable).replace(
+                '    parts = line[2:].split("\\x1f")\n',
+                '    parts = line[2:].split("\\x1f")\n'
+                '    open(os.path.join(os.path.dirname(sys.argv[0]), "requests.log"), "a").write(line[2:] + "\\n")\n'))
+            runner.chmod(0o755)
+            (Path(root) / "weights.bin").write_bytes(b"pins")
+            for voice_id, generator in (("kokoro-ane-heart", "hybrid"), ("kokoro-ane-folded-heart", "folded")):
+                (Path(root) / "requests.log").write_text("")
+                backend = self.backend("native_voice", voice_id, {"runnerPath": str(runner)}, root)
+                try:
+                    self.assertEqual(backend.load()["runtime"]["args"], [root, "af_heart", generator])
+                    backend.speak("ab", "af_heart", 1)
+                finally:
+                    backend.close()
+                self.assertEqual((Path(root) / "requests.log").read_text().split(), ["Hello.", "ab"],
+                                 "load warms the runner once, before the first visible request")
 
 
 if __name__ == "__main__":
