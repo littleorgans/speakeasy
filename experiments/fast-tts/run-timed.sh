@@ -17,6 +17,8 @@ POCKET_PY="${POCKET_PY:-$TMPDIR/venv-pocket/bin/python}"
 export KOKORO_ANE_WORKER="${KOKORO_ANE_WORKER:-$TMPDIR/kokoro-ane-worker-build/release/KokoroAneWorker}"
 export SUPERTONIC_NODE="${SUPERTONIC_NODE:-$TMPDIR/supertonic-node}"
 export PIPER_SPLIT_WORKER="${PIPER_SPLIT_WORKER:-$TMPDIR/libpiper-install/bin/piper-split-worker}"
+# kokoro-ane-* (experiments/kokoro-ane/README.md) run when named in ENGINES.
+export KOKORO_COREML_WORKER="${KOKORO_COREML_WORKER:-$TMPDIR/kokoro-coreml-worker-build/release/KokoroCoreMLWorker}"
 MODES="${MODES:-stream full}"
 COLD_TEXTS="${COLD_TEXTS:-status summary handover}"  # one per length class
 HERE=experiments/fast-tts
@@ -31,6 +33,7 @@ render() {
     kokoro-mlx-*) "$KOKORO_MLX_PY" -I "$HERE/candidates/kokoro-mlx/render.py" --engine "$engine" "$@" ;;
     pocket-18m-*) "$POCKET_PY" -I "$HERE/candidates/pocket-18m/render.py" --engine "$engine" "$@" ;;
     kokoro-coreml-*) node "$HERE/candidates/kokoro-coreml/render.ts" --engine "$engine" "$@" ;;
+    kokoro-ane-*) node experiments/kokoro-ane/render.ts --engine "$engine" "$@" ;;
     supertonic3-*) node "$HERE/candidates/supertonic3/render.ts" --engine "$engine" "$@" ;;
     piper-split-*) node "$HERE/candidates/piper-split/render.ts" --engine "$engine" "$@" ;;
     *) node "$HERE/render-baselines.ts" --engine "$engine" "$@" ;;
