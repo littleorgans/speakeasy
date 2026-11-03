@@ -149,7 +149,7 @@ export class SetupResults {
 
   async run() {
     const source = this.source();
-    if (!source || this.page.gate.capturing || this.page.draining) return;
+    if (!source || this.page.gate.capturing || this.page.mic?.draining) return;
     if (this.provider() !== "local") {
       await this.runApi(source);
       return;
@@ -327,7 +327,7 @@ export class SetupResults {
   render() {
     const source = this.source();
     const local = this.provider() === "local";
-    const frozen = this.page.gate.capturing || this.page.draining;
+    const frozen = this.page.gate.capturing || this.page.mic?.draining;
     this.elements["input-selection"].disabled = frozen;
     this.elements["input-local"].hidden = !local;
     this.elements["input-api"].hidden = local;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { pageHarness, okReply, readyTake, enableComparison, streamReply, rowEvent, acceptStream, type FetchInit } from "./prompt-reader-page-harness.ts";
+import { pageHarness, okReply, mic, waitForRequests, readyTake, enableComparison, streamReply, rowEvent, acceptStream, type FetchInit } from "./prompt-reader-page-harness.ts";
 
 const configs = [
   { schema: 1, provider: { kind: "cartesia", model: "ink-whisper" } },
@@ -63,12 +63,14 @@ for (const config of configs) test(`${config.provider.kind} API identity replace
   const h = apiHarness();
   await readyTake(h);
   h.reader.comparison.mode = "compare";
+  // The take's own comparison run holds the first stream; this run replaces it.
+  const stream = h.nextLocal();
   const local = h.reader.comparison.run();
   const localId = h.reader.comparison.job.requestId;
-  acceptStream(h.stream, localId);
-  h.stream.send({ ...rowEvent(localId, "mlx-parakeet/v3-greedy"), manifestSha256: "old-manifest" });
-  h.stream.send({ type: "done", requestId: localId, comparisonId: "server-job", status: "complete" });
-  h.stream.end();
+  acceptStream(stream, localId);
+  stream.send({ ...rowEvent(localId, "mlx-parakeet/v3-greedy"), manifestSha256: "old-manifest" });
+  stream.send({ type: "done", requestId: localId, comparisonId: "server-job", status: "complete" });
+  stream.end();
   await local;
   assert.equal(h.reader.comparison.rows[0].result.text, "raw words\n");
   h.select(config.provider.kind);
@@ -184,6 +186,22 @@ test("cancelled API response cannot replace a later local job", async () => {
   assert.equal(h.reader.comparison.rows[0].result.text, "raw words\n");
   assert.equal(h.reader.comparison.rows[0].identity, undefined);
   assert.equal(h.requests[2]!.init!.signal!.aborted, true);
+});
+
+test("no comparison runs while a take waits for its worklet flush reply", async () => {
+  const h = pageHarness({ worklet: () => {} });
+  enableComparison(h.reader);
+  const opening = h.reader.press();
+  await waitForRequests(h.pending, 1);
+  h.pending[0]!(mic());
+  await opening;
+  h.frame(new Float32Array(6_400).fill(0.3));
+  h.reader.gate.cancel();
+  void h.reader.finishTake();
+  h.reader.prompts[0].takes = ["saved.wav"];
+  await h.reader.comparison.run();
+  assert.equal(h.reader.mic.draining, true);
+  assert.deepEqual(h.fetched, []);
 });
 
 for (const [name, selection] of Object.entries({
