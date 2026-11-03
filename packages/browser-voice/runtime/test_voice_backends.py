@@ -18,6 +18,7 @@ BACKENDS = [
     ("pocket_18m", "pocket-18m", "bill_boerst", {}, "pocket_tts"),
     ("native_voice", "kokoro-coreml", "af_heart", {"runnerPath": "/r"}, None),
     ("phonon", "phonon-31m", "default", {}, "ptts"),
+    ("qwen_tts", "qwen3-tts-0.6b", "ryan", {"runnerPath": "/r"}, None),
 ]
 
 # A runner speaking the native frame protocol: READY, then per request one AUDIO frame per part and END.
@@ -78,7 +79,8 @@ class VoiceBackendTests(unittest.TestCase):
     def test_runtimes_without_speed_control_refuse_other_speeds(self):
         for module, voice_id, voice, extra in (("pocket_18m", "pocket-18m", "bill_boerst", {}),
                                                ("native_voice", "kokoro-coreml", "af_heart", {"runnerPath": "/r"}),
-                                               ("phonon", "phonon-31m", "default", {})):
+                                               ("phonon", "phonon-31m", "default", {}),
+                                               ("qwen_tts", "qwen3-tts-0.6b", "ryan", {"runnerPath": "/r"})):
             backend = self.backend(module, voice_id, extra)
             backend._model = backend._metadata = object()
             with self.subTest(module=module), self.assertRaisesRegex(ValueError, "speed"):

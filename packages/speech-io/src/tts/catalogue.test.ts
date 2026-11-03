@@ -11,7 +11,8 @@ import { payloadDir, resolveTtsModelPaths, LOCAL_TTS_MODELS, TTS_CACHE_ROOT } fr
 
 test("approved catalogue binds exact browser choices and keeps legacy experiments out", () => {
   assert.deepEqual(LOCAL_OUTPUT_MODELS.map((entry) => entry.id), ["piper-kristin-medium", "kokoro-v1.0", "kokoro-mlx-bf16", "pocket-18m",
-    "piper-kristin-split", "kokoro-coreml", "phonon-31m"]);
+    "piper-kristin-split", "kokoro-coreml", "phonon-31m",
+    "qwen3-tts-0.6b"]);
   assert.equal(resolveLocalOutput().voice.speakerId, 0);
   for (const [voice, sid] of [["af_heart", 3], ["af_bella", 2], ["am_michael", 16]] as const) {
     assert.equal(resolveLocalOutput({ ...DEFAULT_LOCAL_OUTPUT, model: "kokoro-v1.0", voice }).voice.speakerId, sid);
@@ -31,7 +32,7 @@ test("catalogue readiness reads without creating assets and publishes no source 
     const catalogue = await getLocalOutputCatalogue(root);
     assert.equal(catalogue.default.model, "piper-kristin-medium");
     assert.deepEqual(catalogue.models.map((model) => model.readiness.state),
-      ["assets-missing", "assets-missing", ...Array(5).fill("runtime-missing")], "a worker voice needs its runtime first");
+      ["assets-missing", "assets-missing", ...Array(6).fill("runtime-missing")], "a worker voice needs its runtime first");
     const configured = await getLocalOutputCatalogue(root, (model) => model === "kokoro-mlx-bf16");
     assert.deepEqual(configured.models.map((model) => model.readiness.state).slice(2, 4), ["assets-missing", "runtime-missing"],
       "then its pinned payload");

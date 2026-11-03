@@ -96,6 +96,20 @@ export const LOCAL_OUTPUT_MODELS = [
     licence: "Apache 2.0 weights, tokenizer and voice; ptts code MIT or Apache 2.0. Builds on Kyutai's Pocket TTS and Mimi (CC BY 4.0); codec lineage and Kyutai credit unverified. Generated audio rights unverified.",
     voices: [{ id: "default", label: "Default", languages: ["en"], speakerId: 0 }],
   },
+  {
+    id: "qwen3-tts-0.6b",
+    label: "Qwen3 TTS 0.6B",
+    provider: { kind: "local" },
+    runtime: "speech.cpp 0.10.0, Metal GPU, Q8_0",
+    defaultVoice: "ryan",
+    sampleRate: 24_000,
+    streaming: "sentence",
+    licence: "Apache 2.0 weights (Qwen); speech.cpp MIT. Retain the licence and notices. Speaker consent and generated audio rights unverified.",
+    voices: [
+      { id: "ryan", label: "Ryan", languages: ["en"], speakerId: 0 },
+      { id: "aiden", label: "Aiden", languages: ["en"], speakerId: 1 },
+    ],
+  },
 ] as const;
 
 export type LocalOutputModel = typeof LOCAL_OUTPUT_MODELS[number];

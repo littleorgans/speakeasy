@@ -228,6 +228,19 @@ export const LOCAL_TTS_MODELS = {
     ],
     attribution: ["README.md"],
   },
+  "qwen3-tts-0.6b": {
+    name: "qwen3-tts-0.6b-customvoice-q8-fd9df936",
+    note: "Qwen3 TTS 12Hz 0.6B CustomVoice Q8_0 GGUF, sakasegawa/Qwen3-TTS-12Hz-0.6B-CustomVoice-GGUF@fd9df936, 24000 Hz",
+    family: "worker",
+    sampleRate: 24_000,
+    numSpeakers: 2,
+    hub: { repo: "sakasegawa/Qwen3-TTS-12Hz-0.6B-CustomVoice-GGUF", revision: "fd9df9364613a92a86b4137074bc281204823033" },
+    files: [
+      { name: "Qwen3-TTS-12Hz-0.6B-CustomVoice-Q8_0.gguf", bytes: 1_213_534_464, sha256: "f606ea3981aa42762b16db9a94826d2d560eb60f0b102001618f40d5a2f78cc6" },
+      { name: "README.md", bytes: 7_634, sha256: "cb6328d302edd8b282b347b8f4fa6f5469f2f42cf3693924408edd132eb596c3" },
+    ],
+    attribution: ["README.md"],
+  },
 } as const satisfies Record<string, TtsModel | WorkerTtsModel>;
 
 /** Legacy CLI sweep registry, including its original iteration order. */

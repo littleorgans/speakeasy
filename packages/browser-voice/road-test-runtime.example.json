@@ -61,6 +61,10 @@
     },
     "phonon-31m": {
       "pythonPath": "/absolute/path/to/phonon-py3.12/bin/python"
+    },
+    "qwen3-tts-0.6b": {
+      "pythonPath": "/absolute/path/to/any/python3",
+      "runnerPath": "/absolute/path/to/speech.cpp-0.10.0/speech"
     }
   }
 }
