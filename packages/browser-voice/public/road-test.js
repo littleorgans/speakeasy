@@ -441,10 +441,10 @@ export class RoadTestPage {
     const last = this.run;
     if (!last?.input?.text || this.phase !== "idle" || !this.readback) return;
     this.stopReplay();
-    this.run = { setup: last.setup, liveChoice: last.liveChoice, live: last.live, input: last.input, take: last.take,
+    const run = this.run = { setup: last.setup, liveChoice: last.liveChoice, live: last.live, input: last.input, take: last.take,
       selection: this.selection(), voiceLabel: this.voiceLabel(), reading: this.voiceSettings.request() };
-    await this.speak(this.run);
-    this.remember(this.run);
+    await this.speak(run);
+    this.remember(run);
     this.render();
   }
 

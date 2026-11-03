@@ -826,6 +826,26 @@ test("Read again speaks the latest transcript in the voice chosen now and keeps 
   assert.equal(harness.elements.get("history").children.length, 1, "the first reading moves to Earlier takes");
 });
 
+test("interrupting Read again with a new take preserves the interrupted reading in history", async () => {
+  const { page } = pageHarness();
+  await page.start();
+  await take(page, 100);
+  await until(() => page.phase === "idle");
+  page.readback.hold = true;
+  const reading = page.readAgain();
+  await until(() => page.phase === "speaking");
+  const repeated = page.run;
+  page.press(3_000);
+  await reading;
+  assert.notEqual(page.run, repeated);
+  assert.ok(page.history.includes(repeated), "Read again must remember its own reading after a new take replaces it");
+  assert.equal(repeated.output.outcome, "stopped");
+  assert.equal(page.phase, "recording", "the old reading cannot reset the new take's phase");
+  page.readback.hold = false;
+  page.release(3_400);
+  await until(() => page.phase === "idle");
+});
+
 test("a voice copy model shows the consent note; My recording needs a recording and its transcript before sending", async () => {
   const harness = pageHarness({ models: QWEN_MODELS });
   await harness.page.start();
