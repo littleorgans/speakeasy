@@ -1,7 +1,7 @@
 import { parseSpeechOutputConfig, type SpeechOutputConfig, type SpeechOutputRegistry } from "../provider-config.ts";
 import { CMU_DICT, resolveTtsFrontendAssets } from "./frontend.ts";
 import { join } from "node:path";
-import { LOCAL_TTS_MODELS, TTS_ROOT, verifyTtsFiles } from "./models.ts";
+import { LOCAL_TTS_MODELS, payloadDir, TTS_ROOT, verifyTtsFiles } from "./models.ts";
 
 /** Only owner approved browser choices. The legacy sweep registry stays separate. */
 export const LOCAL_OUTPUT_MODELS = [
@@ -85,6 +85,17 @@ export const LOCAL_OUTPUT_MODELS = [
       { id: "am_michael", label: "Michael", languages: ["en-US"], speakerId: 1 },
     ],
   },
+  {
+    id: "phonon-31m",
+    label: "Phonon 31M",
+    provider: { kind: "local" },
+    runtime: "ptts 0.6.0 (Rust), CPU, f32",
+    defaultVoice: "default",
+    sampleRate: 24_000,
+    streaming: "sentence",
+    licence: "Apache 2.0 weights, tokenizer and voice; ptts code MIT or Apache 2.0. Builds on Kyutai's Pocket TTS and Mimi (CC BY 4.0); codec lineage and Kyutai credit unverified. Generated audio rights unverified.",
+    voices: [{ id: "default", label: "Default", languages: ["en"], speakerId: 0 }],
+  },
 ] as const;
 
 export type LocalOutputModel = typeof LOCAL_OUTPUT_MODELS[number];
@@ -140,7 +151,7 @@ export async function getLocalOutputReadiness(
     return { state: "runtime-missing", reason: "Voice runtime is not configured" };
   }
   try {
-    await verifyTtsFiles(join(root, model.name), model.files, model.attribution);
+    await verifyTtsFiles(payloadDir(model, root), model.files, model.attribution);
     // A phoneme runtime also needs the sherpa voice whose frontend the host borrows.
     const frontendVoice = model.family === "worker" && "phonemesFrom" in model ? LOCAL_TTS_MODELS[model.phonemesFrom] : undefined;
     if (frontendVoice) await verifyTtsFiles(join(root, frontendVoice.name), frontendVoice.files, frontendVoice.attribution);

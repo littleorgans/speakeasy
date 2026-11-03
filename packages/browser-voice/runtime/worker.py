@@ -29,9 +29,10 @@ BACKENDS = {
     "pocket-18m": "pocket_18m",
     "piper-kristin-split": "native_voice",
     "kokoro-coreml": "native_voice",
+    "phonon-31m": "phonon",
 }
 # Speech out voices answer speak with PCM; they never transcribe.
-VOICES = {"kokoro-mlx-bf16", "pocket-18m", "piper-kristin-split", "kokoro-coreml"}
+VOICES = {"kokoro-mlx-bf16", "pocket-18m", "piper-kristin-split", "kokoro-coreml", "phonon-31m"}
 MIN_SPEED, MAX_SPEED = 0.5, 2.0
 
 

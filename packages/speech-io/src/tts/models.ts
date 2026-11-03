@@ -1,4 +1,5 @@
 import { stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { ensureAsset, sha256File } from "../engines/assets.ts";
 
@@ -21,6 +22,8 @@ const TTS_MODELS_BASE =
 
 /** On-disk root for downloaded + extracted TTS models. */
 export const TTS_ROOT = join(process.cwd(), "models", "tts");
+/** Where a cached worker voice's payload lives, whatever the output root: never inside a repo. */
+export const TTS_CACHE_ROOT = join(homedir(), "Library", "Caches", "speakeasy", "tts");
 
 export type TtsModelFamily = "vits" | "kokoro";
 
@@ -62,7 +65,14 @@ export type WorkerTtsModel = {
   attribution: readonly string[];
   /** A runtime that takes phonemes: the host converts text with this sherpa voice's Piper Plus frontend. */
   phonemesFrom?: "piper-kristin-medium";
+  /** The Hugging Face repo and revision its files come from; the payload lives under TTS_CACHE_ROOT. */
+  hub?: { repo: string; revision: string };
 };
+
+/** A voice payload's directory: under the cache root for a hub voice, else under the output root. */
+export function payloadDir(model: TtsModel | WorkerTtsModel, root: string): string {
+  return join("hub" in model && model.hub ? TTS_CACHE_ROOT : root, model.name);
+}
 
 /** Payload pins from the approved local research records. Explicit provisioning only. */
 export const LOCAL_TTS_MODELS = {
@@ -201,6 +211,22 @@ export const LOCAL_TTS_MODELS = {
       { name: "kokoro/G2PEncoder.mlmodelc/weights/weight.bin", bytes: 694_592, sha256: "6926bcd2827d21fec82839487b987e06f85fd8a6a5bb896bc4f6062461d014ec" },
     ],
     attribution: [],
+  },
+  "phonon-31m": {
+    name: "phonon-31m-en-8c64b55e",
+    note: "Phonon 31M English, gradium/phonon-31m-en@8c64b55e (the ptts 0.6.0 default), default voice, 24000 Hz",
+    family: "worker",
+    sampleRate: 24_000,
+    numSpeakers: 1,
+    hub: { repo: "gradium/phonon-31m-en", revision: "8c64b55ec301728e2d1695bfea87a08a267d0c2d" },
+    files: [
+      { name: "config.json", bytes: 2_851, sha256: "7062ea376e6b158543c8abec8e5af67df171c49ad70eb7e2a0fb25c16f265e06" },
+      { name: "model.safetensors", bytes: 102_823_920, sha256: "8a04cf833cfe69b67c2ec968b2d31244655b9accc84ade9c0ebcc176f2074607" },
+      { name: "tokenizer.json", bytes: 277_967, sha256: "691a00068fa7b989f2f3e5ae5daa2d1a5bb319f2d5360deafcfb19a8bb6e7936" },
+      { name: "default-voice.safetensors", bytes: 256_136, sha256: "f739e8c4c76ee7f92e7c94a82002748c8cd22e99582ac49f7b9b94cd63786e18" },
+      { name: "README.md", bytes: 6_604, sha256: "232a0ab89f323cc8e003719c32ce72b6b2ce07de0c42caf18fa2f0ae71397508" },
+    ],
+    attribution: ["README.md"],
   },
 } as const satisfies Record<string, TtsModel | WorkerTtsModel>;
 

@@ -7,11 +7,11 @@ import {
   DEFAULT_LOCAL_OUTPUT, getLocalOutputCatalogue, getLocalOutputReadiness,
   LOCAL_OUTPUT_MODELS, resolveLocalOutput,
 } from "./catalogue.ts";
-import { resolveTtsModelPaths, LOCAL_TTS_MODELS } from "./models.ts";
+import { payloadDir, resolveTtsModelPaths, LOCAL_TTS_MODELS, TTS_CACHE_ROOT } from "./models.ts";
 
 test("approved catalogue binds exact browser choices and keeps legacy experiments out", () => {
   assert.deepEqual(LOCAL_OUTPUT_MODELS.map((entry) => entry.id), ["piper-kristin-medium", "kokoro-v1.0", "kokoro-mlx-bf16", "pocket-18m",
-    "piper-kristin-split", "kokoro-coreml"]);
+    "piper-kristin-split", "kokoro-coreml", "phonon-31m"]);
   assert.equal(resolveLocalOutput().voice.speakerId, 0);
   for (const [voice, sid] of [["af_heart", 3], ["af_bella", 2], ["am_michael", 16]] as const) {
     assert.equal(resolveLocalOutput({ ...DEFAULT_LOCAL_OUTPUT, model: "kokoro-v1.0", voice }).voice.speakerId, sid);
@@ -31,7 +31,7 @@ test("catalogue readiness reads without creating assets and publishes no source 
     const catalogue = await getLocalOutputCatalogue(root);
     assert.equal(catalogue.default.model, "piper-kristin-medium");
     assert.deepEqual(catalogue.models.map((model) => model.readiness.state),
-      ["assets-missing", "assets-missing", ...Array(4).fill("runtime-missing")], "a worker voice needs its runtime first");
+      ["assets-missing", "assets-missing", ...Array(5).fill("runtime-missing")], "a worker voice needs its runtime first");
     const configured = await getLocalOutputCatalogue(root, (model) => model === "kokoro-mlx-bf16");
     assert.deepEqual(configured.models.map((model) => model.readiness.state).slice(2, 4), ["assets-missing", "runtime-missing"],
       "then its pinned payload");
@@ -41,6 +41,12 @@ test("catalogue readiness reads without creating assets and publishes no source 
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("a hub voice's payload lives under the cache root whatever the output root; others under the output root", () => {
+  assert.equal(payloadDir(LOCAL_TTS_MODELS["phonon-31m"], "/any/output"), join(TTS_CACHE_ROOT, "phonon-31m-en-8c64b55e"));
+  assert.equal(payloadDir(LOCAL_TTS_MODELS["pocket-18m"], "/any/output"), join("/any/output", LOCAL_TTS_MODELS["pocket-18m"].name));
+  assert.ok(!TTS_CACHE_ROOT.startsWith(process.cwd()), "never inside the repo");
 });
 
 test("readiness rehashes payloads despite a completion marker", async () => {

@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { LOCAL_OUTPUT_MODELS, type LocalOutputModelId } from "../../speech-io/src/tts/catalogue.ts";
 import type { WorkerTtsSynth } from "../../speech-io/src/tts/factory.ts";
 import { createTtsFrontend, type TtsFrontend } from "../../speech-io/src/tts/frontend.ts";
-import { LOCAL_TTS_MODELS, type WorkerTtsModel } from "../../speech-io/src/tts/models.ts";
+import { LOCAL_TTS_MODELS, payloadDir, type WorkerTtsModel } from "../../speech-io/src/tts/models.ts";
 import { PythonSetupWorker } from "./setup-workers.ts";
 
 /** Machine paths for one worker voice, from the setup runtime file. */
@@ -26,7 +26,7 @@ export async function createWorkerVoiceSynth(modelId: LocalOutputModelId, locati
   const payload = LOCAL_TTS_MODELS[modelId] as WorkerTtsModel;
   const frontend = payload.phonemesFrom ? await phonemeFrontend(payload.phonemesFrom, root) : undefined;
   const worker = new PythonSetupWorker({ setupId: modelId, pythonPath: location.pythonPath, workerPath,
-    backendOptions: { modelPath: join(root, payload.name), files: payload.files,
+    backendOptions: { modelPath: payloadDir(payload, root), files: payload.files,
       ...(location.runnerPath ? { runnerPath: location.runnerPath } : {}) },
     expectedIdentity: { setupId: modelId },
     loadTimeoutMs: location.loadTimeoutMs, operationTimeoutMs: location.operationTimeoutMs });

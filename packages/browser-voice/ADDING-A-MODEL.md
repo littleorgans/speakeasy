@@ -130,7 +130,9 @@ worker voice: the same Python worker as speech in, answering `speak`.
    short card line, wherever the licence is not plainly permissive. The card's size is
    the sum of the pinned file bytes. A worker voice numbers its `speakerId`s
    from 0 in list order; the worker receives the voice `id`.
-3. Put the payload under the output root and restart.
+3. Put the payload under the output root and restart. A payload pinned with
+   `hub` (repo and revision) lives under `~/Library/Caches/speakeasy/tts/`
+   instead, whatever the output root, so a download never lands in a repo.
 
 A worker voice also needs:
 
