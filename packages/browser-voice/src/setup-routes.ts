@@ -11,6 +11,7 @@ import type { PromptReader } from "./prompt-reader.ts";
 import { ProviderPolicy, type ProviderDispatchContext, type ProviderSource, type VerifiedOwnerReplayGrant } from "./provider-policy.ts";
 import type { ProviderCredentials } from "./provider-availability.ts";
 import type { SpeechOutputCatalogue } from "./speech-output-catalog.ts";
+import { defaultLiveSetup, liveStream } from "./live-settings.ts";
 import { ComparisonBusyError, SetupComparison } from "./setup-comparison.ts";
 import { createCanonicalPcm, MAX_PCM_BYTES, pcmIdentity, type SetupId } from "./setup-protocol.ts";
 import { parseSetupSelection, SETUPS, SETUP_MANIFEST, SETUP_MANIFEST_SHA256 } from "./setup-registry.ts";
@@ -127,7 +128,9 @@ export class SetupRoutes {
     const readiness = this.#options.readiness();
     return { schema: 1, manifestSha256: SETUP_MANIFEST_SHA256,
       defaultSetupId: SETUP_MANIFEST.defaultSetupId,
+      // live: the setup's own stream and settings, if it streams; liveDefault: today's live model for it.
       setups: SETUPS.map((setup) => ({ ...setup, maxAudioMs: setup.maxSamples / 16, residency: "unobserved",
+        live: liveStream(setup.id) ?? null, liveDefault: defaultLiveSetup(setup.id),
         deadlines: readiness.find((entry) => entry.setupId === setup.id)?.deadlines ?? null,
         readiness: readiness.find((entry) => entry.setupId === setup.id) ??
           { setupId: setup.id, ready: false, reason: "runtime not configured" } })),

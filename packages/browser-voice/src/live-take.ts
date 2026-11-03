@@ -1,4 +1,6 @@
-import { assertLivePartial, assertSetupLoadResult, type LivePartial, type SetupExecutor, type SetupId } from "./setup-protocol.ts";
+import {
+  assertLivePartial, assertSetupLoadResult, type LivePartial, type LiveSettings, type SetupExecutor, type SetupId,
+} from "./setup-protocol.ts";
 
 export type LiveTakeEvent =
   | { type: "loading" }
@@ -9,6 +11,8 @@ export type LiveTakeEvent =
 
 export type LiveTakeOptions = {
   setupId: SetupId;
+  /** Applied when the stream starts; absent means the engine's defaults. */
+  settings?: LiveSettings;
   executor: SetupExecutor;
   maxSamples: number;
   onEvent(event: LiveTakeEvent): void;
@@ -93,7 +97,7 @@ export class LiveTake {
         }
         const samples = concat(this.#queued);
         this.#queued = [];
-        const partial = await executor.feed!(setupId, samples, start, { signal });
+        const partial = await executor.feed!(setupId, samples, start, { signal }, this.#options.settings);
         assertLivePartial(partial);
         start = false;
         this.#options.touch();

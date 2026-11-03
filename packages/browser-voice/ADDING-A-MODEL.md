@@ -77,18 +77,29 @@ its SHA256, to `CPU_PRESETS` in `src/transcriber.ts`, and the same list under
 
 ### Live words
 
-A setup whose engine truly streams sets `card.transcript` to `partials`. While
-the owner holds the key, the page streams the take's mic frames over the
-`/live-words` socket; the host feeds them to the worker whenever it is free,
-and the page shows the words one tone quieter until the final text replaces
-them. The final is still the setup's full pass on the whole take, after the
-live stream stops. The backend adds `feed(samples, start)`: `start` opens a
-fresh stream, and it returns `stable` (settled text), `tentative` (text the
-model may still change) and `processingMs`. Feed whole engine chunks and keep
-a remainder for the next call (`STREAM` in `runtime/parakeet.py`, the 2,560
-sample feeds in `runtime/hex/worker.rs`). A setup with `baseSetup` shows its
-base's words. Never fake partials by decoding the growing take again: an
-engine that only gives final text keeps `final`.
+A setup whose engine truly streams sets `card.transcript` to `partials` and
+gets an entry in `LIVE_STREAMS` in `src/live-settings.ts`, with the streaming
+settings it exposes: each an id, label, one line note, the offered values and
+the default, which is today's behaviour. Offer only values a take has shown
+to hold. The page's Live words choice sits under Speech in: Off, or any live
+stream, paired with any final setup (each runs in its own worker, and the
+final pass waits for the live stream to settle). It defaults to the setup's
+own stream, a `baseSetup`'s stream, or Off.
+
+While the owner holds the key, the page streams the take's mic frames over
+the `/live-words` socket, naming the live model and its settings; the host
+refuses values not offered, answers with the stream and settings it applied,
+then feeds the worker whenever it is free. The page shows the words one tone
+quieter until the final text replaces them, and lists each update in the
+take's revision trail. The final is still the final setup's full pass on the
+whole take. The backend adds `feed(samples, start, settings)`: `start` opens
+a fresh stream with `settings` (absent means the defaults; the backend checks
+the same offered values), and it returns `stable` (settled text), `tentative`
+(text the model may still change) and `processingMs`. Feed whole engine chunks
+and keep a remainder for the next call (`stream_settings` in
+`runtime/parakeet.py`, the 2,560 sample feeds in `runtime/hex/worker.rs`).
+Never fake partials by decoding the growing take again: an engine that only
+gives final text keeps `final`.
 
 ## Speech out
 

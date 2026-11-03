@@ -232,7 +232,10 @@ def handle_request(header, body, backend, setup_id, factory):
     if operation == "feed" and not cleanup and not voice and hasattr(backend, "feed"):
         if type(header.get("start")) is not bool:
             raise ProtocolError("feed requires start")
-        result = backend.feed(pcm_samples(header, body), header["start"])
+        settings = header.get("settings")
+        if settings is not None and (not header["start"] or not isinstance(settings, dict)):
+            raise ProtocolError("feed settings are an object sent with start")
+        result = backend.feed(pcm_samples(header, body), header["start"], settings)
         validate_partial(result)
         return backend, {"type": "partial", "partial": result}
     if operation == "transcribe" and not cleanup and not voice:

@@ -33,6 +33,19 @@ SEED = 0
 # Live stream: parakeet-mlx normalizes each chunk's mel on its own, so chunks
 # much under 800 ms of near silence decode to noise and wipe earlier words.
 STREAM = {"chunkSamples": 12_800, "contextSize": (64, 64), "depth": 1, "attention": "local"}
+# The live setting the page offers (src/live-settings.ts): new audio per update.
+UPDATE_MS = (800, 1_200, 1_600)
+
+
+def stream_settings(settings):
+    """The stream for one live take: STREAM unless the page chose other offered values."""
+    settings = {} if settings is None else settings
+    if not isinstance(settings, dict) or set(settings) - {"updateMs"}:
+        raise ValueError("Parakeet live settings are updateMs")
+    update_ms = settings.get("updateMs", STREAM["chunkSamples"] // 16)
+    if isinstance(update_ms, bool) or update_ms not in UPDATE_MS:
+        raise ValueError("Parakeet live settings must be offered values")
+    return {**STREAM, "chunkSamples": update_ms * 16}
 
 # Byte sizes and SHA256 from the frozen mlx-parakeet/artifacts.json. Shared
 # preprocessing/tokenizer bytes are identical for both measured snapshots.
@@ -132,6 +145,7 @@ class Backend:
         self._stream = None
         self._pending = None
         self._stock_attention = None
+        self._live = STREAM
 
     def load(self):
         if self._metadata is not None:
@@ -221,23 +235,26 @@ class Backend:
             raise ValueError("Parakeet samples must be finite")
         return view, data
 
-    def feed(self, samples, start):
+    def feed(self, samples, start, settings=None):
         """Live words: decodes each whole stream chunk; a remainder waits for the next feed."""
         _, data = self._samples(samples, allow_empty=True)
         if start:
             self._end_stream()
+            self._live = stream_settings(settings)
+        elif settings is not None:
+            raise ValueError("Parakeet live settings go with start")
         mx = self._mx
         with mx.stream(self._gpu_stream):
             start_time = time.perf_counter()
             if self._stream is None:
                 encoder = self._model.encoder
                 self._stock_attention = (encoder.pos_enc, [layer.self_attn for layer in encoder.layers])
-                stream = self._model.transcribe_stream(context_size=STREAM["contextSize"], depth=STREAM["depth"],
+                stream = self._model.transcribe_stream(context_size=self._live["contextSize"], depth=self._live["depth"],
                                                        decoding_config=self._decoding_config)
                 self._stream = stream.__enter__()
                 self._pending = self._np.empty(0, dtype="<f4")
             pending = self._np.concatenate([self._pending, data])
-            chunk = STREAM["chunkSamples"]
+            chunk = self._live["chunkSamples"]
             whole = len(pending) // chunk * chunk
             for offset in range(0, whole, chunk):
                 self._stream.add_audio(mx.array(pending[offset:offset + chunk], dtype=mx.float32))

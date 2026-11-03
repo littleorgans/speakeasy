@@ -32,6 +32,19 @@ export function outputCard(model) {
   ].filter(Boolean).join(" · ");
 }
 
+/**
+ * What makes a take's live words, from the stream and settings the host
+ * applied: "Live words: Parakeet Ultra MLX stream, updates every 800 ms, the
+ * last 5.12 s may change." A final from another model replaces them.
+ */
+export function liveLine(live, final) {
+  if (!live) return "Live words off.";
+  const phrases = live.stream.settings.map((setting) =>
+    setting.options.find((option) => option.value === live.settings[setting.id])?.phrase).filter(Boolean);
+  const replaced = final && final.id !== live.setup.id ? ` ${final.label} writes the final text.` : "";
+  return `Live words: ${[`${live.setup.label} stream`, ...phrases].join(", ")}.${replaced}`;
+}
+
 /** The browser's reported output path delays in ms; null where it reports none. */
 export function outputLatency(context) {
   const ms = (seconds) => Number.isFinite(seconds) ? seconds * 1_000 : null;

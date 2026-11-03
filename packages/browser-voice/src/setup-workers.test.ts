@@ -65,11 +65,12 @@ class Fake:
                 "diagnostics": {"hex": raw.hex(), "count": len(samples), "pid": os.getpid(), "calls": self.calls}}
     def cleanup(self, text):
         return {"text": text, "rawText": text, "processingMs": 0}
-    def feed(self, samples, start):
+    def feed(self, samples, start, settings):
         if mode == "badPartial":
             return {"stable": "", "tentative": "", "processingMs": -1}
         self.fed = (0 if start else getattr(self, "fed", 0)) + len(samples)
-        return {"stable": " heard %d" % self.fed, "tentative": " maybe", "processingMs": 2}
+        chosen = " " + json.dumps(settings, sort_keys=True) if settings else ""
+        return {"stable": " heard %d" % self.fed, "tentative": " maybe" + chosen, "processingMs": 2}
     def speak(self, text, voice, speed):
         if mode == "badAudio":
             return {"samples": b"\\0\\0\\xc0\\x7f", "sampleRate": 24000, "processingMs": 1}
@@ -574,5 +575,9 @@ test("live words feed a loaded worker, mark it used, and reject a malformed part
   const signal = new AbortController().signal;
   await executor.load("hex/unified", { signal });
   assert.equal((await executor.feed("hex/unified", new Float32Array(7), true, { signal })).stable, " heard 7");
+  assert.equal((await executor.feed("hex/unified", new Float32Array(1), true, { signal }, { lookaheadMs: 480 })).tentative,
+    ' maybe {"lookaheadMs": 480}', "a start's settings reach the backend");
+  assert.equal((await executor.feed("hex/unified", new Float32Array(1), false, { signal }, { lookaheadMs: 480 })).tentative,
+    " maybe", "settings go only with a start");
   await assert.rejects(executor.feed("sweep/score-2", new Float32Array(1), true, { signal }), /final text only/);
 });

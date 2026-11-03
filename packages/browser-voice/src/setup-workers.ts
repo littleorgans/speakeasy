@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   assertLivePartial, MAX_HEADER_BYTES as MAX_WORKER_HEADER_BYTES, MAX_PCM_BYTES as MAX_WORKER_PCM_BYTES,
   MAX_TEXT_BYTES as MAX_WORKER_TEXT_BYTES, SETUP_PROTOCOL_VERSION, sha256 as hash,
-  type LivePartial, type PcmIdentity, type SetupId, type SetupExecution, type SetupExecutionContext,
+  type LivePartial, type LiveSettings, type PcmIdentity, type SetupId, type SetupExecution, type SetupExecutionContext,
   type SetupExecutionResult, type SetupExecutor, type SetupLoadResult,
 } from "./setup-protocol.ts";
 import { isCpuSetupId, type ChildTranscriber, type CpuReady, type CpuSetupId } from "./transcriber.ts";
@@ -177,11 +177,12 @@ export class PythonSetupWorker {
     return this.#run("load", {}, Buffer.alloc(0), signal);
   }
 
-  /** Live words after an explicit load; start opens a fresh stream in the worker. */
-  feed(samples: Float32Array, start: boolean, signal?: AbortSignal): Promise<LivePartial> {
+  /** Live words after an explicit load; start opens a fresh stream in the worker, with its settings. */
+  feed(samples: Float32Array, start: boolean, signal?: AbortSignal, settings?: LiveSettings): Promise<LivePartial> {
     try {
       const { body, identity } = canonicalPcm(samples);
-      return this.#run("feed", { ...wireIdentity(identity), start }, body, signal, true);
+      return this.#run("feed", { ...wireIdentity(identity), start, ...(start && settings ? { settings } : {}) },
+        body, signal, true);
     } catch (error) { return Promise.reject(error); }
   }
 
@@ -459,10 +460,11 @@ export class SetupWorkers implements SetupExecutor {
   }
 
   /** Live words: only the Python setups whose backend streams answer; others reject in the worker. */
-  async feed(setupId: SetupId, samples: Float32Array, start: boolean, { signal }: SetupExecutionContext): Promise<LivePartial> {
+  async feed(setupId: SetupId, samples: Float32Array, start: boolean, { signal }: SetupExecutionContext,
+    settings?: LiveSettings): Promise<LivePartial> {
     this.#assertOpen();
     if (isCpuSetupId(setupId)) throw new SetupWorkerError(`${setupId} gives final text only`);
-    return this.#worker(setupId).feed(samples, start, signal);
+    return this.#worker(setupId).feed(samples, start, signal, settings);
   }
 
   async release(setupId: SetupId): Promise<void> {

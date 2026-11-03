@@ -1,17 +1,19 @@
 import { HoldReleaseGate } from "/hold-release.js";
 import { LiveWords } from "/live-words.js";
 import { MicCapture } from "/mic-capture.js";
-import { formatDuration, inputCard, outputCard, outputLatency, readEvents } from "/road-test-text.js";
+import { trailItems, trailSummary } from "/live-trail.js";
+import { formatDuration, inputCard, liveLine, outputCard, outputLatency, readEvents } from "/road-test-text.js";
 import { TalkOverDetector } from "/talk-over.js";
 import { VoiceReadback } from "/voice-readback.js";
 
 /**
  * Road test: pick a local speech in model and voice, hold to speak, see the
  * transcript and its timings, hear the voice read it back, interrupt it by
- * key or by talking over it, and replay both sides. Where the engine truly
- * streams, its words show while the owner speaks, one tone quieter, until the
- * final text replaces them in place. Final text arrives as one comparison
- * row; the voice uses the speech output channel.
+ * key or by talking over it, and replay both sides. A model that truly
+ * streams, the setup's own or another the owner picks, shows words while the
+ * owner speaks, one tone quieter, until the final text replaces them in
+ * place; a collapsed trail lists each revision. Final text arrives as one
+ * comparison row; the voice uses the speech output channel.
  */
 
 const SAMPLE_RATE = 16_000;
@@ -25,9 +27,9 @@ const LISTENING = "Listening. Release when you finish.";
 const DONE = "Done";
 /** Earlier takes columns; narrow screens stack each row and label its cells with these. */
 const HISTORY_COLUMNS = [
-  { label: "Speech in", cell: (run) => [run.setup.label] },
+  { label: "Speech in", cell: (run) => [run.setup.label, liveDiffers(run) ? `Live words ${run.liveChoice.setup.label}` : null] },
   { label: "Voice", cell: (run) => [run.output ? run.voiceLabel : null] },
-  { label: "Transcript", kind: "said-cell", cell: (run) => [run.input.error || run.input.text || "Nothing heard"] },
+  { label: "Transcript", kind: "said-cell", cell: (run) => [run.input.error || run.input.text || "Nothing heard"], trail: true },
   { label: "Press to first words", kind: "num", cell: (run) => [formatDuration(pressToFirstWords(run))] },
   { label: "Release to text", kind: "num", cell: (run) => [formatDuration(run.input.finalMs),
     run.input.loadMs != null ? `Model start ${formatDuration(run.input.loadMs)}` : null] },
@@ -42,9 +44,12 @@ export class RoadTestPage {
       "status", "input-model", "input-card", "output-model", "output-voice", "output-card", "hold", "stop", "level",
       "transcript", "take-models", "input-timings", "output-timings", "interrupt-timings", "replay-take",
       "replay-talk-over", "replay-voice", "echo", "talk-over", "history", "history-head", "history-section", "level-track",
+      "live-model", "live-settings", "live-line", "trail", "trail-summary", "trail-list",
     ].map((id) => [id, document.getElementById(id)]));
     this.setups = [];
     this.voices = [];
+    this.liveSelects = new Map();
+    this.historyRows = new WeakMap();
     this.catalogueRevision = null;
     this.context = null;
     this.mic = null;
@@ -75,6 +80,7 @@ export class RoadTestPage {
       this.catalogueRevision = voices.revision;
       fill(this.elements["input-model"], this.setups.map((setup) => ({ value: setup.id, label: setup.label,
         disabled: setup.readiness?.ready !== true })), this.setups.find((setup) => setup.readiness?.ready)?.id);
+      this.resetLive();
       fill(this.elements["output-model"], this.voices.map((model) => ({ value: model.id, label: model.label,
         disabled: model.readiness?.state !== "ready" })), voices.default?.model);
       this.fillVoices();
@@ -93,7 +99,9 @@ export class RoadTestPage {
     hold.addEventListener("pointercancel", (event) => this.release(event.timeStamp));
     stop.addEventListener("click", (event) => this.stopVoice(event.timeStamp));
     this.elements["output-model"].addEventListener("change", () => { this.fillVoices(); this.render(); });
-    for (const id of ["input-model", "output-voice", "talk-over"]) this.elements[id].addEventListener("change", () => this.render());
+    this.elements["input-model"].addEventListener("change", () => { this.resetLive(); this.render(); });
+    this.elements["live-model"].addEventListener("change", () => { this.fillLiveSettings(); this.render(); });
+    for (const id of ["output-voice", "talk-over"]) this.elements[id].addEventListener("change", () => this.render());
     this.elements.echo.addEventListener("change", () => void this.reopenMic());
     for (const which of ["take", "talk-over"]) this.elements[`replay-${which}`].addEventListener("click", () => this.replay(which));
     this.elements["replay-voice"].addEventListener("click", () => this.replay("voice"));
@@ -116,6 +124,48 @@ export class RoadTestPage {
 
   setup() {
     return this.setups.find((setup) => setup.id === this.elements["input-model"].value);
+  }
+
+  /** Live words default to today's pairing for the chosen setup: its own stream, its base's, or off. */
+  resetLive() {
+    fill(this.elements["live-model"], [{ value: "off", label: "Off" }, ...this.setups.filter((setup) => setup.live)
+      .map((setup) => ({ value: setup.id, label: setup.label, disabled: setup.readiness?.ready !== true }))],
+    this.setup()?.liveDefault ?? "off");
+    this.fillLiveSettings();
+  }
+
+  /** One column per setting of the chosen live model, each at today's value with its one line note. */
+  fillLiveSettings() {
+    this.liveSelects.clear();
+    const columns = (this.liveModel()?.live.settings ?? []).map((setting) => {
+      const column = document.createElement("label");
+      column.className = "setting";
+      const label = document.createElement("span");
+      label.className = "label";
+      label.textContent = setting.label;
+      const select = document.createElement("select");
+      fill(select, setting.options.map((option) => ({ value: String(option.value), label: option.label })), String(setting.default));
+      select.addEventListener("change", () => this.render());
+      const note = document.createElement("span");
+      note.className = "quiet";
+      note.textContent = setting.note;
+      column.append(label, select, note);
+      this.liveSelects.set(setting.id, select);
+      return column;
+    });
+    this.elements["live-settings"].replaceChildren(...columns);
+  }
+
+  liveModel() {
+    return this.setups.find((setup) => setup.live && setup.id === this.elements["live-model"].value);
+  }
+
+  /** The live model and settings a press uses; null when live words are off. */
+  liveChoice() {
+    const setup = this.liveModel();
+    if (!setup) return null;
+    return { setup, stream: setup.live, settings: Object.fromEntries(setup.live.settings.map((setting) =>
+      [setting.id, Number(this.liveSelects.get(setting.id)?.value ?? setting.default)])) };
   }
 
   outputModel() {
@@ -152,8 +202,8 @@ export class RoadTestPage {
     // A press over the voice stops it like Esc; the new take shows that stop.
     const interrupt = this.stopVoice(at);
     this.phase = "recording";
-    this.run = { setup: this.setup(), selection: this.selection(), voiceLabel: this.voiceLabel(), pressedAt: at,
-      ...(interrupt ? { interrupt } : {}) };
+    this.run = { setup: this.setup(), liveChoice: this.liveChoice(), selection: this.selection(), voiceLabel: this.voiceLabel(),
+      pressedAt: at, ...(interrupt ? { interrupt } : {}) };
     this.status(LISTENING);
     this.render();
     void this.openAudio().then(() => {
@@ -173,10 +223,11 @@ export class RoadTestPage {
     this.live.end();
   }
 
-  /** Starts recording; a model that truly streams hears the take live, led by its pre roll. */
+  /** Starts recording; with live words on, the chosen live model hears the take, led by its pre roll. */
   beginTake(target) {
     const preRoll = this.mic.beginTake();
-    if (this.run.setup.card?.transcript === "partials") target.live = { takeId: this.live.begin(this.run.setup.id, preRoll) };
+    const choice = this.run.liveChoice;
+    if (choice) target.live = { takeId: this.live.begin(choice.setup.id, preRoll, choice.settings), updates: [] };
   }
 
   /** Live words for the latest take or what was said over the voice; ignored once that text is final. */
@@ -186,9 +237,12 @@ export class RoadTestPage {
     if (!target) return;
     const now = performance.now();
     const listening = this.phase === "recording" && target === run.live;
-    if (event.type === "loading") {
+    if (event.type === "stream") {
+      // The stream and settings the host applied: what the live words line names.
+      target.stream = { setupId: event.setupId, settings: event.settings };
+    } else if (event.type === "loading") {
       target.loadingAt = now;
-      if (listening) this.status(`Listening. Loading ${run.setup.label} for live words.`);
+      if (listening) this.status(`Listening. Loading ${run.liveChoice.setup.label} for live words.`);
     } else if (event.type === "ready") {
       if (event.cold && target.loadingAt != null) target.loadMs = now - target.loadingAt;
       if (listening) this.status(LISTENING);
@@ -200,6 +254,7 @@ export class RoadTestPage {
       if (words) {
         target.words = words;
         target.firstWordsAt ??= now;
+        if (target === run.live) target.updates.push({ atMs: now - run.pressedAt, words });
       }
     }
     this.render();
@@ -422,6 +477,7 @@ export class RoadTestPage {
     }
     // Names the models that produced the latest take, so changed selects never claim its figures.
     this.elements["take-models"].textContent = run ? [run.setup.label, run.selection && run.voiceLabel].filter(Boolean).join(" · ") : "";
+    this.renderLive(run);
     this.elements["replay-take"].disabled = !run?.take;
     this.elements["replay-talk-over"].hidden = !run?.cutInTake;
     this.elements["replay-voice"].disabled = !run?.output?.samples?.length;
@@ -429,11 +485,26 @@ export class RoadTestPage {
     this.renderHistory();
   }
 
+  /** The line naming what made the latest take's live words (or would make the next), and its trail. */
+  renderLive(run) {
+    const choice = run ? run.liveChoice : this.liveChoice();
+    const applied = run?.live?.stream;
+    this.elements["live-line"].textContent = liveLine(choice && { ...choice, settings: applied?.settings ?? choice.settings },
+      run?.setup ?? this.setup());
+    const updates = run?.live?.updates ?? [];
+    this.elements.trail.hidden = updates.length === 0;
+    this.elements["trail-summary"].textContent = updates.length ? trailSummary(updates) : "";
+    this.elements["trail-list"].replaceChildren(...trailItems(document, updates, run?.input?.text ?? null, formatDuration));
+  }
+
   renderTimings(run) {
     const input = run?.input;
+    // Where the live and final models differ, each figure names its model.
+    const differs = run ? liveDiffers(run) : false;
     describe(this.elements["input-timings"], [
-      ...(run?.setup?.card?.transcript === "partials" ? [["Press to first words", formatDuration(pressToFirstWords(run))]] : []),
-      ["Release to text", formatDuration(input?.finalMs)],
+      ...((run ? run.liveChoice : this.liveChoice()) ? [["Press to first words", formatDuration(pressToFirstWords(run)), null,
+        differs ? run.liveChoice.setup.label : null]] : []),
+      ["Release to text", formatDuration(input?.finalMs), null, differs ? run.setup.label : null],
       ["Model time", formatDuration(input?.processingMs)],
       ...(input?.loadMs != null ? [["Model start", formatDuration(input.loadMs)]] : []),
     ]);
@@ -462,12 +533,16 @@ export class RoadTestPage {
     ]);
   }
 
-  /** Earlier takes only; the latest is already shown above. A cold row names its model start. */
+  /**
+   * Earlier takes only; the latest is already shown above. A cold row names
+   * its model start. Rows are built once, so an opened trail stays open.
+   */
   renderHistory() {
     const earlier = this.history.filter((run) => run !== this.run);
     const rows = earlier.map((run) => {
+      if (this.historyRows.has(run)) return this.historyRows.get(run);
       const row = document.createElement("tr");
-      for (const { label, kind, cell } of HISTORY_COLUMNS) {
+      for (const { label, kind, cell, trail } of HISTORY_COLUMNS) {
         const [value, note] = cell(run);
         const data = document.createElement("td");
         data.dataset.label = label;
@@ -481,8 +556,10 @@ export class RoadTestPage {
           quiet.textContent = note;
           data.append(quiet);
         }
+        if (trail && run.live?.updates?.length) data.append(historyTrail(run));
         row.append(data);
       }
+      this.historyRows.set(run, row);
       return row;
     });
     this.elements.history.replaceChildren(...rows);
@@ -491,14 +568,32 @@ export class RoadTestPage {
 }
 
 /**
- * From the press to the first words on screen: live words where the model
- * streams, else the final text. Only a streaming model's take shows it, and
- * a take where no words came shows none.
+ * From the press to the first words on screen: live words where they came,
+ * else the final text. Only a take with live words on shows it, and a take
+ * where no words came shows none.
  */
 function pressToFirstWords(run) {
-  if (run?.setup?.card?.transcript !== "partials") return null;
+  if (!run?.liveChoice) return null;
   const firstWordsAt = run.live?.firstWordsAt ?? (run.input?.text?.trim() ? run.input.finalAt : null);
   return firstWordsAt != null && run.pressedAt != null ? firstWordsAt - run.pressedAt : null;
+}
+
+/** Whether another model than the final one made the take's live words. */
+function liveDiffers(run) {
+  return Boolean(run.liveChoice && run.liveChoice.setup.id !== run.setup.id);
+}
+
+/** An earlier take's trail, collapsed to its one line summary. */
+function historyTrail(run) {
+  const details = document.createElement("details");
+  details.className = "trail";
+  const summary = document.createElement("summary");
+  summary.className = "note";
+  summary.textContent = trailSummary(run.live.updates);
+  const list = document.createElement("ol");
+  list.replaceChildren(...trailItems(document, run.live.updates, run.input?.text ?? null, formatDuration));
+  details.append(summary, list);
+  return details;
 }
 
 /** From the owner's release to the voice's first sound at the output. */
@@ -508,13 +603,19 @@ function releaseToVoice(run) {
   return run.voiceRequestedAt + firstAudioMs - run.releasedAt;
 }
 
-/** Fills a timing list; missing values show a quiet dash. */
+/** Fills a timing list; missing values show a quiet dash, and a note names the figure's model. */
 function describe(list, entries) {
-  const rows = entries.map(([label, value, kind]) => {
+  const rows = entries.map(([label, value, kind, note]) => {
     const row = document.createElement("div");
     if (kind) row.className = kind;
     const term = document.createElement("dt");
     term.textContent = label;
+    if (note) {
+      const quiet = document.createElement("span");
+      quiet.className = "note";
+      quiet.textContent = note;
+      term.append(quiet);
+    }
     const detail = document.createElement("dd");
     detail.textContent = value ?? "–";
     if (value == null) detail.className = "missing";

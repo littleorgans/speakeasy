@@ -88,22 +88,26 @@ class WorkerTests(unittest.TestCase):
 
     def test_feed_answers_live_words_only_where_the_backend_streams(self):
         class Streaming(Backend):
-            def feed(self, samples, start):
-                self.calls.append((samples.tobytes(), start))
+            def feed(self, samples, start, settings):
+                self.calls.append((samples.tobytes(), start, settings))
                 return {"stable": " heard", "tentative": " maybe", "processingMs": 4}
 
         body = struct.pack("<2f", 0.5, -0.25)
         fields = {k: v for k, v in identity(body).items() if k != "pcmBytes"}
-        data = (frame("load", options={}) + frame("feed", 2, body, start=True, **fields)
+        data = (frame("load", options={}) + frame("feed", 2, body, start=True, settings={"updateMs": 800}, **fields)
                 + frame("feed", 3, b"", start=False, **{k: v for k, v in identity(b"").items() if k != "pcmBytes"}))
         code, replies, backend, _, _ = self.run_worker(data, backend=Streaming())
         self.assertEqual(code, 0)
         self.assertEqual([r["type"] for r in replies], ["ready", "partial", "partial"])
         self.assertEqual(replies[1]["partial"], {"stable": " heard", "tentative": " maybe", "processingMs": 4})
-        self.assertEqual(backend.calls, [(body, True), (b"", False)])
+        self.assertEqual(backend.calls, [(body, True, {"updateMs": 800}), (b"", False, None)])
         refused = {
             "final text only": (frame("load", options={}) + frame("feed", 2, body, start=True, **fields), Backend()),
             "start must be a flag": (frame("load", options={}) + frame("feed", 2, body, start=1, **fields), Streaming()),
+            "settings go with start": (frame("load", options={}) + frame("feed", 2, body, start=False, settings={}, **fields),
+                                       Streaming()),
+            "settings are an object": (frame("load", options={}) + frame("feed", 2, body, start=True, settings=[1], **fields),
+                                       Streaming()),
             "hash checked": (frame("load", options={}) + frame("feed", 2, body, start=True, **{**fields, "sha256": "0" * 64}),
                              Streaming()),
         }

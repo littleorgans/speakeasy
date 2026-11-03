@@ -76,6 +76,13 @@ button:disabled { color: var(--ink-3); border-color: var(--rule); cursor: defaul
 
 kbd { font-family: var(--mono); margin-left: 8px; }
 
+/* Live words and their settings: one row of equal columns under the speech in choice. */
+.live { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 16px; align-items: start; }
+
+.setting { display: grid; gap: 8px; }
+
+.live .columns { display: contents; }
+
 .talk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
 
 .hold { min-height: 48px; padding: 0 24px; border-color: var(--mint); background: var(--mint-soft); }
@@ -98,6 +105,19 @@ kbd { font-family: var(--mono); margin-left: 8px; }
 
 /* Live words sit one tone below the final text, which replaces them in place. */
 .said.partial, .partial dd { color: var(--ink-2); }
+
+/* The revision trail: each live update, its time from the press, changed words marked. */
+.trail summary { width: fit-content; cursor: pointer; }
+
+.trail ol { display: grid; gap: 8px; margin: 8px 0 0; padding: 0; list-style: none; font-size: var(--small); color: var(--ink-3); }
+
+.trail li { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 16px; }
+
+.trail .when { font-variant-numeric: tabular-nums; }
+
+.trail ins { color: var(--ink); text-decoration: none; }
+
+.trail del { color: var(--live); }
 
 .timings { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
 
@@ -149,7 +169,7 @@ th.num { white-space: normal; vertical-align: bottom; }
 footer { padding-top: 24px; border-top: 1px solid var(--rule); }
 
 @media (max-width: 640px) {
-  .pair { grid-template-columns: 1fr; }
+  .pair, .live { grid-template-columns: 1fr; }
   .timings { grid-template-columns: 1fr; }
   /* Two equal buttons on one line; the level line meters inside Hold to speak. */
   .talk { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 8px; }
@@ -164,6 +184,8 @@ footer { padding-top: 24px; border-top: 1px solid var(--rule); }
   .history tr { display: grid; gap: 8px; padding: 16px 0; border-bottom: 1px solid var(--rule); }
   .history td { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 16px; padding: 0; border: 0; text-align: right; }
   .history td::before { content: attr(data-label); grid-row: span 2; text-align: left; color: var(--ink-3); }
+  /* An opened trail takes the row's full width, read from the left edge. */
+  .history .trail { grid-column: 1 / -1; text-align: left; }
 }
 
 @media (prefers-reduced-motion: reduce) {
