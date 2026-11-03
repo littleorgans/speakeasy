@@ -18,8 +18,8 @@ It serves `http://127.0.0.1:4870/` with no further setup:
 - Speech in setups read their paths from `models/road-test-runtime.json`
   (gitignored, one per machine). If it is missing, the page still opens; the
   console names the file and each setup that needs it shows
-  "needs setup: setup runtime file missing". The sherpa CPU setup needs no
-  entry: it reads `models/sherpa`.
+  "needs setup: setup runtime file missing". The sherpa CPU setups need no
+  entry: they read `models/sherpa`.
 
 Flags after `pnpm road-test --` or environment values override either default:
 `--setup-runtime` / `SPEAKEASY_SETUP_RUNTIME` and `--output-root` /
@@ -36,8 +36,8 @@ package shows every entry. Omit a setup to leave it unavailable.
   `libraryPath` for `qwen/context` or `runnerPath` for `hex/unified`.
   Optional `loadTimeoutMs` and `operationTimeoutMs`, positive integers,
   default 120000.
-- `cpu.modelRoot`: the directory holding `parakeet-ultra-sherpa-onnx-int8`;
-  defaults to `models/sherpa`.
+- `cpu.modelRoot`: the directory holding `parakeet-ultra-sherpa-onnx-int8`,
+  shared by every sherpa CPU setup; defaults to `models/sherpa`.
 - `voices.<voice id>`: `pythonPath` for a worker voice (Speech out below),
   plus `runnerPath` where its backend drives a native binary. Optional
   `loadTimeoutMs` and `operationTimeoutMs` as above. Its weights come from the
@@ -69,6 +69,11 @@ Unknown setups or fields are refused at startup.
    in `EXTRA_LOCATIONS`, and `inspectSetupReadiness` checks the files exist.
 6. Add its paths to `models/road-test-runtime.json` and to
    `road-test-runtime.example.json`, restart, and try it in the page.
+
+A sherpa CPU setup with another fixed word list (`tm/today` beside
+`sweep/score-2`) needs no backend or paths: add its preset, with the list and
+its SHA256, to `CPU_PRESETS` in `src/transcriber.ts`, and the same list under
+`controls.list` in its manifest entry. Each CPU setup runs in a child of its own.
 
 ### Live words
 

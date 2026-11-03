@@ -10,16 +10,16 @@ import { prepareOfflineHotwords } from "../../speech-io/src/engines/offline-hotw
 import type { OfflineRecognizerConfig, OfflineStream } from "../../speech-io/src/engines/sherpa-api.ts";
 import { PROMPT_SAMPLE_RATE } from "./prompt-reader.ts";
 import {
-  CPU_PRESET, TRANSCRIBE_MODEL_ID, TranscriptionError, validateCpuSamples,
-  type CpuLoadMetadata, type TranscriptionMode, type Transcript,
+  CPU_DECODING, CPU_PRESETS, cpuWords, TRANSCRIBE_MODEL_ID, TranscriptionError, validateCpuSamples,
+  type CpuLoadMetadata, type CpuPreset, type TranscriptionMode, type Transcript,
 } from "./transcriber.ts";
 
-/** The comparison list is independent of every editable reader file. */
-export function fixedCpuSnapshot(): HotwordFileSnapshot {
-  const phrases = ["launch", "claude", "grok"];
+/** A preset's list is independent of every editable reader file. */
+export function fixedCpuSnapshot(preset: CpuPreset): HotwordFileSnapshot {
+  const phrases = cpuWords(preset);
   Object.freeze(phrases);
-  return Object.freeze({ source: CPU_PRESET.mode, content: `${phrases.join("\n")}\n`,
-    hotwords: Object.freeze({ phrases, score: CPU_PRESET.hotwordsScore, file: CPU_PRESET.mode }) });
+  return Object.freeze({ source: preset.mode, content: preset.words,
+    hotwords: Object.freeze({ phrases, score: preset.hotwordsScore, file: preset.mode }) });
 }
 
 export type CpuMeasurements = {
@@ -32,7 +32,7 @@ export type CpuMeasurements = {
 export class TakeTranscription {
   readonly #read: () => Promise<HotwordFileSnapshot>;
   readonly #createEngine: (hotwords: Hotwords | undefined) => Promise<AnySherpaEngine>;
-  readonly #mode: TranscriptionMode;
+  readonly #fixed: boolean;
   readonly #measurements: (() => CpuMeasurements) | undefined;
   #engine: AnySherpaEngine | undefined;
   #content: string | undefined;
@@ -47,9 +47,10 @@ export class TakeTranscription {
     measurements?(): CpuMeasurements;
     createEngine(hotwords: Hotwords | undefined): Promise<AnySherpaEngine>;
   }) {
-    this.#mode = options.mode ?? "legacy";
-    const fixed = fixedCpuSnapshot();
-    this.#read = this.#mode === CPU_PRESET.mode ? async () => fixed
+    const mode = options.mode ?? "legacy";
+    this.#fixed = mode !== "legacy";
+    const fixed = mode === "legacy" ? undefined : fixedCpuSnapshot(CPU_PRESETS[mode]);
+    this.#read = fixed ? async () => fixed
       : options.readSnapshot ?? (() => loadHotwords({ snapshot: true, source: options.hotwordsPath }));
     this.#createEngine = options.createEngine;
     this.#measurements = options.measurements;
@@ -66,7 +67,7 @@ export class TakeTranscription {
   }
 
   transcribe(samples: Float32Array): Promise<Transcript> {
-    if (this.#mode === CPU_PRESET.mode) {
+    if (this.#fixed) {
       try { validateCpuSamples(samples); } catch (error) { return Promise.reject(error); }
     }
     // Read immediately, before an earlier decode can delay this take. Handle
@@ -91,7 +92,7 @@ export class TakeTranscription {
         const result = await decode(engine, samples);
         const measured = this.#measurements?.();
         return { ...result, model: TRANSCRIBE_MODEL_ID, hotwords: status,
-          ...(this.#mode === CPU_PRESET.mode ? {
+          ...(this.#fixed ? {
             text: measured?.rawText ?? result.text,
             comparison: { ...this.#load, processingMs: measured?.processingMs ?? null,
               firstUse, workerWallMs: performance.now() - started },
@@ -112,7 +113,7 @@ export class TakeTranscription {
       const started = performance.now();
       const engine = await this.#createEngine(hotwords);
       await engine.prepare();
-      if (this.#mode === CPU_PRESET.mode) {
+      if (this.#fixed) {
         // Sherpa constructs lazily in open(), not prepare(). No audio or flush.
         const session = await engine.open({ sampleRate: PROMPT_SAMPLE_RATE });
         await session.end();
@@ -127,7 +128,7 @@ export class TakeTranscription {
 }
 
 /** Hash checks precede engine preparation, which must never install a model. */
-export async function preflightCpuModel(modelRoot: string): Promise<Record<string, string>> {
+export async function preflightCpuModel(modelRoot: string, preset: CpuPreset): Promise<Record<string, string>> {
   const model = SHERPA_MODELS[TRANSCRIBE_MODEL_ID];
   const paths = resolveModelPaths(model, modelRoot);
   if (!(await isAssetComplete(paths))) throw new Error("CPU model is not installed with its pinned completion marker");
@@ -141,8 +142,8 @@ export async function preflightCpuModel(modelRoot: string): Promise<Record<strin
     hashes[file.name] = file.sha256;
   }
   const table = new TextDecoder("utf-8", { fatal: true }).decode(await readFile(join(paths.dir, model.tokens)));
-  const prepared = prepareOfflineHotwords(model, table, fixedCpuSnapshot().hotwords!);
-  if (createHash("sha256").update(prepared.vocabulary).digest("hex") !== CPU_PRESET.vocabularySha256) {
+  const prepared = prepareOfflineHotwords(model, table, fixedCpuSnapshot(preset).hotwords!);
+  if (createHash("sha256").update(prepared.vocabulary).digest("hex") !== preset.vocabularySha256) {
     throw new Error("CPU vocabulary does not match the measured preset");
   }
   return hashes;
@@ -150,8 +151,8 @@ export async function preflightCpuModel(modelRoot: string): Promise<Record<strin
 
 export function validateCpuRuntime(binding: SherpaBinding & { gitSha1?: string; onnxruntimeVersion?: string }): void {
   const runtime = binding;
-  if (runtime.version !== CPU_PRESET.runtimeVersion || runtime.gitSha1 !== CPU_PRESET.runtimeGitSha1 ||
-      runtime.onnxruntimeVersion !== CPU_PRESET.onnxruntimeVersion) {
+  if (runtime.version !== CPU_DECODING.runtimeVersion || runtime.gitSha1 !== CPU_DECODING.runtimeGitSha1 ||
+      runtime.onnxruntimeVersion !== CPU_DECODING.onnxruntimeVersion) {
     throw new Error("CPU comparison requires the pinned sherpa 2.0.1 parent and ONNX Runtime 1.28.2");
   }
 }

@@ -10,7 +10,7 @@ import type { OfflineRecognizerConfig } from "../../speech-io/src/engines/sherpa
 import { bindingWith, seededModelRoot } from "../../speech-io/src/engines/test-support.ts";
 import { fixedCpuSnapshot, instrumentCpuBinding, preflightCpuModel, TakeTranscription, validateCpuRuntime } from "./take-transcription.ts";
 import { readBrowserVoiceOptions } from "./server-options.ts";
-import { ChildTranscriber, CPU_PRESET, TRANSCRIBE_MODEL_ID, TranscriptionError, type TranscriptionMode } from "./transcriber.ts";
+import { ChildTranscriber, CPU_PRESETS, TRANSCRIBE_MODEL_ID, TranscriptionError, type TranscriptionMode } from "./transcriber.ts";
 import { SetupComparison } from "./setup-comparison.ts";
 import { SetupWorkers } from "./setup-workers.ts";
 
@@ -252,7 +252,7 @@ test("native construction and CPU processing have separate clocks and preserve r
     }
     async decodeAsync() { clock += 5; return { text: rawText }; }
   } }));
-  const service = new TakeTranscription({ mode: CPU_PRESET.mode, measurements: () => timed.measurements,
+  const service = new TakeTranscription({ mode: "sweep/score-2", measurements: () => timed.measurements,
     async createEngine(hotwords) {
       return createSherpaEngine({ model: TRANSCRIBE_MODEL_ID, modelRoot: h.modelRoot, hotwords, binding: timed.binding });
     } });
@@ -276,7 +276,7 @@ test("native construction and CPU processing have separate clocks and preserve r
 });
 
 test("fixed snapshot is immutable, and the fixed runtime rejects the experimental decoder", () => {
-  const snapshot = fixedCpuSnapshot();
+  const snapshot = fixedCpuSnapshot(CPU_PRESETS["sweep/score-2"]);
   assert.throws(() => snapshot.hotwords!.phrases.push("extra"), TypeError);
   assert.throws(() => { snapshot.hotwords!.score = 9; }, TypeError);
   const parent = { ...bindingWith({}), version: "2.0.1", gitSha1: "af2d8d81", onnxruntimeVersion: "1.28.2" };
@@ -286,19 +286,35 @@ test("fixed snapshot is immutable, and the fixed runtime rejects the experimenta
   assert.throws(() => validateCpuRuntime({ ...parent, onnxruntimeVersion: "1.27.0" }), /pinned sherpa/);
 });
 
+test("each CPU setup pins its own list, as the manifest records it, and loads only that list", async () => {
+  const { createHash } = await import("node:crypto");
+  const { getSetup } = await import("./setup-registry.ts");
+  for (const preset of Object.values(CPU_PRESETS)) {
+    assert.equal(createHash("sha256").update(preset.words).digest("hex"), preset.hotwordsSha256);
+    assert.deepEqual(getSetup(preset.mode).controls.list, { ...getSetup(preset.mode).controls.list as object,
+      content: preset.words, sha256: preset.hotwordsSha256 });
+  }
+  assert.equal(CPU_PRESETS["tm/today"].words, "Grok\nClaude\nCodex\n");
+  const loaded: string[][] = [];
+  const service = new TakeTranscription({ mode: "tm/today",
+    async createEngine(hotwords) { loaded.push([...hotwords!.phrases]); throw new Error("stop after the list"); } });
+  await assert.rejects(service.prepare(), /stop after the list/);
+  assert.deepEqual(loaded, [["Grok", "Claude", "Codex"]]);
+});
+
 test("CPU asset preflight rejects an absent marker and a corrupt completed model without installation", async () => {
   const root = await seededModelRoot(TRANSCRIBE_MODEL_ID);
-  await assert.rejects(preflightCpuModel(join(root, "absent")), /not installed/);
+  await assert.rejects(preflightCpuModel(join(root, "absent"), CPU_PRESETS["sweep/score-2"]), /not installed/);
   const paths = resolveModelPaths(SHERPA_MODELS[TRANSCRIBE_MODEL_ID], root);
   const tokens = SHERPA_MODELS[TRANSCRIBE_MODEL_ID].files.find((file) => file.name === "tokens.txt")!;
   await writeFile(join(paths.dir, tokens.name), "corrupt");
-  await assert.rejects(preflightCpuModel(root), /asset mismatch: tokens/);
+  await assert.rejects(preflightCpuModel(root, CPU_PRESETS["sweep/score-2"]), /asset mismatch: tokens/);
   await writeFile(join(paths.dir, tokens.name), Buffer.alloc(tokens.bytes));
-  await assert.rejects(preflightCpuModel(root), /asset mismatch: tokens/, "a correct size cannot bypass SHA256 validation");
+  await assert.rejects(preflightCpuModel(root, CPU_PRESETS["sweep/score-2"]), /asset mismatch: tokens/, "a correct size cannot bypass SHA256 validation");
 });
 
 const ready = {
-  type: "ready", version: 1, preset: CPU_PRESET, load: { loadMs: 7, modelConstructionMs: 3 },
+  type: "ready", version: 1, preset: CPU_PRESETS["sweep/score-2"], load: { loadMs: 7, modelConstructionMs: 3 },
   assets: Object.fromEntries(SHERPA_MODELS[TRANSCRIBE_MODEL_ID].files.map((file) => [file.name, file.sha256])),
 };
 function healthyWorker(options: { text?: string; beforeReply?: string } = {}): string { return `
@@ -320,7 +336,7 @@ async function fakeChild(t: TestContext, body = healthyWorker(), options: {
   const write = (source: string) => writeFile(workerPath,
     `const ready = ${JSON.stringify(ready)};\n${source}\nprocess.on("disconnect", () => process.exit(0));\n`);
   await write(body);
-  const child = new ChildTranscriber({ mode: CPU_PRESET.mode, workerPath, startupTimeoutMs: 2_000, ...options });
+  const child = new ChildTranscriber({ mode: "sweep/score-2", workerPath, startupTimeoutMs: 2_000, ...options });
   t.after(async () => { await child.closeAndWait(); await rm(root, { recursive: true, force: true }); });
   return { child, write, workerPath, root };
 }
@@ -366,7 +382,7 @@ test("scheduler CPU cancellation awaits actual exit before queued exact PCM reac
       }
     `,
   }));
-  const executor = new SetupWorkers({ cpu: h.child });
+  const executor = new SetupWorkers({ cpu: { "sweep/score-2": h.child } });
   const scheduler = new SetupComparison({ executor });
   t.after(() => scheduler.close());
   const first = scheduler.compare({ samples: new Float32Array([0.25]), setupIds: ["sweep/score-2"] });
@@ -458,7 +474,7 @@ test("unknown request ids and oversized replies fail the owning CPU generation",
 
 test("fixed ingress refuses oversized audio before spawning, and the real child refuses missing assets before loading native code", async () => {
   const root = await seededModelRoot(TRANSCRIBE_MODEL_ID);
-  const child = new ChildTranscriber({ mode: CPU_PRESET.mode, modelRoot: join(root, "absent") });
+  const child = new ChildTranscriber({ mode: "sweep/score-2", modelRoot: join(root, "absent") });
   try {
     await assert.rejects(child.transcribe(new Float32Array(960001)), /60 seconds/);
     await assert.rejects(child.prepare(), /not installed/);

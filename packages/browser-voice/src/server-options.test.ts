@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { createSetupRuntime, DEFAULT_OUTPUT_ROOT, DEFAULT_SETUP_RUNTIME, parseSetupRuntimeLocations,
   readBrowserVoiceOptions } from "./server-options.ts";
 import { SETUPS } from "./setup-registry.ts";
+import { CPU_SETUP_IDS, isCpuSetupId } from "./transcriber.ts";
 import { isWorkerOutput, LOCAL_OUTPUT_MODELS } from "../../speech-io/src/tts/catalogue.ts";
 
 test("server options keep the model and use the cascade TTS voice", () => {
@@ -117,7 +118,7 @@ test("the committed example runtime file parses and names every Python setup and
   const example = JSON.parse(await readFile(new URL("../road-test-runtime.example.json", import.meta.url), "utf8"));
   const parsed = parseSetupRuntimeLocations(example);
   assert.deepEqual(Object.keys(parsed.python!).sort(),
-    SETUPS.map((setup) => setup.id).filter((id) => id !== "sweep/score-2").sort());
+    SETUPS.map((setup) => setup.id).filter((id) => !isCpuSetupId(id)).sort());
   assert.deepEqual(Object.keys(parsed.voices!).sort(),
     LOCAL_OUTPUT_MODELS.map((model) => model.id).filter(isWorkerOutput).sort());
 });
@@ -188,7 +189,7 @@ test("bootstrap constructs actual lazy transport and reports missing files witho
   const v3 = runtime.readiness().find((entry) => entry.setupId === "mlx-parakeet/v3-greedy")!;
   assert.equal(v3.ready, true);
   assert.equal(v3.sizeBytes, "{}".length + "fake weights never loaded".length, "card size is measured from the model files");
-  assert.equal(runtime.readiness().find((entry) => entry.setupId === "sweep/score-2")!.ready, false);
+  for (const id of CPU_SETUP_IDS) assert.equal(runtime.readiness().find((entry) => entry.setupId === id)!.ready, false);
   await runtime.executor.close();
 });
 

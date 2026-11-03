@@ -178,6 +178,69 @@
       "maxSamples": 960000
     },
     {
+      "id": "tm/today",
+      "label": "TM today",
+      "card": {
+        "runtime": "sherpa-onnx 2.0.1, CPU, TM's word list Grok, Claude, Codex",
+        "transcript": "final"
+      },
+      "model": "en-parakeet-ultra-int8",
+      "revision": "b86784a3a5356cbd126f710b61cd90c5fe5898f1",
+      "artifactRepository": "tpmaerk/parakeet-ultra-sherpa-onnx-int8",
+      "files": [
+        {
+          "path": "encoder.int8.onnx",
+          "bytes": 652282347,
+          "sha256": "f4d06712d32431b1718eceba2153c314ac4425e8fe708a3534f5e56c5ad53697"
+        },
+        {
+          "path": "decoder.int8.onnx",
+          "bytes": 11845275,
+          "sha256": "94373c6405c8149d1c9d1e9862514e0e3e88dab1c7de18fac9d5df9c6ba5efdd"
+        },
+        {
+          "path": "joiner.int8.onnx",
+          "bytes": 6355277,
+          "sha256": "8a71aaccfdba3d451775507a889afd2257d2e754463fd81095a8c8f290f924c2"
+        },
+        {
+          "path": "tokens.txt",
+          "bytes": 93939,
+          "sha256": "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d"
+        }
+      ],
+      "runtime": {
+        "version": "2.0.1",
+        "gitSha1": "af2d8d81",
+        "onnxruntimeVersion": "1.28.2",
+        "node": "v26.13.0"
+      },
+      "quantization": "int8 ONNX",
+      "controls": {
+        "provider": "cpu",
+        "threads": 2,
+        "sampleRate": 16000,
+        "featureDim": 80,
+        "modelType": "nemo_transducer",
+        "modelingUnit": "bpe",
+        "decodingMethod": "modified_beam_search",
+        "maxActivePaths": 4,
+        "hotwordsScore": 2,
+        "lengthReward": 0,
+        "list": {
+          "content": "Grok\nClaude\nCodex\n",
+          "sha256": "0f6cb23db8c767504f966d2cab903db4e0e7ef984c91a3e6c9061ad131323ee9",
+          "source": "transport-matters PR #1364 INITIAL_WORDS, the shipped default"
+        },
+        "bpeVocabularySha256": "41130ff456706304a1adec782ccc9e003c4d417e8e324353d281be958cac4e17",
+        "gate": "off",
+        "rewrite": "off",
+        "padding": "none"
+      },
+      "operation": "transcribe",
+      "maxSamples": 960000
+    },
+    {
       "id": "hex/unified",
       "label": "Hex Parakeet Unified",
       "card": {

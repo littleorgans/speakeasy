@@ -6,13 +6,12 @@ import { isAbsolute, join, resolve } from "node:path";
 import { exactFields, isRecord } from "./http-guards.ts";
 import { getSetup, SETUPS } from "./setup-registry.ts";
 import { isSetupId, type SetupId } from "./setup-protocol.ts";
-import { SetupWorkers, type SetupWorkersOptions } from "./setup-workers.ts";
-import { ChildTranscriber } from "./transcriber.ts";
+import { SetupWorkers, type PythonSetupId, type SetupWorkersOptions } from "./setup-workers.ts";
+import { ChildTranscriber, CPU_SETUP_IDS, isCpuSetupId } from "./transcriber.ts";
 import type { SetupReadiness } from "./setup-routes.ts";
 import { isWorkerOutput, LOCAL_OUTPUT_MODELS, type LocalOutputModelId } from "../../speech-io/src/tts/catalogue.ts";
 import { createWorkerVoiceSynth, type VoiceRuntimeLocation } from "./voice-workers.ts";
 
-type PythonSetupId = Exclude<SetupId, "sweep/score-2">;
 /** The one native location a Python setup needs beyond its model. */
 const EXTRA_LOCATIONS: Partial<Record<PythonSetupId, "libraryPath" | "runnerPath">> = {
   "qwen/context": "libraryPath", "hex/unified": "runnerPath",
@@ -79,7 +78,7 @@ export function parseSetupRuntimeLocations(value: unknown): SetupRuntimeLocation
     if (!isRecord(value.python)) throw new Error("python runtimes must be an object");
     result.python = {};
     for (const [id, config] of Object.entries(value.python)) {
-      if (!isSetupId(id) || id === "sweep/score-2" || !isRecord(config)) throw new Error("unknown Python setup");
+      if (!isSetupId(id) || isCpuSetupId(id) || !isRecord(config)) throw new Error("unknown Python setup");
       const extra = EXTRA_LOCATIONS[id];
       exactFields(config, ["pythonPath", "modelPath", ...(extra ? [extra] : []), "loadTimeoutMs", "operationTimeoutMs"]);
       const parsed = { pythonPath: absoluteLocation(config.pythonPath), modelPath: absoluteLocation(config.modelPath),
@@ -152,8 +151,9 @@ export async function createSetupRuntime(file?: string, { optional = false } = {
       operationTimeoutMs: config.operationTimeoutMs ?? DEFAULT_SETUP_TIMEOUT_MS };
   }
   const modelRoot = locations.cpu?.modelRoot ?? resolve("models/sherpa");
-  const executor = new SetupWorkers({ python, cpu: new ChildTranscriber({ mode: "sweep/score-2", modelRoot,
-    startupTimeoutMs: DEFAULT_SETUP_TIMEOUT_MS, timeoutMs: DEFAULT_SETUP_TIMEOUT_MS }) });
+  const cpu: SetupWorkersOptions["cpu"] = Object.fromEntries(CPU_SETUP_IDS.map((mode) => [mode, new ChildTranscriber({
+    mode, modelRoot, startupTimeoutMs: DEFAULT_SETUP_TIMEOUT_MS, timeoutMs: DEFAULT_SETUP_TIMEOUT_MS })]));
+  const executor = new SetupWorkers({ python, cpu });
   const setupReadiness = await inspectSetupReadiness(locations, modelRoot, missingFile);
   const voices = await inspectVoiceRuntimes(locations.voices ?? {});
   return { executor, readiness: () => setupReadiness, missingFile, voices: {
@@ -186,10 +186,10 @@ async function inspectSetupReadiness(locations: SetupRuntimeLocations, modelRoot
   missingFile?: string): Promise<SetupReadiness[]> {
   const readiness: SetupReadiness[] = [];
   for (const setup of SETUPS) {
-    const config = setup.id === "sweep/score-2" ? undefined : locations.python?.[setup.id];
+    const config = isCpuSetupId(setup.id) ? undefined : locations.python?.[setup.id];
     let sizeBytes: number | undefined;
     try {
-      if (setup.id === "sweep/score-2") {
+      if (isCpuSetupId(setup.id)) {
         const root = join(modelRoot, "parakeet-ultra-sherpa-onnx-int8");
         for (const name of ["encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt", ".complete"]) {
           if (!(await stat(join(root, name))).isFile()) throw new Error();
@@ -215,7 +215,7 @@ async function inspectSetupReadiness(locations: SetupRuntimeLocations, modelRoot
       }
       readiness.push({ setupId: setup.id, ready: true, sizeBytes });
     } catch {
-      readiness.push({ setupId: setup.id, ready: false, reason: !config && missingFile && setup.id !== "sweep/score-2"
+      readiness.push({ setupId: setup.id, ready: false, reason: !config && missingFile && !isCpuSetupId(setup.id)
         ? `setup runtime file missing: ${missingFile}` : "runtime or model files need setup" });
     }
     readiness.at(-1)!.deadlines = { loadMs: config?.loadTimeoutMs ?? DEFAULT_SETUP_TIMEOUT_MS,
