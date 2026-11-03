@@ -4,7 +4,7 @@ import { constants } from "node:fs";
 import { access, readdir, readFile, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { exactFields, isRecord } from "./http-guards.ts";
-import { SETUPS } from "./setup-registry.ts";
+import { getSetup, SETUPS } from "./setup-registry.ts";
 import { isSetupId, type SetupId } from "./setup-protocol.ts";
 import { SetupWorkers, type SetupWorkersOptions } from "./setup-workers.ts";
 import { ChildTranscriber } from "./transcriber.ts";
@@ -175,9 +175,17 @@ async function inspectSetupReadiness(locations: SetupRuntimeLocations, modelRoot
     readiness.at(-1)!.deadlines = { loadMs: config?.loadTimeoutMs ?? DEFAULT_SETUP_TIMEOUT_MS,
       operationMs: config?.operationTimeoutMs ?? DEFAULT_SETUP_TIMEOUT_MS };
   }
-  const ultra = readiness.find((entry) => entry.setupId === "mlx-parakeet/ultra-greedy")!;
-  const cleanup = readiness.find((entry) => entry.setupId === "mlx-cleanup/qwen-targeted")!;
-  if (!ultra.ready) { cleanup.ready = false; cleanup.reason = "Ultra dependency needs setup"; }
+  // A composite setup loads its base setup too: it needs the base ready, and its card counts both.
+  for (const setup of SETUPS) {
+    const entry = readiness.find((candidate) => candidate.setupId === setup.id)!;
+    if (!setup.baseSetup || !entry.ready) continue;
+    const base = readiness.find((candidate) => candidate.setupId === setup.baseSetup)!;
+    if (!base.ready) {
+      entry.ready = false;
+      entry.reason = `${getSetup(setup.baseSetup).label} needs setup`;
+      delete entry.sizeBytes;
+    } else if (entry.sizeBytes !== undefined && base.sizeBytes !== undefined) entry.sizeBytes += base.sizeBytes;
+  }
   return readiness;
 }
 

@@ -46,7 +46,8 @@ Unknown setups or fields are refused at startup.
    `model`, `revision`, `runtime`, `controls`, `operation` (`transcribe`) and
    `maxSamples`. `card.runtime` is the plain text runtime line on the model
    card; `card.transcript` is `final` or `partials`. The card's size is
-   measured from the configured model files.
+   measured from the configured model files. A setup with `baseSetup` also
+   loads that setup: it is ready only when its base is, and its size counts both.
 2. Add the id to `SETUP_IDS` in `src/setup-protocol.ts`, in manifest order.
 3. Recompute the manifest pin in `src/setup-registry.ts`
    (`SETUP_MANIFEST_SHA256`, the SHA256 of `JSON.stringify` of the parsed file).

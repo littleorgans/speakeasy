@@ -119,6 +119,34 @@ test("the committed example runtime file parses and names every Python setup", a
     SETUPS.map((setup) => setup.id).filter((id) => id !== "sweep/score-2").sort());
 });
 
+test("a composite setup needs its base setup and its card counts both models", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "speakeasy-composite-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const snapshot = async (name: string, weights: string) => {
+    const path = join(root, name);
+    await mkdir(path);
+    await writeFile(join(path, "config.json"), "{}");
+    await writeFile(join(path, "model.safetensors"), weights);
+    return path;
+  };
+  const ultra = { pythonPath: process.execPath, modelPath: await snapshot("ultra", "ultra weights") };
+  const cleanup = { pythonPath: process.execPath, modelPath: await snapshot("cleanup", "cleanup") };
+  const ready = async (python: Record<string, unknown>) => {
+    const runtimeFile = join(root, `runtime-${Object.keys(python).length}.json`);
+    await writeFile(runtimeFile, JSON.stringify({ python }));
+    const runtime = await createSetupRuntime(runtimeFile);
+    t.after(() => runtime.executor.close());
+    return runtime.readiness().find((entry) => entry.setupId === "mlx-cleanup/qwen-targeted")!;
+  };
+  const both = await ready({ "mlx-parakeet/ultra-greedy": ultra, "mlx-cleanup/qwen-targeted": cleanup });
+  assert.equal(both.ready, true);
+  assert.equal(both.sizeBytes, 2 * "{}".length + "ultra weights".length + "cleanup".length);
+  const alone = await ready({ "mlx-cleanup/qwen-targeted": cleanup });
+  assert.equal(alone.ready, false);
+  assert.equal(alone.reason, "Parakeet Ultra MLX needs setup");
+  assert.equal(alone.sizeBytes, undefined);
+});
+
 test("bootstrap constructs actual lazy transport and reports missing files without spawning", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "speakeasy-host-paths-"));
   t.after(() => rm(root, { recursive: true, force: true }));
