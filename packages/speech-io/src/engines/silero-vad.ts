@@ -1,8 +1,8 @@
 import { join } from "node:path";
 import { ensureAsset, type FetchArchive, type FileSetSpec } from "./assets.ts";
+import type { ModelFile, ModelLicence } from "./model.ts";
 import type { SpeechDetector } from "./offline-session.ts";
 import { SHERPA_SAMPLE_RATE } from "./sherpa.ts";
-import type { ModelFile, ModelLicence } from "./sherpa-models.ts";
 
 /**
  * The silence gate's speech detector: Silero VAD run through sherpa-onnx's

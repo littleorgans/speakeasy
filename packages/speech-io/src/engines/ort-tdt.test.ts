@@ -6,15 +6,12 @@ import { basename, join } from "node:path";
 import { after, test } from "node:test";
 import type { EmptyEvent, FinalEvent } from "../contract.ts";
 import { COMPLETE_MARKER, completeMarkerValue } from "./assets.ts";
+import { resolveModelPaths } from "./model.ts";
 import type { OrtBinding, OrtGraph, OrtTensor } from "./ort-tdt-graphs.ts";
 import type { SilenceGate } from "./offline-session.ts";
 import { ORT_THREADS } from "./ort-models.ts";
 import { OrtTdtEngine } from "./ort-tdt.ts";
-import {
-  ORT_TDT_MODELS,
-  resolveOrtTdtPaths,
-  type OrtTdtModelId,
-} from "./ort-tdt-models.ts";
+import { ORT_TDT_MODELS, type OrtTdtModelId } from "./ort-tdt-models.ts";
 
 /**
  * OrtTdtEngine over fake onnxruntime sessions: each fake graph answers with
@@ -32,6 +29,9 @@ type Fake = {
   runs: Record<string, Feeds[]>;
   steps: Float32Array[];
   created: string[];
+  released: string[];
+  /** A graph file whose next session creation fails. */
+  failCreate?: string;
   /** Intra op threads per graph file. */
   threads: Record<string, number>;
   failure?: Error;
@@ -119,10 +119,19 @@ function fakeBinding(fake: Fake): OrtBinding {
   return {
     version: "fake",
     createSession: async (path, { threads }) => {
+      if (fake.failCreate === basename(path)) {
+        fake.failCreate = undefined;
+        throw new Error("session failed");
+      }
       fake.created.push(basename(path));
       fake.threads[basename(path)] = threads;
       const run = fakeGraph(basename(path), fake);
-      const graph: OrtGraph = { run: async (feeds) => run(feeds), release: async () => {} };
+      const graph: OrtGraph = {
+        run: async (feeds) => run(feeds),
+        release: async () => {
+          fake.released.push(basename(path));
+        },
+      };
       return graph;
     },
     tensor: (type, data, dims) => tensor(type, data, dims),
@@ -144,7 +153,7 @@ async function seededRoot(id: OrtTdtModelId): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "speak-easy-ort-tdt-"));
   after(() => rm(root, { recursive: true, force: true }));
   const model = ORT_TDT_MODELS[id];
-  const paths = resolveOrtTdtPaths(model, root);
+  const paths = resolveModelPaths(model, root);
   await mkdir(paths.dir, { recursive: true });
   await writeFile(join(paths.dir, COMPLETE_MARKER), completeMarkerValue(paths));
   const entries = Object.entries(PIECES);
@@ -160,7 +169,7 @@ async function seededRoot(id: OrtTdtModelId): Promise<string> {
 }
 
 async function openSession(id: OrtTdtModelId, steps: Float32Array[] = [], silenceGate?: SilenceGate) {
-  const fake: Fake = { runs: {}, steps, created: [], threads: {} };
+  const fake: Fake = { runs: {}, steps, created: [], released: [], threads: {} };
   const engine = new OrtTdtEngine({
     model: id,
     modelRoot: await seededRoot(id),
@@ -303,4 +312,26 @@ test("the engine loads each graph once across sessions and refuses other rates",
     "preprocessor-model.onnx",
   ]);
   await assert.rejects(engine.open({ sampleRate: 48_000 }), /16000 Hz/);
+});
+
+test("release frees every graph once and the next open loads them again", async () => {
+  const { engine, fake } = await openSession("en-fluid-speech-mini");
+  await Promise.all([engine.release(), engine.release()]);
+  assert.deepEqual(fake.released.sort(), ["decoder.onnx", "encoder.onnx", "frontend.onnx", "joint.onnx"]);
+  await engine.open();
+  assert.equal(fake.created.length, 8);
+});
+
+test("a failed graph load releases the graphs it built, and the next open loads them all", async () => {
+  const id = "en-phonon-2-int8";
+  const fake: Fake = { runs: {}, steps: [], created: [], released: [], threads: {}, failCreate: "encoder-model.int8.onnx" };
+  const engine = new OrtTdtEngine({ model: id, modelRoot: await seededRoot(id), binding: fakeBinding(fake) });
+  await assert.rejects(engine.open(), /session failed/);
+  assert.deepEqual(fake.released.sort(), ["decoder_joint-model.onnx", "preprocessor-model.onnx"]);
+  await engine.open();
+  assert.deepEqual(fake.created.slice(2).sort(), [
+    "decoder_joint-model.onnx",
+    "encoder-model.int8.onnx",
+    "preprocessor-model.onnx",
+  ]);
 });

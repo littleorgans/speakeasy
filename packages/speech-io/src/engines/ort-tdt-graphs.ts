@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { concatFrames } from "../audio/pcm.js";
+import { loadAll, releaseAll } from "./offline-engine.ts";
 import {
   frontendChunks,
   logMel,
@@ -89,7 +90,7 @@ async function loadFusedGraphs(
   { createSession, tensor }: OrtBinding,
   threads: number,
 ): Promise<TdtGraphs> {
-  const [vocabulary, preprocessor, encoder, decoderJoint] = await Promise.all([
+  const [vocabulary, preprocessor, encoder, decoderJoint] = await loadAll([
     readFile(join(dir, model.vocab), "utf8").then(parseVocabTxt),
     createSession(join(dir, model.preprocessor), { threads }),
     createSession(join(dir, model.encoder), { threads }),
@@ -151,7 +152,7 @@ async function loadSplitGraphs(
   { createSession, tensor }: OrtBinding,
   threads: number,
 ): Promise<TdtGraphs> {
-  const [vocabulary, filters, frontend, encoder, decoder, joint] = await Promise.all([
+  const [vocabulary, filters, frontend, encoder, decoder, joint] = await loadAll([
     readFile(join(dir, model.tokenizer), "utf8").then(parseTokenizerJson),
     readFile(join(dir, model.melFilters)).then(parseMelFilters),
     createSession(join(dir, model.frontend), { threads }),
@@ -232,10 +233,6 @@ async function loadSplitGraphs(
     },
     release: () => releaseAll(frontend, encoder, decoder, joint),
   };
-}
-
-async function releaseAll(...graphs: OrtGraph[]): Promise<void> {
-  await Promise.all(graphs.map((graph) => graph.release()));
 }
 
 function output(outputs: Record<string, OrtTensor>, name: string): OrtTensor {

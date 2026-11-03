@@ -20,6 +20,8 @@ export type BenchEngine = VoiceToText & {
   /** Intra op threads of the engine's main graphs; absent when the runtime picks. */
   threads?: number;
   prepare?: () => Promise<void>;
+  /** End the model lifetime: free its native resources once decodes finish. */
+  release?: () => Promise<void>;
 };
 
 export type CliOptions = {

@@ -3,12 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after } from "node:test";
 import { COMPLETE_MARKER, completeMarkerValue } from "./assets.ts";
+import { resolveModelPaths } from "./model.ts";
 import type { SherpaBinding } from "./sherpa-api.ts";
-import {
-  resolveModelPaths,
-  SHERPA_MODELS,
-  type SherpaModelId,
-} from "./sherpa-models.ts";
+import { SHERPA_MODELS, type SherpaModelId } from "./sherpa-models.ts";
 
 /**
  * Test helpers for the engine tests: a model root whose entry already looks

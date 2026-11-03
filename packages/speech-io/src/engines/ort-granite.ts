@@ -1,6 +1,5 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { assertSampleRate, SPEECH_SAMPLE_RATE } from "../audio/pcm.js";
 import type { STTConfig, STTSession, VoiceToText } from "../contract.ts";
 import { ensureAsset, type FetchArchive, type FileSetSpec } from "./assets.ts";
 import { ByteLevelVocab, greedyCtc } from "./ctc-decode.ts";
@@ -11,10 +10,11 @@ import {
   graniteFeatureFrames,
   graniteFeatures,
 } from "./granite-frontend.ts";
-import { BufferedOfflineSession, type SilenceGate } from "./offline-session.ts";
+import { OfflineLifecycle } from "./offline-engine.ts";
+import type { SilenceGate } from "./offline-session.ts";
 import type { CtcGraph, CtcRuntime } from "./ort-ctc-runtime.ts";
+import { resolveModelPaths } from "./model.ts";
 import {
-  resolveGraniteFiles,
   resolveGraniteModel,
   type GraniteCtcModel,
   type GraniteModelId,
@@ -55,16 +55,23 @@ export class OrtGraniteEngine implements VoiceToText {
   readonly model: GraniteCtcModel;
   readonly #files: FileSetSpec;
   readonly #runtime: CtcRuntime;
-  readonly #fetchFile: FetchArchive | undefined;
-  readonly #silenceGate: SilenceGate | undefined;
-  #loaded: Promise<LoadedModel> | undefined;
+  readonly #lifecycle: OfflineLifecycle<void, LoadedModel>;
 
   constructor(options: OrtGraniteEngineOptions) {
     this.model = resolveGraniteModel(options.model);
-    this.#files = resolveGraniteFiles(this.model, options.modelRoot);
+    this.#files = resolveModelPaths(this.model, options.modelRoot);
     this.#runtime = options.runtime;
-    this.#fetchFile = options.fetchFile;
-    this.#silenceGate = options.silenceGate;
+    // One graph serves every session; a failed load is retried on next use.
+    this.#lifecycle = new OfflineLifecycle({
+      name: "OrtGraniteEngine",
+      maxAudioMs: this.model.maxAudioMs,
+      silenceGate: options.silenceGate,
+      prepare: "load",
+      preflight: () => ensureAsset(this.#files, options.fetchFile),
+      load: () => this.#load(),
+      release: ({ graph }) => graph.release(),
+      decoder: (loaded) => (audio) => transcribe(loaded, audio),
+    });
   }
 
   get label(): string {
@@ -75,37 +82,25 @@ export class OrtGraniteEngine implements VoiceToText {
     return ortThreads(this.model);
   }
 
-  async prepare(): Promise<void> {
-    await this.#load();
+  prepare(): Promise<void> {
+    return this.#lifecycle.prepare();
   }
 
-  async open(config?: STTConfig): Promise<STTSession> {
-    assertSampleRate("OrtGraniteEngine", config);
-    const loaded = await this.#load();
-    const maxSamples = (this.model.maxAudioMs * SPEECH_SAMPLE_RATE) / 1_000;
-    return new BufferedOfflineSession(
-      maxSamples,
-      (audio) => transcribe(loaded, audio),
-      this.#silenceGate,
-    );
+  open(config?: STTConfig): Promise<STTSession> {
+    return this.#lifecycle.open(config);
   }
 
-  /** One graph serves every session; a failed load is retried on next use. */
-  #load(): Promise<LoadedModel> {
-    this.#loaded ??= this.#loadOnce().catch((err: unknown) => {
-      this.#loaded = undefined;
-      throw err;
-    });
-    return this.#loaded;
+  /** Free the native graph; a later open() loads it again. */
+  release(): Promise<void> {
+    return this.#lifecycle.release();
   }
 
-  async #loadOnce(): Promise<LoadedModel> {
-    await ensureAsset(this.#files, this.#fetchFile);
+  async #load(): Promise<LoadedModel> {
     const vocab = ByteLevelVocab.fromTokenizerJson(
-      await readFile(join(this.#files.dir, this.model.tokenizer.name), "utf8"),
+      await readFile(join(this.#files.dir, this.model.tokenizer), "utf8"),
       this.model.blankToken,
     );
-    const graph = await this.#runtime.loadGraph(join(this.#files.dir, this.model.graph.name), {
+    const graph = await this.#runtime.loadGraph(join(this.#files.dir, this.model.graph), {
       threads: this.threads,
     });
     return { graph, vocab };

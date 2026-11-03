@@ -56,6 +56,7 @@ for (const id of Object.keys(ORT_WHISTLE_MODELS) as WhistleModelId[]) {
         if (run === 0) t.diagnostic(`text: ${final.text}`);
       }
       await session.end();
+      await engine.release();
       t.diagnostic(`label: ${engine.label}`);
       t.diagnostic(`decodeMs (cold, warm, warm): ${decodeMs.join(", ")}`);
       t.diagnostic(`peak RSS MiB: ${Math.round(process.resourceUsage().maxRSS / 1024)}`);

@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { loadHotwords, type Hotwords } from "./hotwords.ts";
+import { Lazy } from "./offline-engine.ts";
 import {
   gatesSilence,
   type SilenceGate,
@@ -50,11 +51,14 @@ export async function createLocalSherpaEngine(
   });
 }
 
-let detector: Promise<SpeechDetector> | undefined;
+const detector = new Lazy<SpeechDetector>(() =>
+  loadSileroDetector(loadSherpaBinding() as SherpaBinding & VadBinding, SHERPA_ROOT),
+);
 
 /**
  * The silence gate a local engine runs under `mode`, or none. Every engine
- * shares one Silero detector, loaded on first use under SHERPA_ROOT.
+ * shares one Silero detector, loaded on first use under SHERPA_ROOT and
+ * retried after a failure.
  */
 export async function localSilenceGate(
   policy: SilenceGatePolicy | undefined,
@@ -63,12 +67,5 @@ export async function localSilenceGate(
   if (!gatesSilence(policy, mode)) {
     return undefined;
   }
-  detector ??= loadSileroDetector(
-    loadSherpaBinding() as SherpaBinding & VadBinding,
-    SHERPA_ROOT,
-  ).catch((err: unknown) => {
-    detector = undefined;
-    throw err;
-  });
-  return { hasSpeech: await detector, logProbFloor: policy?.logProbFloor ?? null };
+  return { hasSpeech: await detector.get(), logProbFloor: policy?.logProbFloor ?? null };
 }

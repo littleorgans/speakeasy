@@ -6,17 +6,14 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import type { EmptyEvent, FinalEvent, STTErrorEvent } from "../contract.ts";
 import { COMPLETE_MARKER, completeMarkerValue } from "./assets.ts";
+import { resolveModelPaths } from "./model.ts";
 import {
   OrtWhistleEngine,
   whistleDetail,
   type WhistleFiles,
   type WhistleRuntime,
 } from "./ort-whistle.ts";
-import {
-  ORT_WHISTLE_MODELS,
-  resolveWhistleFiles,
-  type WhistleModelId,
-} from "./ort-whistle-models.ts";
+import { ORT_WHISTLE_MODELS, type WhistleModelId } from "./ort-whistle-models.ts";
 import type { SilenceGate } from "./offline-session.ts";
 import { ORT_THREADS } from "./ort-models.ts";
 import { LANGS, type TranscribeResult } from "./vendor/whistle/whistle.js";
@@ -28,6 +25,7 @@ type FakeRuntime = WhistleRuntime & {
   threads: number[];
   calls: { samples: number; language: string | undefined }[];
   maxConcurrent: number;
+  released: number;
 };
 
 /** A runtime whose recognizer answers from `results` in order. */
@@ -43,6 +41,7 @@ function fakeRuntime(
     threads: [],
     calls: [],
     maxConcurrent: 0,
+    released: 0,
     createRecognizer: async (files, { threads }) => {
       if (failures-- > 0) throw new Error("load failed");
       runtime.created.push(files);
@@ -58,6 +57,9 @@ function fakeRuntime(
           if (result instanceof Error) throw result;
           return result;
         },
+        release: async () => {
+          runtime.released += 1;
+        },
       };
     },
   };
@@ -71,7 +73,7 @@ function said(text: string, words: TranscribeResult["words"] = []): TranscribeRe
 async function seededRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "speak-easy-ort-"));
   after(() => rm(root, { recursive: true, force: true }));
-  const spec = resolveWhistleFiles(ORT_WHISTLE_MODELS[MODEL], root);
+  const spec = resolveModelPaths(ORT_WHISTLE_MODELS[MODEL], root);
   await mkdir(spec.dir, { recursive: true });
   await writeFile(join(spec.dir, COMPLETE_MARKER), completeMarkerValue(spec));
   return root;
@@ -225,6 +227,16 @@ test("a failed load is retried on the next open", async () => {
   await assert.rejects(engine.open(), /load failed/);
   await engine.open();
   assert.equal(runtime.created.length, 1);
+});
+
+test("release frees the recognizer once and the next open loads it again", async () => {
+  const runtime = fakeRuntime();
+  const engine = await engineWith(runtime);
+  await engine.open();
+  await Promise.all([engine.release(), engine.release()]);
+  assert.equal(runtime.released, 1);
+  await engine.open();
+  assert.equal(runtime.created.length, 2);
 });
 
 test("open rejects a sample rate other than 16 kHz", async () => {

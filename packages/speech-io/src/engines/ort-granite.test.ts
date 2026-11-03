@@ -7,15 +7,12 @@ import { after, test } from "node:test";
 import type { EmptyEvent, FinalEvent } from "../contract.ts";
 import { COMPLETE_MARKER, completeMarkerValue } from "./assets.ts";
 import { logitsFor, TINY_TOKENIZER } from "./ctc-test-support.ts";
+import { resolveModelPaths } from "./model.ts";
 import type { CtcRuntime } from "./ort-ctc-runtime.ts";
 import { OrtGraniteEngine } from "./ort-granite.ts";
 import type { SilenceGate } from "./offline-session.ts";
 import { ORT_THREADS } from "./ort-models.ts";
-import {
-  GRANITE_MODELS,
-  resolveGraniteFiles,
-  type GraniteModelId,
-} from "./ort-granite-models.ts";
+import { GRANITE_MODELS, type GraniteModelId } from "./ort-granite-models.ts";
 
 const MODEL: GraniteModelId = "en-granite-speech-5.0-470m-turboctc-int8";
 const VOCAB_SIZE = 7;
@@ -27,6 +24,7 @@ type FakeRuntime = CtcRuntime & {
   /** Argmax id per output frame for the next run; missing frames are blank. */
   script: (number[] | Error)[];
   failLoads: number;
+  released: number;
 };
 
 function fakeRuntime(script: (number[] | Error)[] = []): FakeRuntime {
@@ -37,6 +35,7 @@ function fakeRuntime(script: (number[] | Error)[] = []): FakeRuntime {
     runs: [],
     script,
     failLoads: 0,
+    released: 0,
     async loadGraph(path, { threads }) {
       fake.loads.push(path);
       fake.threads.push(threads);
@@ -53,6 +52,9 @@ function fakeRuntime(script: (number[] | Error)[] = []): FakeRuntime {
           const ids = Array.from({ length: outFrames }, (_, frame) => next[frame] ?? 0);
           return logitsFor(ids, VOCAB_SIZE);
         },
+        async release() {
+          fake.released += 1;
+        },
       };
     },
   };
@@ -63,9 +65,9 @@ function fakeRuntime(script: (number[] | Error)[] = []): FakeRuntime {
 async function seededRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "speak-easy-granite-"));
   after(() => rm(root, { recursive: true, force: true }));
-  const spec = resolveGraniteFiles(GRANITE_MODELS[MODEL], root);
+  const spec = resolveModelPaths(GRANITE_MODELS[MODEL], root);
   await mkdir(spec.dir, { recursive: true });
-  await writeFile(join(spec.dir, GRANITE_MODELS[MODEL].tokenizer.name), TINY_TOKENIZER);
+  await writeFile(join(spec.dir, GRANITE_MODELS[MODEL].tokenizer), TINY_TOKENIZER);
   await writeFile(join(spec.dir, COMPLETE_MARKER), completeMarkerValue(spec));
   return root;
 }
@@ -150,6 +152,14 @@ test("one graph serves every session; a failed load is retried", async () => {
   assert.deepEqual(runtime.threads, [ORT_THREADS, ORT_THREADS]);
   assert.equal(engine.threads, ORT_THREADS);
   assert.equal(engine.label, "onnxruntime-node-fake:granite-speech-5.0-470m-turboctc-onnx-int8");
+});
+
+test("release frees the graph once and the next open loads it again", async () => {
+  const { engine, runtime } = await openSession();
+  await Promise.all([engine.release(), engine.release()]);
+  assert.equal(runtime.released, 1);
+  await engine.open();
+  assert.equal(runtime.loads.length, 2);
 });
 
 test("the engine refuses other sample rates and unknown models", async () => {

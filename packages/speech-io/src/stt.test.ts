@@ -46,6 +46,8 @@ test("stt closure holds the engines and contract only", () => {
     "audio/pcm.js",
     "contract.ts",
     "engines/assets.ts",
+    "engines/model.ts",
+    "engines/offline-engine.ts",
     "engines/offline-hotwords.ts",
     "engines/offline-session.ts",
     "engines/result.ts",

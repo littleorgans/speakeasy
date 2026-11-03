@@ -1,3 +1,4 @@
+import { hasModelId, lookupModel } from "./model.ts";
 import { GRANITE_MODELS, type GraniteCtcModel } from "./ort-granite-models.ts";
 import { ORT_TDT_MODELS, type OrtTdtModel } from "./ort-tdt-models.ts";
 import { ORT_WHISTLE_MODELS, type WhistleModel } from "./ort-whistle-models.ts";
@@ -30,14 +31,9 @@ export function ortThreads(model: OrtModel): number {
 }
 
 export function isOrtModelId(value: string): value is OrtModelId {
-  return Object.hasOwn(ORT_MODELS, value);
+  return hasModelId(ORT_MODELS, value);
 }
 
 export function resolveOrtModel(id: string): OrtModel {
-  if (isOrtModelId(id)) {
-    return ORT_MODELS[id];
-  }
-  throw new Error(
-    `Unknown onnxruntime model "${id}"; available: ${Object.keys(ORT_MODELS).join(", ")}`,
-  );
+  return lookupModel(ORT_MODELS, id, "onnxruntime");
 }

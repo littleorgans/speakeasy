@@ -38,7 +38,6 @@ export { OrtGraniteEngine, type OrtGraniteEngineOptions } from "./engines/ort-gr
 export {
   GRANITE_MODELS,
   isGraniteModelId,
-  resolveGraniteFiles,
   resolveGraniteModel,
   type GraniteCtcModel,
   type GraniteModelId,
@@ -46,8 +45,8 @@ export {
 export { ortCtcRuntime, type CtcGraph, type CtcRuntime } from "./engines/ort-ctc-runtime.ts";
 
 export { OrtTdtEngine, type OrtTdtEngineOptions } from "./engines/ort-tdt.ts";
+export { downloadBytes } from "./engines/model.ts";
 export {
-  downloadBytes,
   isOrtTdtModelId,
   ORT_TDT_MODELS,
   resolveOrtTdtModel,
@@ -57,6 +56,6 @@ export {
   type SplitTdtModel,
 } from "./engines/ort-tdt-models.ts";
 export type { OrtBinding, OrtGraph, OrtTensor } from "./engines/ort-tdt-graphs.ts";
-export { loadOrtBinding } from "./engines/ort-tdt-runtime.ts";
+export { loadOrtBinding } from "./engines/ort-runtime.ts";
 
 export { MoonshineEngine } from "./engines/moonshine.ts";
