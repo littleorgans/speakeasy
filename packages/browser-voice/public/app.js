@@ -1,6 +1,5 @@
-import { CAPTURE_AUDIO_CONSTRAINTS } from "/capture-constraints.js";
+import { CaptureSession } from "/capture-session.js";
 import { HoldReleaseGate } from "/hold-release.js";
-import { PreRollRing } from "/pre-roll.js";
 import { SpeechOutputControls, loadRoomSettings, clampPause, SETTINGS_KEY } from "/speech-output-controls.js";
 
 const AUDIO_HEADER_BYTES = 9;
@@ -12,11 +11,8 @@ class SpeakEasyRoom {
     this.socketPromise = null;
     this.roomAttempt = null;
     this.audioContext = null;
-    this.micStream = null;
-    this.captureNode = null;
+    this.capture = null;
     this.playbackNode = null;
-    /** Idle hold mode frames that lead the next hold take. */
-    this.preRoll = new PreRollRing();
     this.sessionPhase = "stopped";
     this.state = "idle";
     this.muted = false;
@@ -207,7 +203,7 @@ class SpeakEasyRoom {
   beginHold() {
     if (!this.usesHoldMode() || this.sessionPhase !== "ready" || !this.hold.press()) return;
     if (this.state === "thinking" || this.state === "speaking") this.interrupt();
-    this.sendAudio(this.preRoll.take());
+    if (this.capture) this.sendAudio(this.capture.takePreRoll());
   }
 
   endHold() {
@@ -516,40 +512,16 @@ class SpeakEasyRoom {
   async setupAudio(attempt = this.roomAttempt) {
     await this.teardownAudio();
     if (this.roomAttempt !== attempt) return;
-    const device = this.settings.microphoneId;
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        ...(device ? { deviceId: { exact: device } } : {}),
-        ...CAPTURE_AUDIO_CONSTRAINTS,
-      },
-    });
-    if (this.roomAttempt !== attempt) { stream.getTracks().forEach((track) => track.stop()); return; }
-    this.micStream = stream;
     const context = new AudioContext({ latencyHint: "interactive" });
     this.audioContext = context;
-    await Promise.all([
-      context.audioWorklet.addModule("/capture-worklet.js"),
-      context.audioWorklet.addModule("/playback-worklet.js"),
-    ]);
+    const capture = new CaptureSession({ context, deviceId: this.settings.microphoneId, onFrame: (data) => this.captureFrame(data) });
+    this.capture = capture;
+    await Promise.all([capture.start(), context.audioWorklet.addModule("/playback-worklet.js")]);
     if (this.roomAttempt !== attempt) return;
-    this.captureNode = new AudioWorkletNode(context, "speak-easy-capture");
     this.playbackNode = new AudioWorkletNode(context, "speak-easy-playback", {
       outputChannelCount: [2],
     });
-    const source = context.createMediaStreamSource(stream);
-    const silent = context.createGain();
-    silent.gain.value = 0;
-    source.connect(this.captureNode).connect(silent).connect(context.destination);
     this.playbackNode.connect(context.destination);
-    // Idle hold mode frames feed the pre roll ring, so each hold take starts
-    // with the last PRE_ROLL_MS before its press.
-    this.captureNode.port.onmessage = (event) => {
-      this.level = Number(event.data?.level) || 0;
-      const samples = event.data?.samples;
-      if (!(samples instanceof Float32Array) || this.muted || this.sessionPhase !== "ready") return;
-      if (this.usesHoldMode() && !this.hold.capturing) this.preRoll.push(samples);
-      else this.sendAudio(samples);
-    };
     this.playbackNode.port.onmessage = (event) => {
       if (event.data?.kind === "drained") {
         this.send({ type: "playback-drained", playbackId: event.data.playbackId, audioEndMs: event.data.audioEndMs });
@@ -560,14 +532,22 @@ class SpeakEasyRoom {
     await this.refreshDevices();
   }
 
+  // Live frames stream to the host. Idle hold mode frames stay in the
+  // session's pre roll ring, so each hold take starts with the last
+  // PRE_ROLL_MS before its press.
+  captureFrame(data) {
+    this.level = Number(data.level) || 0;
+    if (this.muted || this.sessionPhase !== "ready") return false;
+    if (this.usesHoldMode() && !this.hold.capturing) return true;
+    this.sendAudio(data.samples);
+    return false;
+  }
+
   async teardownAudio() {
     this.level = 0;
-    this.preRoll.clear();
-    this.micStream?.getTracks().forEach((track) => track.stop());
-    this.micStream = null;
-    this.captureNode?.disconnect();
+    this.capture?.close();
+    this.capture = null;
     this.playbackNode?.disconnect();
-    this.captureNode = null;
     this.playbackNode = null;
     const context = this.audioContext;
     this.audioContext = null;

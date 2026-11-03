@@ -52,7 +52,7 @@ async function roomHarness(mode: "hold" | "natural") {
     async resume() { await audioWaits.resume; }
     async close() { this.state = "closed"; }
     createGain() { return { gain: { value: 1 }, connect: (node: unknown) => node }; }
-    createMediaStreamSource() { return { connect: (node: unknown) => node }; }
+    createMediaStreamSource() { return { connect: (node: unknown) => node, disconnect() {} }; }
   }
   class AudioWorkletNode {
     port: PagePort = { postMessage() {} };
@@ -94,6 +94,7 @@ async function roomHarness(mode: "hold" | "natural") {
     window: { setTimeout, clearTimeout, addEventListener(type: string, callback: (event: any) => void) { listeners.set(type, callback); } },
   });
   vm.runInContext(readFileSync(new URL("../public/capture-constraints.js", import.meta.url), "utf8").replace(/^export /gm, ""), context);
+  vm.runInContext(readFileSync(new URL("../public/capture-session.js", import.meta.url), "utf8").replace(/^import .*;$/gm, "").replace(/^export /gm, ""), context);
   vm.runInContext(readFileSync(new URL("../public/speech-observations.js", import.meta.url), "utf8").replace(/^export /gm, ""), context);
   vm.runInContext(readFileSync(new URL("../public/speech-output-controls.js", import.meta.url), "utf8").replace(/^import .*;$/gm, "").replace(/^export /gm, ""), context);
   vm.runInContext(source, context);
@@ -241,7 +242,7 @@ for (const phase of ["mic", "module", "resume", "connect", "selection"] as const
   assert.equal(h.commands().some((command) => command.type === "start"), false);
   assert.equal(h.commands().filter((command) => command.type === "select-output").length, phase === "selection" ? 1 : 0);
   assert.equal(h.track.stopped, true);
-  assert.equal(h.room.micStream, null);
+  assert.equal(h.room.capture, null);
   assert.ok(h.contexts.every((context) => context.state === "closed"));
 });
 
@@ -432,7 +433,7 @@ for (const kind of ["cartesia", "openai"]) test(`guard failure during ${kind} ro
     await settle();
     assert.equal(h.captured.context!.speechOutputContext!.signal!.aborted, true);
     assert.equal(h.room.sessionPhase, "stopped");
-    assert.equal(h.room.micStream, null);
+    assert.equal(h.room.capture, null);
     assert.equal(h.lease.active, undefined);
     assert.equal(h.transports, 0);
     assert.equal(h.events.some((event) => event.phase === "ready"), false);
@@ -490,7 +491,7 @@ for (const failedRetirement of [false, true]) test(`guard failure between actual
       await assert.rejects(h.session.close());
     } else {
       assert.equal(h.room.sessionPhase, "stopped");
-      assert.equal(h.room.micStream, null);
+      assert.equal(h.room.capture, null);
       assert.equal(h.lease.active, undefined);
     }
     assert.throws(() => h.captured.context!.speechOutputContext!.getKey!());
