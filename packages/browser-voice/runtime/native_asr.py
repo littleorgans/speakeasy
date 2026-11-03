@@ -3,7 +3,7 @@
 Both speak one stdin protocol (hex/worker.rs). Backend options contain an
 absolute runnerPath, an absolute modelPath unless the system manages the
 weights, and an optional setupId from SETUPS (default hex/unified).
-Construction starts nothing; load verifies the model hash, starts the worker
+Construction starts nothing; load verifies the model hash (pins.file_sha256), starts the worker
 in that setup's mode and waits for its ready line. For hex/unified each take
 goes through Hex's own stream pipeline inside the worker, and feed runs the
 same pipeline live, at the lookahead the page chose, answering with its
@@ -12,13 +12,14 @@ setups (Hex with its word list, Cohere) give final text only.
 """
 
 import copy
-import hashlib
 import json
 from pathlib import Path
 import struct
 import subprocess
 import sys
 import time
+
+from pins import file_sha256
 
 
 SETUP_ID = "hex/unified"
@@ -49,11 +50,6 @@ SETUPS = {
 RUNTIME_COMMIT = "7045d1c0fe7cee37747b2792977421d435e75fca"
 HEX_COMMIT = "826bdbc44c8806630a45c08ed8cef35a36817a17"
 PROCESSING_TIMING = "worker Instant around the take's sessions and runs, or stream feeds, pause cap and finalize"
-
-
-def _digest(path):
-    with Path(path).open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 class Backend:
@@ -88,7 +84,7 @@ class Backend:
     def load(self):
         if self.metadata is not None:
             return copy.deepcopy(self.metadata)
-        model_sha256 = _digest(self.model_path) if self.model_path else None
+        model_sha256 = file_sha256(self.model_path) if self.model_path else None
         if model_sha256 != self.spec["sha256"]:
             raise ValueError("Hex model SHA256 mismatch")
         try:
@@ -108,7 +104,7 @@ class Backend:
                 "runtime": "Apple Speech, system managed weights" if apple else "transcribe.cpp",
                 **({"locale": ready.get("locale"), "reservedHere": ready.get("reservedHere")} if apple
                    else {"runtimeCommit": RUNTIME_COMMIT, "hexCommit": HEX_COMMIT}),
-                "runnerSha256": _digest(self.runner_path),
+                "runnerSha256": file_sha256(self.runner_path),
                 "device": ready.get("device"), "workerLoadMs": ready.get("loadMs"),
                 "pipeline": self.spec["pipeline"],
                 "loadTiming": "worker start to ready line", "processingTiming": PROCESSING_TIMING,

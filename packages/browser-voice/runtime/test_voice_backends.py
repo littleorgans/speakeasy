@@ -2,14 +2,17 @@
 
 import hashlib
 import importlib
+import os
 import struct
 import sys
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import native_voice
+import pins
 
 PIN = [{"name": "weights.bin", "bytes": 4, "sha256": hashlib.sha256(b"pins").hexdigest()}]
 # (module, voice id, a pinned voice, extra options, the runtime module load must not import)
@@ -132,6 +135,37 @@ class VoiceBackendTests(unittest.TestCase):
                     backend.close()
                 self.assertEqual((Path(root) / "requests.log").read_text().split(), ["Hello.", "ab"],
                                  "load warms the runner once, before the first visible request")
+
+
+class FileDigestTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory(prefix="speakeasy-digest-test-")
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        cache = patch.object(pins, "DIGEST_CACHE", self.root / "cache")
+        cache.start()
+        self.addCleanup(cache.stop)
+
+    def test_a_file_is_hashed_in_full_again_only_when_its_size_or_modification_time_changes(self):
+        path = self.root / "weights.bin"
+        path.write_bytes(b"pins")
+        os.utime(path, ns=(1, 1))
+        with patch.object(hashlib, "file_digest", wraps=hashlib.file_digest) as full:
+            self.assertEqual(pins.file_sha256(path), hashlib.sha256(b"pins").hexdigest())
+            self.assertEqual(pins.file_sha256(path), hashlib.sha256(b"pins").hexdigest())
+            self.assertEqual(full.call_count, 1, "an unchanged file reads its cached hash")
+            path.write_bytes(b"PINS")
+            os.utime(path, ns=(2, 2))
+            self.assertEqual(pins.file_sha256(path), hashlib.sha256(b"PINS").hexdigest(), "a new time")
+            path.write_bytes(b"pins!")
+            os.utime(path, ns=(2, 2))
+            self.assertEqual(pins.file_sha256(path), hashlib.sha256(b"pins!").hexdigest(), "a new size")
+            self.assertEqual(full.call_count, 3)
+        for entry in (self.root / "cache").iterdir():
+            entry.write_text("not a digest")
+        path.write_bytes(b"pins")
+        os.utime(path, ns=(1, 1))
+        self.assertEqual(pins.file_sha256(path), hashlib.sha256(b"pins").hexdigest(), "an unreadable entry is rehashed")
 
 
 if __name__ == "__main__":

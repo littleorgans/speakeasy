@@ -11,7 +11,17 @@ import unittest
 from unittest.mock import patch
 
 import native_asr as hexu
+import pins
 import worker
+
+
+def setUpModule():
+    """Model hashes cache in a temporary directory, never the owner's cache."""
+    directory = tempfile.TemporaryDirectory(prefix="speakeasy-digest-test-")
+    unittest.addModuleCleanup(directory.cleanup)
+    cache = patch.object(pins, "DIGEST_CACHE", Path(directory.name))
+    cache.start()
+    unittest.addModuleCleanup(cache.stop)
 
 
 FAKE_WORKER = """#!{python}

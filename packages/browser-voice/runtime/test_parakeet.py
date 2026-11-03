@@ -15,10 +15,20 @@ import unittest
 from unittest.mock import patch
 
 import parakeet
+import pins
 
 
 ROOT = Path(__file__).resolve().parent
 SETUP_IDS = ("mlx-parakeet/v3-greedy", "mlx-parakeet/ultra-greedy")
+
+
+def setUpModule():
+    """Model hashes cache in a temporary directory, never the owner's cache."""
+    directory = tempfile.TemporaryDirectory(prefix="speakeasy-digest-test-")
+    unittest.addModuleCleanup(directory.cleanup)
+    cache = patch.object(pins, "DIGEST_CACHE", Path(directory.name))
+    cache.start()
+    unittest.addModuleCleanup(cache.stop)
 
 
 class FakeArray:

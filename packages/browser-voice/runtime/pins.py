@@ -2,7 +2,14 @@
 
 import hashlib
 import importlib.metadata
+import os
+from pathlib import Path
 import platform
+
+# Full file hashes by resolved path, size and modification time: one small
+# file per key, so concurrent workers never share one, and a file whose size
+# or time changed misses and is hashed in full again.
+DIGEST_CACHE = Path.home() / "Library" / "Caches" / "speakeasy" / "sha256"
 
 
 def pinned_files(value, label):
@@ -18,6 +25,33 @@ def pinned_files(value, label):
             raise ValueError(f"{label} pinned file entries need a relative name, bytes and sha256")
         files[entry["name"]] = (entry["bytes"], entry["sha256"])
     return files
+
+
+def file_sha256(path):
+    """A file's SHA256, hashed in full unless this path, size and modification time already were."""
+    path = Path(path).resolve()
+    before = path.stat()
+    key = hashlib.sha256(f"{path}\0{before.st_size}\0{before.st_mtime_ns}".encode()).hexdigest()
+    entry = DIGEST_CACHE / key
+    try:
+        cached = entry.read_text()
+    except OSError:
+        cached = ""
+    if len(cached) == 64 and all(char in "0123456789abcdef" for char in cached):
+        return cached
+    with path.open("rb") as handle:
+        digest = hashlib.file_digest(handle, "sha256").hexdigest()
+    after = path.stat()
+    # A file that changed while it was read is never cached.
+    if (after.st_size, after.st_mtime_ns) == (before.st_size, before.st_mtime_ns):
+        try:
+            DIGEST_CACHE.mkdir(parents=True, exist_ok=True)
+            pending = DIGEST_CACHE / f"{key}.{os.getpid()}"
+            pending.write_text(digest)
+            os.replace(pending, entry)
+        except OSError:
+            pass
+    return digest
 
 
 def attest_snapshot(model_path, files, label):
