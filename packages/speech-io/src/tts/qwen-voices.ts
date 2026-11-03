@@ -57,6 +57,8 @@ const onOff = (stockValue?: boolean) => [false, true].map((value) =>
 
 /** Copy runs only tried stock sampling on official PyTorch. */
 const COPY_TRIED = " Voice copy: only stock was tried here.";
+/** Byte repeats ran on speech.cpp only (taming-F12); none on official PyTorch (vc-F15). */
+const COPY_SEED_UNTRIED = " Voice copy: a same seed repeat was not tried here.";
 
 function qwenSettings({ instructions, copy }: { instructions: boolean; copy: boolean }): readonly VoiceSetting[] {
   const tried = copy ? COPY_TRIED : "";
@@ -70,7 +72,8 @@ function qwenSettings({ instructions, copy }: { instructions: boolean; copy: boo
       options: LANGUAGES.map(([value, label]) => ({ value, label })),
       note: "The language of the text. Each speaker sounds best in its own; only English was tried here." },
     { id: "seed", label: "Seed", kind: "integer", default: 1, min: 0, max: Number.MAX_SAFE_INTEGER,
-      note: "Same seed and settings give the same audio; another seed gives another take." },
+      note: "Same seed and settings give the same audio; another seed gives another take." +
+        (copy ? COPY_SEED_UNTRIED : "") },
     // D1, owner 2026-11-03: Off for Qwen, a main row control so Read again can compare both ways.
     { id: "firstClause", label: "First clause split", kind: "choice", default: false, pipeline: true, options: onOff(),
       note: "On sends the opening words alone so sound starts sooner; Off keeps the first sentence whole." },
@@ -78,10 +81,10 @@ function qwenSettings({ instructions, copy }: { instructions: boolean; copy: boo
     { id: "maxSeconds", label: "Longest part", kind: "choice", default: copy ? 20 : 0,
       options: [{ value: 0, label: copy ? "Off" : "Off (stock)" }, ...[5, 10, 20].map((value) =>
         ({ value, label: `${value} s${copy && value === 20 ? " (stock)" : ""}` }))],
-      note: "Stops each part at this length. It can cut words; it does not stop a laugh." },
+      note: "Stops each part at this length. A short cap can cut words." },
     { id: "temperature", label: "Temperature", kind: "choice", default: 0.9, group: "sampling", disabledBy: "greedy",
       options: sorted([stock(0.9), ...values(0.5, 0.7, 1.1)]),
-      note: `Lower picks likelier sounds. Every value tried changed the audio; none was always shorter.${tried}` },
+      note: `Lower picks likelier sounds. Every value tried changed the audio; 0.5 was shorter in all four test takes, the others varied.${tried}` },
     { id: "topP", label: "Top p", kind: "choice", default: 1, group: "sampling", disabledBy: "greedy",
       options: sorted([stock(1), ...values(0.8, 0.9)]),
       note: `Below 1 drops unlikely sounds. At 0.8 one Aiden sentence ran twice as long.${tried}` },
