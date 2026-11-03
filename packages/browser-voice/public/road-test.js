@@ -1,6 +1,6 @@
 import { HoldReleaseGate } from "/hold-release.js";
 import { LiveWords } from "/live-words.js";
-import { MicCapture } from "/mic-capture.js";
+import { CaptureSession } from "/capture-session.js";
 import { trailItems, trailSummary } from "/live-trail.js";
 import { formatDuration, inputCard, liveLine, outputCard, outputLatency, readEvents } from "/road-test-text.js";
 import { appliedLive, describe, finalNote, HISTORY_COLUMNS, historyTrail, liveDiffers, pressToFirstWords, releaseToVoice } from "/take-history.js";
@@ -184,7 +184,7 @@ export class RoadTestPage {
   async openAudio() {
     this.context ??= new AudioContext({ latencyHint: "interactive" });
     await this.context.resume();
-    this.mic ??= new MicCapture({ context: this.context, onFrame: (frame) => this.frame(frame) });
+    this.mic ??= new CaptureSession({ context: this.context, onFrame: (frame) => this.frame(frame) });
     this.readback ??= new VoiceReadback({ context: this.context, onChange: () => this.render() });
     await Promise.all([this.mic.start(this.elements.echo.checked), this.readback.prepare()]);
     this.elements["level-track"].hidden = false;

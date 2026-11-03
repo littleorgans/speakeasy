@@ -10,7 +10,7 @@ import { concat, PreRollRing } from "/pre-roll.js";
  * rate; `constraints` replace the shared capture constraints, as a voice copy
  * recording does to keep the voice unprocessed.
  */
-export class MicCapture {
+export class CaptureSession {
   constructor({ context, onFrame = () => {}, rate = 16_000, constraints = CAPTURE_AUDIO_CONSTRAINTS }) {
     this.context = context;
     this.onFrame = onFrame;
@@ -83,10 +83,6 @@ export class MicCapture {
       this.draining.push({ take, resolve });
       this.node.port.postMessage({ kind: "flush" });
     });
-  }
-
-  cancelTake() {
-    this.take = null;
   }
 
   frame(data) {
