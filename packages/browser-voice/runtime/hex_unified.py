@@ -29,6 +29,11 @@ SETUPS = {
     "hex/vocabulary": {**HEX_MODEL, "mode": ["--whole=vocabulary"], "streams": False,
                        "pipeline": "whole take session.run, word list Claude GPT Grok Codex TM whoami at boost 2.5, "
                                    "padded to 24000 then 6400 zeros"},
+    # handy-computer/cohere-transcribe-03-2026-gguf at dfa4ade, Apache 2.0.
+    "cohere/transcribe": {"file": "cohere-transcribe-03-2026-Q8_0.gguf",
+                          "sha256": "931916663432fd895423a4291a8400221802b288967ca2d435fc5e3141c9e71e",
+                          "variant": "cohere-transcribe-03-2026", "mode": ["--whole=cohere"], "streams": False,
+                          "pipeline": "whole take session.run per window of at most 560000 samples, padded to 24000"},
 }
 RUNTIME_COMMIT = "7045d1c0fe7cee37747b2792977421d435e75fca"
 HEX_COMMIT = "826bdbc44c8806630a45c08ed8cef35a36817a17"

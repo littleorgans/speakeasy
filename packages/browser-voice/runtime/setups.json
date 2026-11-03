@@ -320,6 +320,41 @@
       "maxSamples": 1920000
     },
     {
+      "id": "cohere/transcribe",
+      "label": "Cohere Transcribe",
+      "card": {
+        "runtime": "transcribe.cpp 7045d1c, Metal GPU, whole take",
+        "transcript": "final"
+      },
+      "model": "handy-computer/cohere-transcribe-03-2026-gguf",
+      "revision": "dfa4adebb64f3076b7b6b90b721275cc069cb421",
+      "file": "cohere-transcribe-03-2026-Q8_0.gguf",
+      "fileBytes": 2410655232,
+      "sha256": "931916663432fd895423a4291a8400221802b288967ca2d435fc5e3141c9e71e",
+      "runtime": {
+        "transcribe.cpp": "7045d1c0fe7cee37747b2792977421d435e75fca",
+        "worker": "runtime/hex/worker.rs --whole=cohere, built by runtime/hex/build.py",
+        "device": "Metal"
+      },
+      "quantization": "Q8_0 GGUF",
+      "controls": {
+        "language": "en",
+        "threads": 1,
+        "timestamps": "none",
+        "session": "fresh per window",
+        "window": 560000,
+        "minimumSamples": 24000,
+        "trailingSamples": 0,
+        "vocabulary": [],
+        "repetition": "keep the partial text, as Hex does",
+        "gate": "off",
+        "rewrite": "off",
+        "source": "stt-ux gguf-controls cohere-whole (control.rs, runner.rs)"
+      },
+      "operation": "transcribe",
+      "maxSamples": 1920000
+    },
+    {
       "id": "mlx-cleanup/qwen-targeted",
       "label": "Ultra plus Qwen cleanup",
       "card": {

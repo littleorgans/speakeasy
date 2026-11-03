@@ -121,7 +121,15 @@ class HexUnifiedTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "final text only"):
             backend.feed(samples, True)
         backend.close()
+        cohere = self.backend(self.runner("cohere-transcribe-03-2026"), "cohere/transcribe")
+        with self.pinned("cohere/transcribe"):
+            cohere.load()
+        self.assertEqual(cohere.transcribe(samples)["text"], "heard 2 --whole=cohere")
+        cohere.close()
+        with self.assertRaisesRegex(RuntimeError, "identity"), self.pinned("cohere/transcribe"):
+            self.backend(self.runner(), "cohere/transcribe").load()
         self.assertEqual(worker.BACKENDS["hex/vocabulary"], "hex_unified")
+        self.assertEqual(worker.BACKENDS["cohere/transcribe"], "hex_unified")
 
     def test_identity_mismatch_retires_the_worker(self):
         backend = self.backend(self.runner(variant="other"))
