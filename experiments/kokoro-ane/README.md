@@ -61,6 +61,34 @@ ENGINES="kokoro-ane-heart kokoro-ane-folded-heart" OUT=$TMPDIR/runs bash experim
 - `worker/` `KokoroAneProbe`: whole text per call, wall and process CPU, stage times; one process per generator.
 - `tools/plan.swift`: MLComputePlan per op, each function of a multifunction model with `PLAN_FUNCTIONS`. `tools/trace_sum.py`: ANE and GPU busy time from an Instruments Core ML trace (`xcrun xctrace record --template 'Core ML' --launch -- ...`). `tools/v3sg.swift`: FluidAudio v3's source generator at a given frame count.
 
+## Results (partial timed pass, 2026-11-03)
+
+One slot, stopped by owner direction at its last step; every engine run completed. Warm short first audio, median, idle vs beside Llama 3.2 3B:
+
+| Engine | Idle | Load |
+| --- | --- | --- |
+| Kokoro MLX | 68 ms | 165 ms |
+| `kokoro-ane-heart` | 115 ms | 443 ms |
+| `kokoro-ane-folded-heart` | 345 ms | 573 ms |
+
+Cold first audio under load was 2.2 to 4.3 s for the ANE engines, against 134 to 214 ms for MLX. In that window the ANE route did not hold speed better than MLX. Outside load rose sharply in the second half of the load pass, when the ANE engines ran, so the ranking under load is unverified. Full tables live in the kokoro-ane thread's `results.md`.
+
+## For the road test page
+
+The runner is `KokoroCoreMLWorker`, a resident process that speaks the fast-tts native worker protocol ([NATIVE.md](../fast-tts/candidates/NATIVE.md)).
+
+- **Setup:** Xcode 27.2 or later, then `xcodebuild -downloadComponent MetalToolchain` once; fetch the weights and `swift build` the worker as in Setup above. Weights live in `MODELS/kokoro-coreml-mattmireles-034f7741/` (`KokoroRuntimeManifest.json`, `coreml/`, `voices/af_heart.bin`; Core ML compiles into `compiled-v2/` there on first use).
+- **Start:** `KokoroCoreMLWorker <bundle root> af_heart <hybrid|folded>`. The third argument picks the generator. `hybrid` is `kokoro-ane-heart`: faster when idle, but it uses some GPU. `folded` is `kokoro-ane-folded-heart`: ANE only, no GPU, about 3x slower when idle. `cpu` exists as a control only.
+- **Requests,** one line on stdin: `S<TAB>part<US>part...` (US is `\u001f`) synthesizes the parts in order; `Q` quits. Parts must not contain tab, newline or US.
+- **Replies** on stdout, as frames: little endian int32 kind, int32 count, then the payload.
+  - `READY` 1: JSON, sent once after load.
+  - `AUDIO` 2: `count` float32 samples, 24 kHz mono, one frame per part.
+  - `END` 3: JSON `{"generators": [...]}` after the last part.
+  - `ERROR` 4: JSON `{"error": ...}`, including a part that ran another generator than requested.
+  - Logs go to stderr.
+- **Warm up:** send one short request before the first visible one. The first synthesis in a process loads the Core ML models (about 1 s); the first ever after a build compiles them for the ANE (10 to 12 s once).
+- **Text:** the SDK runs its own Misaki G2P on raw text; `render.ts` splits with speak-easy `planSegments` and applies `trimSilence` to each part.
+
 ## Stream policy
 
 - Segments: speak-easy `planSegments`, all submitted in one worker request; one `KokoroTTS.synthesize` per segment (Misaki G2P, the SDK's chunking past 15 s); speak-easy `trimSilence` on each. Each yield is one completed segment waveform.

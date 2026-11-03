@@ -29,7 +29,8 @@ for v in hybrid folded cpu; do
   "$PROBE" "$MODELS/kokoro-coreml-mattmireles-034f7741" "$v" 0 experiments/fast-tts/cohort.json "$OUT/prime/probe-$v.json" status 2> /dev/null
 done
 
-(while :; do { date -u +%FT%TZ; uptime; ps -Aceo pcpu,pmem,comm -r | head -7; echo; } >> "$OUT/background.txt"; sleep 60; done) &
+# `|| true`: under pipefail, head closing the pipe would end the sampler after one sample.
+(while :; do { date -u +%FT%TZ; uptime; ps -Aceo pcpu,pmem,comm -r | head -7 || true; echo; } >> "$OUT/background.txt"; sleep 60; done) &
 SAMPLER=$!
 trap 'kill $SAMPLER ${LLM:-} 2>/dev/null || true' EXIT
 
