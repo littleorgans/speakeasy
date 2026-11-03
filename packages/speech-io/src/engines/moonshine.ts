@@ -4,6 +4,7 @@ import * as ort from "onnxruntime-node";
 import llamaTokenizer from "llama-tokenizer-js";
 import type { STTConfig, STTSession, VoiceToText } from "../contract.ts";
 import { downloadFile, hasNonEmptyFile } from "./assets.ts";
+import { argMax } from "./logits.ts";
 
 /**
  * MoonshineEngine: a local-first Moonshine tiny runtime backed by
@@ -229,7 +230,11 @@ async function generate(
     if (!(logits instanceof ort.Tensor)) {
       throw new Error("Moonshine decoder did not return logits");
     }
-    const nextToken = argMax(logits.data as Float32Array);
+    const logitsData = logits.data as Float32Array;
+    if (logitsData.length === 0) {
+      throw new Error("Cannot argMax an empty logits tensor");
+    }
+    const nextToken = argMax(logitsData);
     tokens.push(nextToken);
 
     if (nextToken === EOS_TOKEN_ID) {
@@ -284,22 +289,6 @@ function tensorInt64(values: number[]): ort.Tensor {
     BigInt64Array.from(values.map((value) => BigInt(value))),
     [1, values.length],
   );
-}
-
-function argMax(array: Float32Array): number {
-  if (array.length === 0) {
-    throw new Error("Cannot argMax an empty logits tensor");
-  }
-  let maxIndex = 0;
-  let maxValue = array[0]!;
-  for (let index = 1; index < array.length; index += 1) {
-    const value = array[index]!;
-    if (value > maxValue) {
-      maxValue = value;
-      maxIndex = index;
-    }
-  }
-  return maxIndex;
 }
 
 function concatFrames(

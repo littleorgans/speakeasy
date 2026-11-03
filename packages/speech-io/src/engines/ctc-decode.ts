@@ -1,3 +1,4 @@
+import { argMax, logSumExp } from "./logits.ts";
 import type { RecognizerResult } from "./sherpa-api.ts";
 
 /**
@@ -135,26 +136,4 @@ function tokenBytes(token: string): Uint8Array {
     }
     return byte;
   });
-}
-
-function argMax(row: Float32Array): number {
-  let best = 0;
-  for (let index = 1; index < row.length; index += 1) {
-    if (row[index]! > row[best]!) {
-      best = index;
-    }
-  }
-  return best;
-}
-
-function logSumExp(row: Float32Array): number {
-  let max = -Infinity;
-  for (const value of row) {
-    max = Math.max(max, value);
-  }
-  let sum = 0;
-  for (const value of row) {
-    sum += Math.exp(value - max);
-  }
-  return max + Math.log(sum);
 }

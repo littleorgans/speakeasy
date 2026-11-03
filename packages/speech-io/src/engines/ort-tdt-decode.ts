@@ -1,3 +1,4 @@
+import { argMax, logSoftmaxAt } from "./logits.ts";
 import type { TdtDecoding } from "./ort-tdt-models.ts";
 import type { RecognizerResult } from "./sherpa-api.ts";
 
@@ -45,7 +46,7 @@ export async function greedyTdt(
       break;
     }
     if (token !== blankId) {
-      tokens.push({ id: token, frame, logProb: logSoftmaxAt(logits, vocabSize, token) });
+      tokens.push({ id: token, frame, logProb: logSoftmaxAt(logits, token, 0, vocabSize) });
       await stepper.emit(token);
       emitted += 1;
     }
@@ -58,28 +59,6 @@ export async function greedyTdt(
     }
   }
   return tokens;
-}
-
-function argMax(values: Float32Array, from: number, to: number): number {
-  let best = from;
-  for (let index = from + 1; index < to; index += 1) {
-    if (values[index]! > values[best]!) {
-      best = index;
-    }
-  }
-  return best - from;
-}
-
-function logSoftmaxAt(logits: Float32Array, size: number, index: number): number {
-  let max = -Infinity;
-  for (let i = 0; i < size; i += 1) {
-    max = Math.max(max, logits[i]!);
-  }
-  let sum = 0;
-  for (let i = 0; i < size; i += 1) {
-    sum += Math.exp(logits[i]! - max);
-  }
-  return logits[index]! - max - Math.log(sum);
 }
 
 /** Pieces indexed by token id. */
