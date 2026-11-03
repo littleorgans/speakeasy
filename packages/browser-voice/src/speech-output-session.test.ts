@@ -439,3 +439,20 @@ test("actual combined policy rejects split catalogue revisions and permits selec
   h.send({ type: "select-output", requestId: "old", catalogueRevision: h.catalogue.revision, selection: h.catalogue.default });
   assert.ok(h.events.at(-1)?.type === "sample-error");
 });
+
+test("a voice's load on opening is reported as it starts producing and in the completion timing", async (t) => {
+  const h = harness(t, { createOutput: () => ({ open: async () => ({ loadMs: 4_200,
+    speak: async function* () { yield audio(); }, close: async () => {} }) }) });
+  h.speak();
+  await until(() => h.completions().length === 1);
+  const phases = h.events.filter((event) => event.type === "sample-phase");
+  assert.deepEqual(phases.map((event) => [event.phase, event.loadMs]), [["opening", undefined], ["producing", 4_200]]);
+  assert.deepEqual(h.completions()[0].timing.loadMs, { status: "measured", ms: 4_200, clock: "server",
+    boundary: "Voice load inside TTS session opening, on the voice's first use." });
+  const warm = harness(t);
+  warm.speak();
+  await until(() => warm.completions().length === 1);
+  const producing = warm.events.find((event) => event.type === "sample-phase" && event.phase === "producing");
+  assert.ok(producing?.type === "sample-phase" && producing.loadMs === undefined);
+  assert.equal(warm.completions()[0].timing.loadMs.status, "unavailable");
+});

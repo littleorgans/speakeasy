@@ -277,3 +277,22 @@ test("worker voices run the shared pipeline on the host's synth and close with t
   await factory.close();
   assert.equal(closed, 1);
 });
+
+test("only the open that loads a voice reports its load time", async () => {
+  let clock = 100;
+  const now = performance.now;
+  performance.now = () => clock;
+  try {
+    const factory = new LocalSpeechOutputFactory({ createSynth: async () => {
+      clock += 2_500;
+      return { numSpeakers: 1, sampleRate: 22050, synth: async () => result(22050) };
+    } });
+    const first = await factory.open();
+    assert.equal(first.loadMs, 2_500);
+    const second = await factory.open();
+    assert.equal(second.loadMs, undefined, "a loaded voice reports no load");
+    await first.close();
+    await second.close();
+    await factory.close();
+  } finally { performance.now = now; }
+});

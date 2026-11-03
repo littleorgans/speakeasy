@@ -5,6 +5,8 @@ export type ReadbackResult = {
   totalMs: number | null;
   stopMs: number | null;
   hostFirstAudioMs: number | null;
+  /** The voice's load on its first use, reported by the host; null when it was already loaded. */
+  loadMs: number | null;
   samples: Float32Array;
   sampleRate: number | null;
 };

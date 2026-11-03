@@ -16,7 +16,7 @@ const PART_SEPARATOR = "\u001f";
 /**
  * A worker voice behind the shared sentence pipeline: each planned segment is
  * one speak request to the Python worker, which attests the registry's pins
- * and loads the voice on first use. The pipeline's speaker index is the
+ * and loads the voice here, so its load counts as the voice's start. The pipeline's speaker index is the
  * voice's position in the registry. A phoneme runtime receives the segment as
  * Piper Plus phoneme characters, one part per frontend sentence.
  */
@@ -30,6 +30,7 @@ export async function createWorkerVoiceSynth(modelId: LocalOutputModelId, locati
       ...(location.runnerPath ? { runnerPath: location.runnerPath } : {}) },
     expectedIdentity: { setupId: modelId },
     loadTimeoutMs: location.loadTimeoutMs, operationTimeoutMs: location.operationTimeoutMs });
+  await worker.load();
   return {
     numSpeakers: payload.numSpeakers,
     sampleRate: payload.sampleRate,

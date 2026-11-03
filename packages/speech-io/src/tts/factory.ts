@@ -47,10 +47,14 @@ export class LocalSpeechOutputFactory {
   async open(config: SpeechOutputConfig = DEFAULT_LOCAL_OUTPUT): Promise<TTSSession> {
     if (this.#closed) throw new Error("Local speech output factory is closed");
     const { model, voice, speed } = resolveLocalOutput(config);
+    const started = performance.now();
+    // Only the open that starts a voice's load reports it; later opens find it loaded.
+    const cold = !this.#models.has(model.id);
     const synth = await this.#load(model.id);
     if (this.#closed) throw new Error("Local speech output factory is closed");
     const { SherpaTextToSpeech } = await import("./sherpa-tts.ts");
-    return new SherpaTextToSpeech(async () => synth).open({ model: model.id, voice: voice.speakerId, speed });
+    const session = await new SherpaTextToSpeech(async () => synth).open({ model: model.id, voice: voice.speakerId, speed });
+    return cold ? Object.assign(session, { loadMs: performance.now() - started }) : session;
   }
 
   /**

@@ -45,6 +45,8 @@ export type AudioSegment = {
  * turn; it consumes incremental text (or a whole string) and streams audio.
  */
 export interface TTSSession {
+  /** Time this open spent loading the voice; absent when the voice was already loaded. */
+  readonly loadMs?: number;
   speak(text: AsyncIterable<string> | string): AsyncIterable<AudioSegment>;
   close(): Promise<void>;
 }
