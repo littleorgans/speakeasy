@@ -245,7 +245,8 @@
       "label": "Hex Parakeet Unified",
       "card": {
         "runtime": "transcribe.cpp 7045d1c, Metal GPU, Hex stream pipeline",
-        "transcript": "partials"
+        "transcript": "partials",
+        "terms": "NVIDIA Open Model License"
       },
       "model": "parakeet-unified-en-0.6b",
       "revision": "826bdbc44c8806630a45c08ed8cef35a36817a17",
@@ -270,6 +271,164 @@
         "gate": "off",
         "rewrite": "off",
         "hotwords": null
+      },
+      "operation": "transcribe",
+      "maxSamples": 1920000
+    },
+    {
+      "id": "hex/vocabulary",
+      "label": "Hex Unified with word list",
+      "card": {
+        "runtime": "transcribe.cpp 7045d1c, Metal GPU, word list Claude, GPT, Grok, Codex, TM, whoami",
+        "transcript": "final",
+        "terms": "NVIDIA Open Model License"
+      },
+      "model": "parakeet-unified-en-0.6b",
+      "revision": "826bdbc44c8806630a45c08ed8cef35a36817a17",
+      "file": "parakeet-unified-en-0.6b-Q8_0.gguf",
+      "fileBytes": 731357568,
+      "sha256": "4b50b6dd862bf6e346929aaf4f5eaacec003bfa3f56462d6c874b41ef2f38795",
+      "runtime": {
+        "transcribe.cpp": "7045d1c0fe7cee37747b2792977421d435e75fca",
+        "hex": "826bdbc44c8806630a45c08ed8cef35a36817a17",
+        "worker": "runtime/hex/worker.rs --whole=vocabulary, built by runtime/hex/build.py",
+        "device": "Metal"
+      },
+      "quantization": "Q8_0 GGUF",
+      "controls": {
+        "language": "en",
+        "threads": 1,
+        "timestamps": "word",
+        "session": "fresh per window",
+        "minimumSamples": 24000,
+        "trailingSamples": 6400,
+        "window": "whole take",
+        "vocabulary": [
+          "Claude",
+          "GPT",
+          "Grok",
+          "Codex",
+          "TM",
+          "whoami"
+        ],
+        "vocabularyBoost": 2.5,
+        "soundsLike": [],
+        "repetition": "keep the partial text, as Hex does",
+        "gate": "off",
+        "rewrite": "off",
+        "source": "stt-ux gguf-controls parakeet-vocabulary-whole (control.rs, runner.rs)"
+      },
+      "operation": "transcribe",
+      "maxSamples": 1920000
+    },
+    {
+      "id": "cohere/transcribe",
+      "label": "Cohere Transcribe",
+      "card": {
+        "runtime": "transcribe.cpp 7045d1c, Metal GPU",
+        "transcript": "final"
+      },
+      "model": "handy-computer/cohere-transcribe-03-2026-gguf",
+      "revision": "dfa4adebb64f3076b7b6b90b721275cc069cb421",
+      "file": "cohere-transcribe-03-2026-Q8_0.gguf",
+      "fileBytes": 2410655232,
+      "sha256": "931916663432fd895423a4291a8400221802b288967ca2d435fc5e3141c9e71e",
+      "runtime": {
+        "transcribe.cpp": "7045d1c0fe7cee37747b2792977421d435e75fca",
+        "worker": "runtime/hex/worker.rs --whole=cohere, built by runtime/hex/build.py",
+        "device": "Metal"
+      },
+      "quantization": "Q8_0 GGUF",
+      "controls": {
+        "language": "en",
+        "threads": 1,
+        "timestamps": "none",
+        "session": "fresh per window",
+        "window": 560000,
+        "minimumSamples": 24000,
+        "trailingSamples": 0,
+        "vocabulary": [],
+        "repetition": "keep the partial text, as Hex does",
+        "gate": "off",
+        "rewrite": "off",
+        "source": "stt-ux gguf-controls cohere-whole (control.rs, runner.rs)"
+      },
+      "operation": "transcribe",
+      "maxSamples": 1920000
+    },
+    {
+      "id": "nemotron/streaming",
+      "label": "NVIDIA Nemotron 0.6B",
+      "card": {
+        "runtime": "mlx-audio 0.6.3 on MLX, Metal GPU",
+        "transcript": "partials",
+        "terms": "NVIDIA Open Model License"
+      },
+      "model": "nvidia/nemotron-speech-streaming-en-0.6b",
+      "revision": "ebe59e5a817142986528bbbee5dba8db7b38ed50",
+      "runtime": {
+        "python": "3.12.5",
+        "mlx-audio": "0.6.3",
+        "mlx": "0.32.4",
+        "numpy": "2.5.4",
+        "device": "GPU Metal",
+        "environment": "requirements-kokoro-mlx.txt"
+      },
+      "quantization": {
+        "onDisk": "safetensors as published",
+        "lowBitQuantization": false
+      },
+      "controls": {
+        "session": "create_streaming_session, fresh per take",
+        "temperature": 0,
+        "language": "en",
+        "delayMs": 560,
+        "feedSamples": 2560,
+        "decodeBudget": 256,
+        "drain": "step while audio is queued or encoded, then close and step to done",
+        "gate": "off",
+        "rewrite": "off",
+        "source": "stt-ux mlx-stream (pins.json, replay.py); mlx-audio 0.6.3 in place of source 65b6a39"
+      },
+      "operation": "transcribe",
+      "maxSamples": 1920000
+    },
+    {
+      "id": "apple/speech",
+      "label": "Apple on device speech",
+      "card": {
+        "runtime": "SpeechAnalyzer and SpeechTranscriber, macOS 27",
+        "transcript": "partials",
+        "size": "system managed",
+        "terms": "Apple macOS licence; system managed weights"
+      },
+      "model": "SpeechTranscriber en-US",
+      "revision": "system managed",
+      "runtime": {
+        "framework": "Speech, macOS 27",
+        "worker": "runtime/apple_speech/worker.swift built by runtime/apple_speech/build.py",
+        "target": "arm64-apple-macos27.0",
+        "weights": "system managed, reserved with AssetInventory"
+      },
+      "quantization": "system managed",
+      "controls": {
+        "locale": "en-US",
+        "transcriptionOptions": [],
+        "reportingOptions": [
+          "volatileResults"
+        ],
+        "attributeOptions": [
+          "audioTimeRange"
+        ],
+        "feedSamples": 2560,
+        "converter": "AnalyzerInputConverter",
+        "priority": "userInitiated",
+        "modelRetention": "processLifetime",
+        "ignoresResourceLimits": false,
+        "finalize": "finalizeAndFinishThroughEndOfInput",
+        "gate": "off",
+        "rewrite": "off",
+        "source": "stt-ux apple (Main.swift, Audio.swift); modelRetention processLifetime in place of whileInUse"
       },
       "operation": "transcribe",
       "maxSamples": 1920000

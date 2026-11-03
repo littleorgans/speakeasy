@@ -114,6 +114,22 @@ test("a missing default runtime file still serves and names the file; a missing 
   await assert.rejects(createSetupRuntime(missing), { code: "ENOENT" });
 });
 
+test("a system managed setup takes no model path, and is ready with its runner but no measured size", async () => {
+  const root = await mkdtemp(join(tmpdir(), "system-managed-"));
+  try {
+    assert.throws(() => parseSetupRuntimeLocations({ python: { "apple/speech": { pythonPath: process.execPath,
+      modelPath: "/m", runnerPath: process.execPath } } }), /unexpected|field/i);
+    const runtimeFile = join(root, "runtime.json");
+    await writeFile(runtimeFile, JSON.stringify({ python: { "apple/speech": { pythonPath: process.execPath,
+      runnerPath: process.execPath } } }));
+    const runtime = await createSetupRuntime(runtimeFile);
+    const apple = runtime.readiness().find((entry) => entry.setupId === "apple/speech")!;
+    assert.equal(apple.ready, true);
+    assert.equal(apple.sizeBytes, undefined, "the card says system managed instead");
+    await runtime.executor.close();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("the committed example runtime file parses and names every Python setup and worker voice", async () => {
   const example = JSON.parse(await readFile(new URL("../road-test-runtime.example.json", import.meta.url), "utf8"));
   const parsed = parseSetupRuntimeLocations(example);

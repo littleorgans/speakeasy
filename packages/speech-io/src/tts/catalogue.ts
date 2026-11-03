@@ -1,7 +1,7 @@
 import { parseSpeechOutputConfig, type SpeechOutputConfig, type SpeechOutputRegistry } from "../provider-config.ts";
 import { CMU_DICT, resolveTtsFrontendAssets } from "./frontend.ts";
 import { join } from "node:path";
-import { LOCAL_TTS_MODELS, TTS_ROOT, verifyTtsFiles } from "./models.ts";
+import { LOCAL_TTS_MODELS, payloadDir, TTS_ROOT, verifyTtsFiles } from "./models.ts";
 
 /** Only owner approved browser choices. The legacy sweep registry stays separate. */
 export const LOCAL_OUTPUT_MODELS = [
@@ -40,6 +40,8 @@ export const LOCAL_OUTPUT_MODELS = [
     sampleRate: 24_000,
     streaming: "sentence",
     licence: "Apache 2.0 weights and code. misaki's espeak-ng fallback is GPL 3.0. Per voice training provenance and generated audio rights unverified.",
+    /** One short line on the card wherever a licence is not plainly permissive. */
+    terms: "misaki's espeak-ng fallback is GPL 3.0",
     voices: [
       { id: "af_heart", label: "Heart", languages: ["en-US"], speakerId: 0 },
       { id: "am_michael", label: "Michael", languages: ["en-US"], speakerId: 1 },
@@ -54,6 +56,7 @@ export const LOCAL_OUTPUT_MODELS = [
     sampleRate: 24_000,
     streaming: "sentence",
     licence: "CC BY 4.0 weights: attribution required; the model card prohibits voice impersonation without consent. MIT code. Voice bill_boerst from Kyutai's CC0 collection.",
+    terms: "CC BY 4.0, credit required; no voice impersonation without consent",
     voices: [{ id: "bill_boerst", label: "Bill", languages: ["en"], speakerId: 0 }],
   },
   {
@@ -65,6 +68,7 @@ export const LOCAL_OUTPUT_MODELS = [
     sampleRate: 22_050,
     streaming: "sentence",
     licence: "Voice released as public domain. libpiper, and the eSpeak NG it links statically, are GPL 3.0: a runtime licence boundary sherpa does not have, pending packaging review. onnxruntime MIT.",
+    terms: "GPL 3.0 runtime (libpiper, eSpeak NG)",
     voices: [{ id: "kristin", label: "Kristin", languages: ["en-GB"], speakerId: 0 }],
   },
   {
@@ -80,6 +84,53 @@ export const LOCAL_OUTPUT_MODELS = [
       { id: "af_heart", label: "Heart", languages: ["en-US"], speakerId: 0 },
       { id: "am_michael", label: "Michael", languages: ["en-US"], speakerId: 1 },
     ],
+  },
+  {
+    id: "phonon-31m",
+    label: "Phonon 31M",
+    provider: { kind: "local" },
+    runtime: "ptts 0.6.0 (Rust), CPU, f32",
+    defaultVoice: "default",
+    sampleRate: 24_000,
+    streaming: "sentence",
+    licence: "Apache 2.0 weights, tokenizer and voice; ptts code MIT or Apache 2.0. Builds on Kyutai's Pocket TTS and Mimi (CC BY 4.0); codec lineage and Kyutai credit unverified. Generated audio rights unverified.",
+    voices: [{ id: "default", label: "Default", languages: ["en"], speakerId: 0 }],
+  },
+  {
+    id: "qwen3-tts-0.6b",
+    label: "Qwen3 TTS 0.6B",
+    provider: { kind: "local" },
+    runtime: "speech.cpp 0.10.0, Metal GPU, Q8_0",
+    defaultVoice: "ryan",
+    sampleRate: 24_000,
+    streaming: "sentence",
+    licence: "Apache 2.0 weights (Qwen); speech.cpp MIT. Retain the licence and notices. Speaker consent and generated audio rights unverified.",
+    voices: [
+      { id: "ryan", label: "Ryan", languages: ["en"], speakerId: 0 },
+      { id: "aiden", label: "Aiden", languages: ["en"], speakerId: 1 },
+    ],
+  },
+  {
+    id: "kokoro-ane-heart",
+    label: "Kokoro ANE hybrid",
+    provider: { kind: "local" },
+    runtime: "kokoro-coreml b23caa8 on Core ML, Neural Engine and GPU",
+    defaultVoice: "af_heart",
+    sampleRate: 24_000,
+    streaming: "sentence",
+    licence: "Apache 2.0 weights (hexgrad/Kokoro-82M), kokoro-coreml SDK and MisakiSwift. The hosted bundle's own card licence and the full transitive review are unchecked. Generated audio rights unverified.",
+    voices: [{ id: "af_heart", label: "Heart", languages: ["en-US"], speakerId: 0 }],
+  },
+  {
+    id: "kokoro-ane-folded-heart",
+    label: "Kokoro ANE folded",
+    provider: { kind: "local" },
+    runtime: "kokoro-coreml b23caa8 on Core ML, Neural Engine only",
+    defaultVoice: "af_heart",
+    sampleRate: 24_000,
+    streaming: "sentence",
+    licence: "Apache 2.0 weights (hexgrad/Kokoro-82M), kokoro-coreml SDK and MisakiSwift. The hosted bundle's own card licence and the full transitive review are unchecked. Generated audio rights unverified.",
+    voices: [{ id: "af_heart", label: "Heart", languages: ["en-US"], speakerId: 0 }],
   },
 ] as const;
 
@@ -136,7 +187,7 @@ export async function getLocalOutputReadiness(
     return { state: "runtime-missing", reason: "Voice runtime is not configured" };
   }
   try {
-    await verifyTtsFiles(join(root, model.name), model.files, model.attribution);
+    await verifyTtsFiles(payloadDir(model, root), model.files, model.attribution);
     // A phoneme runtime also needs the sherpa voice whose frontend the host borrows.
     const frontendVoice = model.family === "worker" && "phonemesFrom" in model ? LOCAL_TTS_MODELS[model.phonemesFrom] : undefined;
     if (frontendVoice) await verifyTtsFiles(join(root, frontendVoice.name), frontendVoice.files, frontendVoice.attribution);

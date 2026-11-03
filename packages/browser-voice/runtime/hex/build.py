@@ -46,6 +46,7 @@ def build(root, out):
     worker = root / "worker"
     (worker / "src/transcription").mkdir(parents=True)
     shutil.copyfile(HERE / "worker.rs", worker / "src/main.rs")
+    shutil.copyfile(HERE / "whole.rs", worker / "src/whole.rs")
     # Hex's pause logic, copied verbatim rather than reimplemented.
     streaming = (hex_source / "src/transcription/engine/streaming.rs").read_text()
     trait = streaming[streaming.index("pub(super) trait StreamFeed"):streaming.index("/// Silence a dictation stream")]

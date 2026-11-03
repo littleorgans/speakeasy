@@ -33,8 +33,26 @@ const HEX: readonly LiveSetting[] = [
       phrase: `${seconds(ms)} lookahead, written words never change` })) },
 ];
 
+// mlx-audio's Nemotron delay menu; the research measured 560 ms, the final keeps it.
+const NEMOTRON: readonly LiveSetting[] = [
+  { id: "delayMs", label: "Delay", default: 560,
+    note: "Shorter shows words sooner; longer hears more before each word.",
+    options: [1_120, 560, 160].map((ms) => ({ value: ms, label: seconds(ms),
+      phrase: `${seconds(ms)} delay, written words never change` })) },
+];
+
+// SpeechTranscriber's reporting options; the research measured both, volatile results alone first.
+const APPLE: readonly LiveSetting[] = [
+  { id: "fastResults", label: "Fast results", default: 0,
+    note: "On shows words sooner and revises them more.",
+    options: [{ value: 0, label: "Off", phrase: "volatile results, the newest words may change" },
+      { value: 1, label: "On", phrase: "fast volatile results, the newest words may change" }] },
+];
+
 export const LIVE_STREAMS: readonly LiveStream[] = Object.freeze([
   { setupId: "hex/unified", settings: HEX },
+  { setupId: "nemotron/streaming", settings: NEMOTRON },
+  { setupId: "apple/speech", settings: APPLE },
   { setupId: "mlx-parakeet/v3-greedy", settings: PARAKEET },
   { setupId: "mlx-parakeet/ultra-greedy", settings: PARAKEET },
 ]);

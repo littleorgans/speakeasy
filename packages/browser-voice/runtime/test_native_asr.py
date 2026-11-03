@@ -10,13 +10,24 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import hex_unified as hexu
+import native_asr as hexu
+import pins
 import worker
+
+
+def setUpModule():
+    """Model hashes cache in a temporary directory, never the owner's cache."""
+    directory = tempfile.TemporaryDirectory(prefix="speakeasy-digest-test-")
+    unittest.addModuleCleanup(directory.cleanup)
+    cache = patch.object(pins, "DIGEST_CACHE", Path(directory.name))
+    cache.start()
+    unittest.addModuleCleanup(cache.stop)
 
 
 FAKE_WORKER = """#!{python}
 import json, struct, sys
-print(json.dumps({{"kind": "ready", "backend": "metal", "device": "MTL0", "variant": "{variant}", "loadMs": 5}}), flush=True)
+mode = sys.argv[2:]
+print(json.dumps({{"kind": "ready", "backend": "{backend}", "device": "MTL0", "variant": "{variant}", "loadMs": 5}}), flush=True)
 fed = 0
 while True:
     head = sys.stdin.buffer.read(5)
@@ -25,8 +36,8 @@ while True:
     lookahead = struct.unpack("<ii", sys.stdin.buffer.read(8)) if op == b"S" else None
     samples = struct.unpack("<%df" % count, sys.stdin.buffer.read(count * 4))
     if op == b"T":
-        print(json.dumps({{"kind": "result", "text": "heard %d" % len(samples), "rawText": " heard", "processingMs": 2.5,
-                          "pauseDroppedSamples": 0}}), flush=True)
+        print(json.dumps({{"kind": "result", "text": " ".join(["heard %d" % len(samples)] + mode), "rawText": " heard",
+                          "processingMs": 2.5, "pauseDroppedSamples": 0}}), flush=True)
     else:
         if lookahead: opened = "%d+%d" % lookahead
         fed = (0 if op == b"S" else fed) + len(samples)
@@ -37,21 +48,24 @@ while True:
 class HexUnifiedTest(unittest.TestCase):
     def setUp(self):
         self.root = Path(tempfile.mkdtemp())
-        self.model = self.root / hexu.MODEL_FILE
+        self.model = self.root / hexu.HEX_MODEL["file"]
         self.model.write_bytes(b"fake gguf")
         self.addCleanup(shutil.rmtree, self.root)
 
-    def runner(self, variant="unified-en-0.6b"):
+    def runner(self, variant="unified-en-0.6b", backend="metal"):
         path = self.root / "worker"
-        path.write_text(FAKE_WORKER.format(python=sys.executable, variant=variant))
+        path.write_text(FAKE_WORKER.format(python=sys.executable, variant=variant, backend=backend))
         os.chmod(path, 0o755)
         return path
 
-    def backend(self, runner):
-        return hexu.Backend({"runnerPath": str(runner), "modelPath": str(self.model), "setupId": "hex/unified"})
+    def backend(self, runner, setup_id="hex/unified"):
+        return hexu.Backend({"runnerPath": str(runner), "modelPath": str(self.model), "setupId": setup_id})
+
+    def pinned(self, setup_id="hex/unified"):
+        return patch.dict(hexu.SETUPS[setup_id], {"sha256": hashlib.sha256(b"fake gguf").hexdigest()})
 
     def test_worker_routes_the_setup_to_this_backend(self):
-        self.assertEqual(worker.BACKENDS["hex/unified"], "hex_unified")
+        self.assertEqual(worker.BACKENDS["hex/unified"], "native_asr")
 
     def test_options_require_absolute_paths_and_this_setup(self):
         with self.assertRaises(ValueError):
@@ -69,7 +83,7 @@ class HexUnifiedTest(unittest.TestCase):
 
     def test_load_transcribe_and_close_through_the_worker(self):
         backend = self.backend(self.runner())
-        with patch.object(hexu, "MODEL_SHA256", hashlib.sha256(b"fake gguf").hexdigest()):
+        with self.pinned():
             metadata = backend.load()
         self.assertEqual(metadata["setupId"], "hex/unified")
         self.assertEqual(metadata["device"], "MTL0")
@@ -86,7 +100,7 @@ class HexUnifiedTest(unittest.TestCase):
 
     def test_feed_streams_live_words_and_start_opens_a_fresh_stream(self):
         backend = self.backend(self.runner())
-        with patch.object(hexu, "MODEL_SHA256", hashlib.sha256(b"fake gguf").hexdigest()):
+        with self.pinned():
             backend.load()
         samples = lambda count: memoryview(array.array("f", [0.1] * count).tobytes()).cast("f")
         first = backend.feed(samples(3), True)
@@ -106,9 +120,46 @@ class HexUnifiedTest(unittest.TestCase):
         backend.close()
         self.assertEqual(process.returncode, 0)
 
+    def test_whole_take_setups_start_the_worker_in_their_mode_and_give_final_text_only(self):
+        backend = self.backend(self.runner(), "hex/vocabulary")
+        with self.pinned("hex/vocabulary"):
+            metadata = backend.load()
+        self.assertEqual(metadata["setupId"], "hex/vocabulary")
+        self.assertIn("Claude GPT Grok Codex TM whoami", metadata["pipeline"])
+        samples = memoryview(array.array("f", [0.1, -0.2]).tobytes()).cast("f")
+        self.assertEqual(backend.transcribe(samples)["text"], "heard 2 --whole=vocabulary")
+        with self.assertRaisesRegex(ValueError, "final text only"):
+            backend.feed(samples, True)
+        backend.close()
+        cohere = self.backend(self.runner("cohere-transcribe-03-2026"), "cohere/transcribe")
+        with self.pinned("cohere/transcribe"):
+            cohere.load()
+        self.assertEqual(cohere.transcribe(samples)["text"], "heard 2 --whole=cohere")
+        cohere.close()
+        with self.assertRaisesRegex(RuntimeError, "identity"), self.pinned("cohere/transcribe"):
+            self.backend(self.runner(), "cohere/transcribe").load()
+        self.assertEqual(worker.BACKENDS["hex/vocabulary"], "native_asr")
+        self.assertEqual(worker.BACKENDS["cohere/transcribe"], "native_asr")
+
+    def test_apple_needs_no_model_file_and_streams_with_fast_results_on_request(self):
+        runner = self.runner("speech-transcriber", "apple")
+        with self.assertRaises(ValueError):
+            hexu.Backend({"setupId": "apple/speech", "runnerPath": str(runner), "modelPath": str(self.model)})
+        backend = hexu.Backend({"setupId": "apple/speech", "runnerPath": str(runner)})
+        metadata = backend.load()
+        self.assertEqual((metadata["modelSha256"], metadata["runtime"]), (None, "Apple Speech, system managed weights"))
+        samples = memoryview(array.array("f", [0.1] * 3).tobytes()).cast("f")
+        self.assertEqual(backend.feed(samples, True)["tentative"], " at 0+0", "volatile results by default")
+        self.assertEqual(backend.feed(samples, True, {"fastResults": 1})["tentative"], " at 1+0")
+        with self.assertRaises(ValueError):
+            backend.feed(samples, True, {"lookaheadMs": 480})
+        self.assertEqual(backend.transcribe(samples)["text"], "heard 3")
+        backend.close()
+        self.assertEqual(worker.BACKENDS["apple/speech"], "native_asr")
+
     def test_identity_mismatch_retires_the_worker(self):
         backend = self.backend(self.runner(variant="other"))
-        with patch.object(hexu, "MODEL_SHA256", hashlib.sha256(b"fake gguf").hexdigest()):
+        with self.pinned():
             with self.assertRaisesRegex(RuntimeError, "identity"):
                 backend.load()
         self.assertIsNone(backend.process)

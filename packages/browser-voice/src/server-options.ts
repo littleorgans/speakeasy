@@ -14,18 +14,22 @@ import { createWorkerVoiceSynth, type VoiceRuntimeLocation } from "./voice-worke
 
 /** The one native location a Python setup needs beyond its model. */
 const EXTRA_LOCATIONS: Partial<Record<PythonSetupId, "libraryPath" | "runnerPath">> = {
-  "qwen/context": "libraryPath", "hex/unified": "runnerPath",
+  "qwen/context": "libraryPath", "hex/unified": "runnerPath", "hex/vocabulary": "runnerPath",
+  "cohere/transcribe": "runnerPath", "apple/speech": "runnerPath",
 };
+/** Setups whose weights the system manages: no model path, no measured size. */
+const SYSTEM_MANAGED = new Set<PythonSetupId>(["apple/speech"]);
 /** The one native location a worker voice needs beyond its interpreter. */
 const VOICE_EXTRA_LOCATIONS: Partial<Record<LocalOutputModelId, "runnerPath">> = {
-  "piper-kristin-split": "runnerPath", "kokoro-coreml": "runnerPath",
+  "piper-kristin-split": "runnerPath", "kokoro-coreml": "runnerPath", "qwen3-tts-0.6b": "runnerPath",
+  "kokoro-ane-heart": "runnerPath", "kokoro-ane-folded-heart": "runnerPath",
 };
 const DEFAULT_SETUP_TIMEOUT_MS = 120_000;
 /** Gitignored, machine specific; read when no flag or environment value names another. */
 export const DEFAULT_SETUP_RUNTIME = "models/road-test-runtime.json";
 export const DEFAULT_OUTPUT_ROOT = "models/tts";
 export type SetupRuntimeLocations = {
-  python?: Partial<Record<PythonSetupId, { pythonPath: string; modelPath: string; libraryPath?: string;
+  python?: Partial<Record<PythonSetupId, { pythonPath: string; modelPath?: string; libraryPath?: string;
     runnerPath?: string; loadTimeoutMs?: number; operationTimeoutMs?: number }>>;
   cpu?: { modelRoot: string };
   voices?: Partial<Record<LocalOutputModelId, VoiceRuntimeLocation>>;
@@ -80,8 +84,11 @@ export function parseSetupRuntimeLocations(value: unknown): SetupRuntimeLocation
     for (const [id, config] of Object.entries(value.python)) {
       if (!isSetupId(id) || isCpuSetupId(id) || !isRecord(config)) throw new Error("unknown Python setup");
       const extra = EXTRA_LOCATIONS[id];
-      exactFields(config, ["pythonPath", "modelPath", ...(extra ? [extra] : []), "loadTimeoutMs", "operationTimeoutMs"]);
-      const parsed = { pythonPath: absoluteLocation(config.pythonPath), modelPath: absoluteLocation(config.modelPath),
+      const system = SYSTEM_MANAGED.has(id);
+      exactFields(config, ["pythonPath", ...(system ? [] : ["modelPath"]), ...(extra ? [extra] : []),
+        "loadTimeoutMs", "operationTimeoutMs"]);
+      const parsed = { pythonPath: absoluteLocation(config.pythonPath),
+        ...(system ? {} : { modelPath: absoluteLocation(config.modelPath) }),
         ...(extra ? { [extra]: absoluteLocation(config[extra]) } : {}) };
       result.python[id] = { ...parsed, ...deadlines(config) };
     }
@@ -145,7 +152,8 @@ export async function createSetupRuntime(file?: string, { optional = false } = {
   const python: SetupWorkersOptions["python"] = {};
   for (const [id, config] of Object.entries(locations.python ?? {})) {
     python[id as PythonSetupId] = { pythonPath: config.pythonPath,
-      backendOptions: { modelPath: config.modelPath, ...(config.libraryPath ? { libraryPath: config.libraryPath } : {}),
+      backendOptions: { ...(config.modelPath ? { modelPath: config.modelPath } : {}),
+        ...(config.libraryPath ? { libraryPath: config.libraryPath } : {}),
         ...(config.runnerPath ? { runnerPath: config.runnerPath } : {}) },
       expectedIdentity: { setupId: id }, loadTimeoutMs: config.loadTimeoutMs ?? DEFAULT_SETUP_TIMEOUT_MS,
       operationTimeoutMs: config.operationTimeoutMs ?? DEFAULT_SETUP_TIMEOUT_MS };
@@ -199,21 +207,27 @@ async function inspectSetupReadiness(locations: SetupRuntimeLocations, modelRoot
         if (!config) throw new Error();
         await access(config.pythonPath, constants.X_OK);
         if (!(await stat(config.pythonPath)).isFile()) throw new Error();
-        const model = await stat(config.modelPath);
-        if (setup.id === "qwen/context") {
-          if (!model.isFile() || !config.libraryPath || !(await stat(config.libraryPath)).isFile()) throw new Error();
-        } else if (setup.id === "hex/unified") {
-          if (!model.isFile() || !config.runnerPath) throw new Error();
+        if (!config.modelPath) {
+          // System managed weights: the worker reserves and installs them at load; no size to measure.
+          if (!config.runnerPath) throw new Error();
           await access(config.runnerPath, constants.X_OK);
         } else {
-          if (!model.isDirectory()) throw new Error();
-          for (const name of ["config.json", "model.safetensors"]) {
-            if (!(await stat(join(config.modelPath, name))).isFile()) throw new Error();
+          const model = await stat(config.modelPath);
+          if (setup.id === "qwen/context") {
+            if (!model.isFile() || !config.libraryPath || !(await stat(config.libraryPath)).isFile()) throw new Error();
+          } else if (EXTRA_LOCATIONS[setup.id] === "runnerPath") {
+            if (!model.isFile() || !config.runnerPath) throw new Error();
+            await access(config.runnerPath, constants.X_OK);
+          } else {
+            if (!model.isDirectory()) throw new Error();
+            for (const name of ["config.json", "model.safetensors"]) {
+              if (!(await stat(join(config.modelPath, name))).isFile()) throw new Error();
+            }
           }
+          sizeBytes = await modelBytes(config.modelPath);
         }
-        sizeBytes = await modelBytes(config.modelPath);
       }
-      readiness.push({ setupId: setup.id, ready: true, sizeBytes });
+      readiness.push({ setupId: setup.id, ready: true, ...(sizeBytes === undefined ? {} : { sizeBytes }) });
     } catch {
       readiness.push({ setupId: setup.id, ready: false, reason: !config && missingFile && !isCpuSetupId(setup.id)
         ? `setup runtime file missing: ${missingFile}` : "runtime or model files need setup" });

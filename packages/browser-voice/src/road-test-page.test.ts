@@ -42,7 +42,7 @@ test("talk over tracks the noise floor, so steady echo below three times it neve
   assert.equal(detector.push(0.2, time += 0.02)?.type, "onset");
 });
 
-test("model cards are plain text: where it runs, size and runtime", () => {
+test("model cards are plain text: where it runs, size, runtime and terms", () => {
   assert.equal(text.inputCard({ readiness: { ready: true, sizeBytes: 2_509_042_622 },
     card: { runtime: "parakeet-mlx 0.5.3 on MLX, Metal GPU", transcript: "final" } }),
     "Local · 2.5 GB · parakeet-mlx 0.5.3 on MLX, Metal GPU", "the Live words choice says whether words show while you speak");
@@ -51,6 +51,15 @@ test("model cards are plain text: where it runs, size and runtime", () => {
     "Local · size unknown · speech.cpp · needs setup: runtime or model files need setup");
   assert.equal(text.outputCard({ provider: { kind: "local" }, sizeBytes: 63_537_415, runtime: "sherpa-onnx VITS, CPU",
     streaming: "sentence", readiness: { state: "ready" } }), "Local · 64 MB · sherpa-onnx VITS, CPU · streams by sentence");
+  assert.equal(text.inputCard({ readiness: { ready: true, sizeBytes: 731_357_568 },
+    card: { runtime: "transcribe.cpp", transcript: "final", terms: "NVIDIA Open Model License" } }),
+  "Local · 731 MB · transcribe.cpp · Terms:\u00a0NVIDIA\u00a0Open\u00a0Model\u00a0License",
+  "a terms line where not permissive, never split across lines");
+  assert.equal(text.outputCard({ provider: { kind: "local" }, sizeBytes: 1, runtime: "libpiper", streaming: "sentence",
+    terms: "GPL 3.0 runtime", readiness: { state: "ready" } }), "Local · 1 MB · libpiper · streams by sentence · Terms:\u00a0GPL\u00a03.0\u00a0runtime");
+  assert.equal(text.outputCard({ provider: { kind: "local" }, sizeBytes: 1, runtime: "pocket", terms: "CC BY 4.0, credit required",
+    readiness: { state: "ready" } }), "Local · 1 MB · pocket · Terms:\u00a0CC\u00a0BY\u00a04.0, credit\u00a0required",
+  "long terms break only after their punctuation");
   assert.equal(text.formatDuration(312.4), "312 ms");
   assert.equal(text.formatDuration(1_234), "1.23 s");
   assert.equal(text.formatDuration(null), null);
@@ -546,10 +555,13 @@ test("the live words line names the live model, the settings the host applied, a
     settings: { lookaheadMs: 2_080 } }), "Live words: Hex Parakeet Unified stream, 2.08 s lookahead, written words never change.");
   assert.equal(text.liveLine(null), "Live words off.");
   const qwen = { id: "qwen/context", label: "Qwen3 ASR with known words", card: { transcript: "final" } };
-  assert.equal(text.liveLine(null, qwen), "Live words off. Qwen3 ASR with known words gives final text only.");
+  assert.equal(text.liveLine(null, qwen), "Live words off. Qwen3 ASR with known words gives final\u00a0text\u00a0only.");
   assert.equal(text.liveLine(null, { ...ultra, card: { transcript: "partials" } }), "Live words off.");
   assert.equal(text.liveLine({ setup: ultra, stream, settings: { updateMs: 800 } }, qwen),
-    "Live words: Parakeet Ultra MLX stream, updates every 800 ms, the last 5.12 s may change. Qwen3 ASR with known words writes the final text only.");
+    "Live words: Parakeet Ultra MLX stream, updates every 800 ms, the last 5.12 s may change. Qwen3 ASR with known words writes the final\u00a0text\u00a0only.",
+    "final text only never wraps inside itself");
+  assert.equal(text.liveSettingsNote({ stream, settings: { updateMs: 1_600 } }), "Updates every 1.6 s",
+    "Earlier takes name the setting by its label");
 });
 
 test("live words default to the setup's own stream; another live model and its settings reach the channel, and each figure names its model", async () => {
@@ -591,10 +603,29 @@ test("live words default to the setup's own stream; another live model and its s
   assert.equal(elements.get("trail-list").children.length, 3, "two updates, then the final");
   await take(page, 5_000);
   const row = elements.get("history").children[0];
-  assert.equal(row.children[0].children.map((cell: any) => cell.textContent).join(" | "), "Parakeet v3 MLX | Live words Hex Parakeet Unified");
+  assert.equal(row.children[0].children.map((cell: any) => cell.textContent).join(" | "), "Parakeet v3 MLX | Live words Hex Parakeet Unified · Lookahead 480 ms",
+    "an earlier take names its live model and the setting the host applied");
   assert.equal(row.children[2].children.at(-1).children[0].textContent, "2 updates, no corrections", "earlier takes keep the trail");
   elements.get("input-model").listeners.get("change")!();
   assert.equal(elements.get("live-model").value, "mlx-parakeet/v3-greedy", "a new speech in choice restores its own pairing");
+});
+
+test("after a take, the live words line follows a new speech in or live words choice, and returns to the take", async () => {
+  const { page, elements } = pageHarness({ transcript: "partials" });
+  await page.start();
+  await take(page, 1_000);
+  const taken = "Live words: Parakeet v3 MLX stream, updates every 800 ms, the last 5.12 s may change.";
+  assert.equal(elements.get("live-line").textContent, taken);
+  elements.get("live-model").value = "off";
+  elements.get("live-model").listeners.get("change")!();
+  assert.equal(elements.get("live-line").textContent, "Live words off.", "a new live words choice");
+  elements.get("live-model").value = "mlx-parakeet/v3-greedy";
+  elements.get("live-model").listeners.get("change")!();
+  assert.equal(elements.get("live-line").textContent, taken, "the take's own choice again");
+  elements.get("input-model").value = "hex/unified";
+  elements.get("input-model").listeners.get("change")!();
+  assert.equal(elements.get("live-line").textContent,
+    "Live words: Hex Parakeet Unified stream, 2.08 s lookahead, written words never change.", "a new speech in choice");
 });
 
 test("with live words off nothing streams, no first words figure shows, and the line says so once", async () => {

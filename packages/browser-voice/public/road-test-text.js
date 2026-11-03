@@ -10,16 +10,23 @@ export function formatBytes(bytes) {
   return bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1e6))} MB`;
 }
 
+/** A card's terms; a wrapping card breaks them only after a comma or semicolon, never inside a licence name. */
+function termsLine(terms) {
+  return terms ? `Terms: ${terms}`.replaceAll(" ", "\u00a0").replace(/([,;])\u00a0/g, "$1 ") : "";
+}
+
 /**
- * Where it runs · size · runtime. The name is the list entry itself; whether
- * words show while you speak is the Live words choice, said once there.
+ * Where it runs · size · runtime · terms where not permissive. The name is the
+ * list entry itself; whether words show while you speak is the Live words
+ * choice, said once there.
  */
 export function inputCard(setup) {
   const ready = setup.readiness?.ready === true;
   return [
     "Local",
-    formatBytes(setup.readiness?.sizeBytes) ?? "size unknown",
+    formatBytes(setup.readiness?.sizeBytes) ?? setup.card?.size ?? "size unknown",
     setup.card?.runtime ?? "runtime unknown",
+    termsLine(setup.card?.terms),
     ready ? "" : `needs setup: ${setup.readiness?.reason ?? "not configured"}`,
   ].filter(Boolean).join(" · ");
 }
@@ -30,9 +37,13 @@ export function outputCard(model) {
     formatBytes(model.sizeBytes) ?? "size unknown",
     model.runtime ?? "runtime unknown",
     model.streaming === "sentence" ? "streams by sentence" : model.streaming === "pcm" ? "streams audio" : "",
+    termsLine(model.terms),
     model.readiness?.state === "ready" ? "" : `needs setup: ${model.readiness?.reason ?? model.readiness?.state}`,
   ].filter(Boolean).join(" · ");
 }
+
+/** Kept on one line at any width. */
+const FINAL_ONLY = "final\u00a0text\u00a0only";
 
 /**
  * What makes a take's live words, from the stream and settings the host
@@ -42,12 +53,20 @@ export function outputCard(model) {
  */
 export function liveLine(live, final) {
   const finalOnly = final?.card?.transcript === "final";
-  if (!live) return finalOnly ? `Live words off. ${final.label} gives final text only.` : "Live words off.";
+  if (!live) return finalOnly ? `Live words off. ${final.label} gives ${FINAL_ONLY}.` : "Live words off.";
   const phrases = live.stream.settings.map((setting) =>
     setting.options.find((option) => option.value === live.settings[setting.id])?.phrase).filter(Boolean);
   const replaced = final && final.id !== live.setup.id
-    ? ` ${final.label} writes the final text${finalOnly ? " only" : ""}.` : "";
+    ? ` ${final.label} writes the ${finalOnly ? FINAL_ONLY : "final text"}.` : "";
   return `Live words: ${[`${live.setup.label} stream`, ...phrases].join(", ")}.${replaced}`;
+}
+
+/** A take's live settings by their labels, so Earlier takes rows at different settings differ: "Lookahead 480 ms". */
+export function liveSettingsNote(live) {
+  return live.stream.settings.map((setting) => {
+    const option = setting.options.find((entry) => entry.value === live.settings[setting.id]);
+    return option && `${setting.label} ${option.label.toLowerCase()}`;
+  }).filter(Boolean).join(", ");
 }
 
 /** The browser's reported output path delays in ms; null where it reports none. */

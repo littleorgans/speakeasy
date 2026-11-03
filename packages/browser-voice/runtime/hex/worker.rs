@@ -14,6 +14,9 @@
 //! stream unfinalized. End of input exits.
 //! stdout: one JSON line at ready, then one JSON line per request. No network
 //! client, no files written.
+//!
+//! With `--whole=vocabulary` or `--whole=cohere` after the model, each `T`
+//! take runs whole instead (whole.rs) and live streams are refused.
 use std::{error::Error, io::{self, Read, Write}, time::Instant};
 use serde_json::json;
 use transcribe_cpp::{Backend, Model, ModelOptions, ParakeetBufferedStreamOptions, RunOptions, SessionOptions,
@@ -24,6 +27,8 @@ mod transcription {
 }
 mod hex_pause;
 use hex_pause::{PauseCap, StreamFeed};
+mod whole;
+use whole::Whole;
 
 const TRAILING_SAMPLES: usize = 6_400;
 const FEED_SAMPLES: usize = 2_560;
@@ -99,15 +104,21 @@ fn live(model: &Model, options: &RunOptions, session_options: &SessionOptions, (
 fn main() -> Result<(), Box<dyn Error>> {
     transcribe_cpp::disable_logging();
     let args: Vec<String> = std::env::args().collect();
-    if args.len() != 2 { return Err("usage: hex-unified-worker MODEL".into()); }
+    let whole = match args.len() {
+        2 => None,
+        3 => Some(Whole::parse(&args[2]).ok_or("unknown mode")?),
+        _ => return Err("usage: hex-unified-worker MODEL [--whole=vocabulary|--whole=cohere]".into()),
+    };
     let started = Instant::now();
     let model = Model::load_with(&args[1], &ModelOptions { backend: Backend::Metal, ..Default::default() })?;
     let device = model.device()?;
-    if device.kind != "metal" || model.arch() != "parakeet" || model.variant() != "unified-en-0.6b" {
+    let (arch, variant) = whole.map_or(("parakeet", "unified-en-0.6b"), Whole::identity);
+    if device.kind != "metal" || model.arch() != arch || model.variant() != variant {
         return Err("runtime identity mismatch".into());
     }
     let caps = model.capabilities()?;
-    if !caps.supports_streaming { return Err("stream unsupported".into()); }
+    if whole.is_none() && !caps.supports_streaming { return Err("stream unsupported".into()); }
+    let limit = match whole { Some(mode) => mode.limit(&model)?, None => 0 };
     let options = RunOptions { language: Some("en".into()), timestamps: TimestampKind::Segment, ..Default::default() };
     let session_options = SessionOptions { n_threads: 1, ..Default::default() };
     let stdout = io::stdout();
@@ -116,6 +127,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         "variant":model.variant(), "supportsStreaming":caps.supports_streaming,
         "loadMs":started.elapsed().as_secs_f64() * 1000.0}))?;
     let mut input = io::stdin().lock();
+    if let Some(mode) = whole {
+        while let Some(next) = read_request(&mut input)? {
+            let Request::Take(samples) = next else { return Err("whole take mode has no live stream".into()) };
+            let started = Instant::now();
+            let mut reply = match mode.run(&model, limit, &samples) {
+                Ok(result) => result,
+                Err(error) => { emit(&mut out, json!({"kind":"error", "error":error}))?; continue; }
+            };
+            reply["kind"] = json!("result");
+            reply["processingMs"] = json!(started.elapsed().as_secs_f64() * 1000.0);
+            emit(&mut out, reply)?;
+        }
+        return Ok(());
+    }
     let mut request = read_request(&mut input)?;
     while let Some(next) = request {
         request = match next {

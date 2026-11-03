@@ -13,9 +13,27 @@
       "modelPath": "/absolute/path/to/Qwen3-ASR-0.6B-Q8_0.gguf",
       "libraryPath": "/absolute/path/to/speech.cpp-0.10.0/libspeech.4.dylib"
     },
+    "nemotron/streaming": {
+      "pythonPath": "/absolute/path/to/kokoro-mlx-py3.12/bin/python",
+      "modelPath": "/absolute/path/to/hf/models--nvidia--nemotron-speech-streaming-en-0.6b/snapshots/ebe59e5a817142986528bbbee5dba8db7b38ed50"
+    },
+    "apple/speech": {
+      "pythonPath": "/absolute/path/to/any/python3",
+      "runnerPath": "/absolute/path/to/apple-speech-worker"
+    },
     "hex/unified": {
       "pythonPath": "/absolute/path/to/any/python3",
       "modelPath": "/absolute/path/to/parakeet-unified-en-0.6b-Q8_0.gguf",
+      "runnerPath": "/absolute/path/to/hex-unified-worker"
+    },
+    "hex/vocabulary": {
+      "pythonPath": "/absolute/path/to/any/python3",
+      "modelPath": "/absolute/path/to/parakeet-unified-en-0.6b-Q8_0.gguf",
+      "runnerPath": "/absolute/path/to/hex-unified-worker"
+    },
+    "cohere/transcribe": {
+      "pythonPath": "/absolute/path/to/any/python3",
+      "modelPath": "/absolute/path/to/hf/models--handy-computer--cohere-transcribe-03-2026-gguf/snapshots/dfa4adebb64f3076b7b6b90b721275cc069cb421/cohere-transcribe-03-2026-Q8_0.gguf",
       "runnerPath": "/absolute/path/to/hex-unified-worker"
     },
     "mlx-cleanup/qwen-targeted": {
@@ -40,6 +58,21 @@
     "kokoro-coreml": {
       "pythonPath": "/absolute/path/to/any/python3.11-or-later",
       "runnerPath": "/absolute/path/to/kokoro-coreml/e396cf78/KokoroAneWorker"
+    },
+    "phonon-31m": {
+      "pythonPath": "/absolute/path/to/phonon-py3.12/bin/python"
+    },
+    "qwen3-tts-0.6b": {
+      "pythonPath": "/absolute/path/to/any/python3",
+      "runnerPath": "/absolute/path/to/speech.cpp-0.10.0/speech"
+    },
+    "kokoro-ane-heart": {
+      "pythonPath": "/absolute/path/to/any/python3",
+      "runnerPath": "/absolute/path/to/kokoro-ane/KokoroCoreMLWorker"
+    },
+    "kokoro-ane-folded-heart": {
+      "pythonPath": "/absolute/path/to/any/python3",
+      "runnerPath": "/absolute/path/to/kokoro-ane/KokoroCoreMLWorker"
     }
   }
 }

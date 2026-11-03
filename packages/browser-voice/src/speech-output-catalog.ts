@@ -18,6 +18,8 @@ export type SpeechOutputModel = {
   sampleRate: number;
   streaming: "sentence" | "pcm";
   licence: string;
+  /** The card's terms line, where the licence is not plainly permissive. */
+  terms?: string;
   readiness: { state: "ready" | "assets-missing" | "runtime-missing" | "adapter-deferred" | "failed"; reason: string | null };
   configured: boolean;
 };
@@ -59,6 +61,7 @@ export function buildSpeechOutputCatalogue(options: {
     sampleRate: model.sampleRate,
     streaming: model.streaming,
     licence: model.licence,
+    ...("terms" in model ? { terms: model.terms } : {}),
     readiness: { ...model.readiness },
     configured: true,
   }));

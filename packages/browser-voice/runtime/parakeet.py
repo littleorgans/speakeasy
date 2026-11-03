@@ -19,6 +19,8 @@ import platform
 import sys
 import time
 
+from pins import file_sha256
+
 
 PYTHON_VERSION = "3.12.5"
 RUNTIME_VERSIONS = {
@@ -90,8 +92,7 @@ def _validate_snapshot(model_path, spec):
         path = model_path / name
         if not path.is_file() or path.stat().st_size != size:
             raise ValueError(f"Parakeet snapshot size mismatch: {name}")
-        with path.open("rb") as handle:
-            digest = hashlib.file_digest(handle, "sha256").hexdigest()
+        digest = file_sha256(path)
         if digest != expected_digest:
             raise ValueError(f"Parakeet snapshot SHA256 mismatch: {name}")
         verified[name] = {"bytes": size, "sha256": digest}

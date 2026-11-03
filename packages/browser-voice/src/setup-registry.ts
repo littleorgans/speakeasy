@@ -3,7 +3,8 @@ import { isSetupId, SETUP_IDS, sha256, type SetupId } from "./setup-protocol.ts"
 
 type Json = null | boolean | number | string | readonly Json[] | { readonly [key: string]: Json };
 /** Plain text model card facts; size is measured from the configured files. */
-export type SetupCard = Readonly<{ runtime: string; transcript: "final" | "partials" }>;
+/** size: the card's size text where the system manages the weights, so none is measured. */
+export type SetupCard = Readonly<{ runtime: string; transcript: "final" | "partials"; terms?: string; size?: string }>;
 export type SetupDefinition = Readonly<{
   id: SetupId; label: string; card: SetupCard; model: string; revision: string;
   runtime: Readonly<Record<string, Json>>; controls: Readonly<Record<string, Json>>;
@@ -15,7 +16,7 @@ export type SetupManifest = Readonly<{
 }>;
 
 // Pins every model, runtime, control, dependency and portable artifact name.
-export const SETUP_MANIFEST_SHA256 = "e86eb70ce675f57b7ba0400294c5e92c4538f2d3da8572cfbb2b4f2ac7797acc";
+export const SETUP_MANIFEST_SHA256 = "a2be804f1e437ae857d6eedc3f879befc8d79e37a9d91e99eb612b30f50d815d";
 
 export function assertSetupManifest(value: unknown): asserts value is SetupManifest {
   if (sha256(JSON.stringify(value) ?? "") !== SETUP_MANIFEST_SHA256) {
