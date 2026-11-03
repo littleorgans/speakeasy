@@ -61,7 +61,9 @@ Unknown setups or fields are refused at startup.
    `Backend` class (`load`, `transcribe`, `close`); register it in `BACKENDS` in
    `runtime/worker.py` and `PYTHON_WORKERS` in `src/setup-workers.ts`. A native
    binary goes behind a Python backend; `runtime/hex_unified.py` is the
-   example. Its build script builds into a directory of its own under
+   example. Every transcribe.cpp setup shares its worker: add it to `SETUPS`
+   there with its model pin and worker mode (`--whole=` modes in
+   `runtime/hex/whole.rs`). Its build script builds into a directory of its own under
    `~/Library/Caches/speakeasy/`; after a change to `runtime/hex/worker.rs`,
    rebuild to a new directory and point `runnerPath` at it, so a running
    server keeps the binary it started with.

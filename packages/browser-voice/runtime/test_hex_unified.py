@@ -16,6 +16,7 @@ import worker
 
 FAKE_WORKER = """#!{python}
 import json, struct, sys
+mode = sys.argv[2:]
 print(json.dumps({{"kind": "ready", "backend": "metal", "device": "MTL0", "variant": "{variant}", "loadMs": 5}}), flush=True)
 fed = 0
 while True:
@@ -25,8 +26,8 @@ while True:
     lookahead = struct.unpack("<ii", sys.stdin.buffer.read(8)) if op == b"S" else None
     samples = struct.unpack("<%df" % count, sys.stdin.buffer.read(count * 4))
     if op == b"T":
-        print(json.dumps({{"kind": "result", "text": "heard %d" % len(samples), "rawText": " heard", "processingMs": 2.5,
-                          "pauseDroppedSamples": 0}}), flush=True)
+        print(json.dumps({{"kind": "result", "text": " ".join(["heard %d" % len(samples)] + mode), "rawText": " heard",
+                          "processingMs": 2.5, "pauseDroppedSamples": 0}}), flush=True)
     else:
         if lookahead: opened = "%d+%d" % lookahead
         fed = (0 if op == b"S" else fed) + len(samples)
@@ -37,7 +38,7 @@ while True:
 class HexUnifiedTest(unittest.TestCase):
     def setUp(self):
         self.root = Path(tempfile.mkdtemp())
-        self.model = self.root / hexu.MODEL_FILE
+        self.model = self.root / hexu.HEX_MODEL["file"]
         self.model.write_bytes(b"fake gguf")
         self.addCleanup(shutil.rmtree, self.root)
 
@@ -47,8 +48,11 @@ class HexUnifiedTest(unittest.TestCase):
         os.chmod(path, 0o755)
         return path
 
-    def backend(self, runner):
-        return hexu.Backend({"runnerPath": str(runner), "modelPath": str(self.model), "setupId": "hex/unified"})
+    def backend(self, runner, setup_id="hex/unified"):
+        return hexu.Backend({"runnerPath": str(runner), "modelPath": str(self.model), "setupId": setup_id})
+
+    def pinned(self, setup_id="hex/unified"):
+        return patch.dict(hexu.SETUPS[setup_id], {"sha256": hashlib.sha256(b"fake gguf").hexdigest()})
 
     def test_worker_routes_the_setup_to_this_backend(self):
         self.assertEqual(worker.BACKENDS["hex/unified"], "hex_unified")
@@ -69,7 +73,7 @@ class HexUnifiedTest(unittest.TestCase):
 
     def test_load_transcribe_and_close_through_the_worker(self):
         backend = self.backend(self.runner())
-        with patch.object(hexu, "MODEL_SHA256", hashlib.sha256(b"fake gguf").hexdigest()):
+        with self.pinned():
             metadata = backend.load()
         self.assertEqual(metadata["setupId"], "hex/unified")
         self.assertEqual(metadata["device"], "MTL0")
@@ -86,7 +90,7 @@ class HexUnifiedTest(unittest.TestCase):
 
     def test_feed_streams_live_words_and_start_opens_a_fresh_stream(self):
         backend = self.backend(self.runner())
-        with patch.object(hexu, "MODEL_SHA256", hashlib.sha256(b"fake gguf").hexdigest()):
+        with self.pinned():
             backend.load()
         samples = lambda count: memoryview(array.array("f", [0.1] * count).tobytes()).cast("f")
         first = backend.feed(samples(3), True)
@@ -106,9 +110,22 @@ class HexUnifiedTest(unittest.TestCase):
         backend.close()
         self.assertEqual(process.returncode, 0)
 
+    def test_whole_take_setups_start_the_worker_in_their_mode_and_give_final_text_only(self):
+        backend = self.backend(self.runner(), "hex/vocabulary")
+        with self.pinned("hex/vocabulary"):
+            metadata = backend.load()
+        self.assertEqual(metadata["setupId"], "hex/vocabulary")
+        self.assertIn("Claude GPT Grok Codex TM whoami", metadata["pipeline"])
+        samples = memoryview(array.array("f", [0.1, -0.2]).tobytes()).cast("f")
+        self.assertEqual(backend.transcribe(samples)["text"], "heard 2 --whole=vocabulary")
+        with self.assertRaisesRegex(ValueError, "final text only"):
+            backend.feed(samples, True)
+        backend.close()
+        self.assertEqual(worker.BACKENDS["hex/vocabulary"], "hex_unified")
+
     def test_identity_mismatch_retires_the_worker(self):
         backend = self.backend(self.runner(variant="other"))
-        with patch.object(hexu, "MODEL_SHA256", hashlib.sha256(b"fake gguf").hexdigest()):
+        with self.pinned():
             with self.assertRaisesRegex(RuntimeError, "identity"):
                 backend.load()
         self.assertIsNone(backend.process)

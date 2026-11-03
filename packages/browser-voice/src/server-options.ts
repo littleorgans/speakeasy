@@ -14,7 +14,7 @@ import { createWorkerVoiceSynth, type VoiceRuntimeLocation } from "./voice-worke
 
 /** The one native location a Python setup needs beyond its model. */
 const EXTRA_LOCATIONS: Partial<Record<PythonSetupId, "libraryPath" | "runnerPath">> = {
-  "qwen/context": "libraryPath", "hex/unified": "runnerPath",
+  "qwen/context": "libraryPath", "hex/unified": "runnerPath", "hex/vocabulary": "runnerPath",
 };
 /** The one native location a worker voice needs beyond its interpreter. */
 const VOICE_EXTRA_LOCATIONS: Partial<Record<LocalOutputModelId, "runnerPath">> = {
@@ -202,7 +202,7 @@ async function inspectSetupReadiness(locations: SetupRuntimeLocations, modelRoot
         const model = await stat(config.modelPath);
         if (setup.id === "qwen/context") {
           if (!model.isFile() || !config.libraryPath || !(await stat(config.libraryPath)).isFile()) throw new Error();
-        } else if (setup.id === "hex/unified") {
+        } else if (EXTRA_LOCATIONS[setup.id] === "runnerPath") {
           if (!model.isFile() || !config.runnerPath) throw new Error();
           await access(config.runnerPath, constants.X_OK);
         } else {

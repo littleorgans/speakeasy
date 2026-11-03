@@ -21,6 +21,7 @@ BACKENDS = {
     "mlx-cleanup/qwen-targeted": "cleanup",
     "qwen/context": "qwen_asr",
     "hex/unified": "hex_unified",
+    "hex/vocabulary": "hex_unified",
     "kokoro-mlx-bf16": "kokoro_mlx",
     "pocket-18m": "pocket_18m",
     "piper-kristin-split": "native_voice",

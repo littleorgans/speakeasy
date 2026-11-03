@@ -18,6 +18,11 @@
       "modelPath": "/absolute/path/to/parakeet-unified-en-0.6b-Q8_0.gguf",
       "runnerPath": "/absolute/path/to/hex-unified-worker"
     },
+    "hex/vocabulary": {
+      "pythonPath": "/absolute/path/to/any/python3",
+      "modelPath": "/absolute/path/to/parakeet-unified-en-0.6b-Q8_0.gguf",
+      "runnerPath": "/absolute/path/to/hex-unified-worker"
+    },
     "mlx-cleanup/qwen-targeted": {
       "pythonPath": "/absolute/path/to/cleanup-py3.13.2/bin/python",
       "modelPath": "/absolute/path/to/hf/models--mlx-community--Qwen2.5-1.5B-Instruct-4bit/snapshots/8b403126fc14f14cfc99bb4cfa72ecbc129ea677"
