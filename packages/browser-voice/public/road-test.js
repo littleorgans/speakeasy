@@ -92,7 +92,7 @@ export class RoadTestPage {
     hold.addEventListener("pointercancel", (event) => this.release(event.timeStamp));
     stop.addEventListener("click", (event) => this.stopVoice(event.timeStamp));
     this.elements["output-model"].addEventListener("change", () => { this.fillVoices(); this.render(); });
-    for (const id of ["input-model", "output-voice"]) this.elements[id].addEventListener("change", () => this.render());
+    for (const id of ["input-model", "output-voice", "talk-over"]) this.elements[id].addEventListener("change", () => this.render());
     this.elements.echo.addEventListener("change", () => void this.reopenMic());
     for (const which of ["take", "talk-over"]) this.elements[`replay-${which}`].addEventListener("click", () => this.replay(which));
     this.elements["replay-voice"].addEventListener("click", () => this.replay("voice"));
@@ -449,14 +449,14 @@ export class RoadTestPage {
     const stopMs = interrupt?.stopMs;
     const said = interrupt?.text ?? interrupt?.live?.words
       ?? (this.phase === "cut-in" ? "Listening" : this.phase === "cut-in-transcribing" ? "Transcribing" : null);
+    // Talk over is off by default; while off, only the stop key or button can interrupt.
     describe(this.elements["interrupt-timings"], interrupt?.kind === "talk-over" ? [
       ["Voice heard after", formatDuration(interrupt.detectMs)],
       ["Silent after", formatDuration(stopMs)],
       ["You said", said, interrupt.text == null && interrupt.live?.words ? "wide partial" : "wide"],
     ] : [
       ["Stop to silence", formatDuration(interrupt?.kind === "stop" ? stopMs : null)],
-      ["Voice heard after", null],
-      ["Silent after", null],
+      ...(this.elements["talk-over"].checked ? [["Voice heard after", null], ["Silent after", null]] : []),
     ]);
   }
 

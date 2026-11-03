@@ -435,3 +435,33 @@ test("a talk over with a streaming setup streams too, and shows its words as you
   assert.equal(page.run.interrupt.text, "Clear the screen.");
   assert.equal(elements.get("interrupt-timings").children.at(-1).className, "wide");
 });
+
+test("talk over starts off on every load, and the note says once where it works", () => {
+  const html = source("road-test.html");
+  const input = html.match(/<input[^>]*id="talk-over"[^>]*>/)![0];
+  assert.doesNotMatch(input, /\schecked/, "the switch starts off");
+  assert.match(input, /autocomplete="off"/, "a reload never restores a ticked switch");
+  assert.equal(html.match(/headphones/gi)?.length, 1);
+  assert.match(html, /Talking over works best with headphones; on speakers, other sound can stop the voice\./);
+});
+
+test("with talk over off, loud sound during the voice records nothing and the interrupt column shows only the stop", async () => {
+  const { page, elements, live } = pageHarness({ holdVoice: true, transcript: "partials" });
+  elements.set("talk-over", Object.assign(page.elements["talk-over"], { checked: false }));
+  await page.start();
+  assert.deepEqual(listed(elements.get("interrupt-timings")), ["Stop to silence: –"]);
+  await take(page, 100);
+  let time = 1;
+  for (let index = 0; index < 40; index++) page.frame({ level: index > 10 ? 0.3 : 0.002, audioTime: time += 0.02, samples: new Float32Array(320) });
+  assert.equal(page.phase, "speaking", "no cut in");
+  assert.equal(page.mic.recording, false, "no cut in recording");
+  assert.equal(live.begun.length, 1, "only the main take streamed");
+  assert.equal(page.run.interrupt, undefined, "no talk over detection");
+  page.stopVoice(5_000);
+  await until(() => page.phase === "idle");
+  assert.deepEqual(listed(elements.get("interrupt-timings")), ["Stop to silence: 41 ms"]);
+  assert.equal(elements.get("replay-talk-over").hidden, true);
+  page.elements["talk-over"].checked = true;
+  page.render();
+  assert.deepEqual(listed(elements.get("interrupt-timings")), ["Stop to silence: 41 ms", "Voice heard after: –", "Silent after: –"]);
+});
