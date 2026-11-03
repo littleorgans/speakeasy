@@ -21,6 +21,7 @@ import {
 import { BrowserConversationSession, type BrowserRuntimeConfig, type RuntimeFactory } from "./session.ts";
 import { AudioWorkLease } from "./audio-lease.ts";
 import { HttpError, readTakeSamples, requireLoopback, sendHttpError, sendJson } from "./http-guards.ts";
+import { LiveWordsSession } from "./live-words.ts";
 import { SetupComparison } from "./setup-comparison.ts";
 import { SetupWorkers } from "./setup-workers.ts";
 import type { SetupExecutor } from "./setup-protocol.ts";
@@ -51,6 +52,7 @@ const STATIC_FILES = new Map([
   ["/road-test.js", "road-test.js"],
   ["/mic-capture.js", "mic-capture.js"],
   ["/voice-readback.js", "voice-readback.js"],
+  ["/live-words.js", "live-words.js"],
   ["/talk-over.js", "talk-over.js"],
   ["/road-test-text.js", "road-test-text.js"],
 ]);
@@ -127,6 +129,8 @@ export async function startBrowserVoiceServer(options: BrowserVoiceServerOptions
   const sockets = new WebSocketServer({ noServer: true });
   const outputSockets = new WebSocketServer({ noServer: true });
   const outputSessions = new Set<SpeechOutputSession>();
+  const liveSockets = new WebSocketServer({ noServer: true });
+  const liveSessions = new Set<LiveWordsSession>();
   let activeSocket: WebSocket | undefined;
   const runtimeConfig = options.runtimeConfig ?? {};
   const createRuntime: RuntimeFactory = options.createRuntime ?? ((config, context) =>
@@ -134,7 +138,8 @@ export async function startBrowserVoiceServer(options: BrowserVoiceServerOptions
 
   server.on("upgrade", (request, socket, head) => {
     const output = request.url === "/speech-output" && !!options.speechOutput && !!options.providers;
-    if (request.url !== "/voice" && !output) {
+    const live = request.url === "/live-words";
+    if (request.url !== "/voice" && !output && !live) {
       socket.destroy();
       return;
     }
@@ -143,12 +148,17 @@ export async function startBrowserVoiceServer(options: BrowserVoiceServerOptions
       socket.destroy();
       return;
     }
-    const target = output ? outputSockets : sockets;
+    const target = output ? outputSockets : live ? liveSockets : sockets;
     target.handleUpgrade(request, socket, head, (webSocket) => {
       target.emit("connection", webSocket, request);
     });
   });
   outputSockets.on("connection", (socket) => connectSpeechOutput(socket, options, lease, outputSessions));
+  liveSockets.on("connection", (socket) => {
+    const session = new LiveWordsSession({ socket, comparison, acquire: () => lease.tryAcquire("comparison") });
+    liveSessions.add(session);
+    socket.once("close", () => { void session.close().then(() => liveSessions.delete(session)); });
+  });
   sockets.on("connection", (socket) => {
     if (activeSocket?.readyState === WebSocket.OPEN) {
       socket.send(
@@ -190,10 +200,12 @@ export async function startBrowserVoiceServer(options: BrowserVoiceServerOptions
         ? transcriber.closeAndWait() : Promise.resolve(transcriber?.close());
       for (const socket of sockets.clients) socket.terminate();
       for (const socket of outputSockets.clients) socket.terminate();
+      for (const socket of liveSockets.clients) socket.terminate();
       const stopped = Promise.allSettled([transcriberClosed, setupRoutes.close(), ...[...sessions].map((session) => session.close()),
-        ...[...outputSessions].map((session) => session.close())]);
+        ...[...outputSessions].map((session) => session.close()), ...[...liveSessions].map((session) => session.close())]);
       sockets.close();
       outputSockets.close();
+      liveSockets.close();
       server.closeIdleConnections();
       await new Promise<void>((resolveClose, rejectClose) => {
         server.close((error) => (error ? rejectClose(error) : resolveClose()));

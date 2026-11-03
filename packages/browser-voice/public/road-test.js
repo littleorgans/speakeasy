@@ -1,4 +1,5 @@
 import { HoldReleaseGate } from "/hold-release.js";
+import { LiveWords } from "/live-words.js";
 import { MicCapture } from "/mic-capture.js";
 import { formatDuration, inputCard, outputCard, outputLatency, readEvents } from "/road-test-text.js";
 import { TalkOverDetector } from "/talk-over.js";
@@ -7,8 +8,10 @@ import { VoiceReadback } from "/voice-readback.js";
 /**
  * Road test: pick a local speech in model and voice, hold to speak, see the
  * transcript and its timings, hear the voice read it back, interrupt it by
- * key or by talking over it, and replay both sides. Final text arrives as
- * one comparison row; the voice uses the speech output channel.
+ * key or by talking over it, and replay both sides. Where the engine truly
+ * streams, its words show while the owner speaks, one tone quieter, until the
+ * final text replaces them in place. Final text arrives as one comparison
+ * row; the voice uses the speech output channel.
  */
 
 const SAMPLE_RATE = 16_000;
@@ -18,12 +21,14 @@ const BUSY_RETRY_MS = 150;
 const BUSY_RETRY_LIMIT = 80;
 const HISTORY_LIMIT = 20;
 const PLACEHOLDER = "The transcript appears here, and the voice reads it back.";
+const LISTENING = "Listening. Release when you finish.";
 const DONE = "Done";
 /** Earlier takes columns; narrow screens stack each row and label its cells with these. */
 const HISTORY_COLUMNS = [
   { label: "Speech in", cell: (run) => [run.setup.label] },
   { label: "Voice", cell: (run) => [run.output ? run.voiceLabel : null] },
   { label: "Transcript", kind: "said-cell", cell: (run) => [run.input.error || run.input.text || "Nothing heard"] },
+  { label: "Press to first words", kind: "num", cell: (run) => [formatDuration(pressToFirstWords(run))] },
   { label: "Release to text", kind: "num", cell: (run) => [formatDuration(run.input.finalMs),
     run.input.loadMs != null ? `Model start ${formatDuration(run.input.loadMs)}` : null] },
   { label: "Text to first audio", kind: "num", cell: (run) => [formatDuration(run.output?.firstAudioMs)] },
@@ -43,6 +48,7 @@ export class RoadTestPage {
     this.context = null;
     this.mic = null;
     this.readback = null;
+    this.live = new LiveWords({ onEvent: (event) => this.liveEvent(event) });
     this.detector = new TalkOverDetector();
     this.phase = "idle";
     this.run = null;
@@ -147,10 +153,10 @@ export class RoadTestPage {
     this.phase = "recording";
     this.run = { setup: this.setup(), selection: this.selection(), voiceLabel: this.voiceLabel(), pressedAt: at,
       ...(interrupt ? { interrupt } : {}) };
-    this.status("Listening. Release when you finish.");
+    this.status(LISTENING);
     this.render();
     void this.openAudio().then(() => {
-      if (this.phase === "recording" && this.gate.capturing && !this.mic.recording) this.mic.beginTake();
+      if (this.phase === "recording" && this.gate.capturing && !this.mic.recording) this.beginTake(this.run);
     }, (error) => {
       this.gate.cancel();
       this.phase = "idle";
@@ -162,10 +168,45 @@ export class RoadTestPage {
   release(at) {
     if (this.phase !== "recording" || !this.gate.release()) return;
     this.run.releasedAt = at;
+    // The owner has finished: a feed still running settles during the release tail, before the final pass.
+    this.live.end();
+  }
+
+  /** Starts recording; a model that truly streams hears the take live, led by its pre roll. */
+  beginTake(target) {
+    const preRoll = this.mic.beginTake();
+    if (this.run.setup.card?.transcript === "partials") target.live = { takeId: this.live.begin(this.run.setup.id, preRoll) };
+  }
+
+  /** Live words for the latest take or what was said over the voice; ignored once that text is final. */
+  liveEvent(event) {
+    const run = this.run;
+    const target = [run?.live, run?.interrupt?.live].find((live) => live && live.takeId === event.takeId);
+    if (!target) return;
+    const now = performance.now();
+    const listening = this.phase === "recording" && target === run.live;
+    if (event.type === "loading") {
+      target.loadingAt = now;
+      if (listening) this.status(`Listening. Loading ${run.setup.label} for live words.`);
+    } else if (event.type === "ready") {
+      if (event.cold && target.loadingAt != null) target.loadMs = now - target.loadingAt;
+      if (listening) this.status(LISTENING);
+    } else if (event.type === "error") {
+      target.error = event.message;
+      if (listening) this.status(`Listening. Live words stopped: ${event.message}`);
+    } else if (event.type === "partial" && !(target === run.live ? run.input : run.interrupt.text)) {
+      const words = `${event.stable}${event.tentative}`.trim();
+      if (words) {
+        target.words = words;
+        target.firstWordsAt ??= now;
+      }
+    }
+    this.render();
   }
 
   async finishTake() {
     const run = this.run;
+    this.live.end();
     const take = await this.mic?.endTake();
     if (this.run !== run) return;
     if (!take || (take.samples.length - take.preRollSamples) / SAMPLE_RATE * 1_000 < MIN_TAKE_MS) {
@@ -180,6 +221,8 @@ export class RoadTestPage {
     this.render();
     const result = await this.transcribe(run, take.samples, run.releasedAt);
     if (this.run !== run) return;
+    // Model start counts a load the live words did while the owner spoke.
+    if (run.live?.loadMs != null) result.loadMs = (result.loadMs ?? 0) + run.live.loadMs;
     run.input = result;
     if (result.error) {
       this.phase = "idle";
@@ -194,7 +237,7 @@ export class RoadTestPage {
 
   /** One comparison row for one setup. Waits while the voice releases the host. */
   async transcribe(run, samples, from, onText = (text) => this.showTranscript(text)) {
-    const result = { text: "", finalMs: null, firstWordsMs: null, loadMs: null, firstUse: false, processingMs: null, error: "" };
+    const result = { text: "", finalMs: null, finalAt: null, loadMs: null, firstUse: false, processingMs: null, error: "" };
     const setupIds = JSON.stringify([run.setup.id]);
     for (let tries = 0; ; tries++) {
       const requestId = `road-${Date.now()}-${++this.serial}`;
@@ -225,13 +268,10 @@ export class RoadTestPage {
           loadingAt = null;
           this.status(`Transcribing with ${run.setup.label}`);
         }
-        if (typeof row.text === "string" && row.text.trim() && result.firstWordsMs == null) {
-          result.firstWordsMs = performance.now() - from;
-          onText(row.text);
-        }
         if (row.status === "complete") {
           result.text = row.text ?? "";
-          result.finalMs = performance.now() - from;
+          result.finalAt = performance.now();
+          result.finalMs = result.finalAt - from;
           // Observed here: the host's load figure leaves out worker process startup.
           result.loadMs = row.timings.firstUse ? startMs : null;
           result.processingMs = row.timings.processingMs;
@@ -275,6 +315,7 @@ export class RoadTestPage {
 
   frame(frame) {
     this.elements.level.style.width = `${Math.min(100, (Number(frame.level) || 0) * 400)}%`;
+    if (this.mic?.recording) this.live.push(frame.samples);
     const run = this.run;
     if (this.phase === "speaking" && this.readback.playing && this.elements["talk-over"].checked) {
       const event = this.detector.push(frame.level, frame.audioTime);
@@ -291,7 +332,7 @@ export class RoadTestPage {
     run.interrupt = { kind: "talk-over", detectMs: Math.max(0, (this.context.currentTime - onsetTime) * 1_000) };
     this.phase = "cut-in";
     this.readback.stop(detectedAt);
-    this.mic.beginTake();
+    this.beginTake(run.interrupt);
     run.cutInTimer = setTimeout(() => void this.finishCutIn(run), CUT_IN_MAX_MS);
     this.status("Heard you. Listening until you pause.");
     this.render();
@@ -301,6 +342,7 @@ export class RoadTestPage {
     if (this.phase !== "cut-in" || this.run !== run) return;
     clearTimeout(run.cutInTimer);
     const endedAt = performance.now();
+    this.live.end();
     this.phase = "cut-in-transcribing";
     this.status(`Transcribing what you said over the voice`);
     this.render();
@@ -354,6 +396,7 @@ export class RoadTestPage {
     const element = this.elements.transcript;
     element.textContent = text;
     element.classList.toggle("placeholder", false);
+    element.classList.toggle("partial", false);
   }
 
   status(message) {
@@ -371,8 +414,10 @@ export class RoadTestPage {
     stop.disabled = !this.readback?.active;
     const run = this.run;
     if (!run?.input) {
-      this.elements.transcript.textContent = run ? "" : PLACEHOLDER;
+      // Live words, one tone quieter, until the final text replaces them in place.
+      this.elements.transcript.textContent = run ? run.live?.words ?? "" : PLACEHOLDER;
       this.elements.transcript.classList.toggle("placeholder", !run);
+      this.elements.transcript.classList.toggle("partial", Boolean(run));
     }
     // Names the models that produced the latest take, so changed selects never claim its figures.
     this.elements["take-models"].textContent = run ? [run.setup.label, run.selection && run.voiceLabel].filter(Boolean).join(" · ") : "";
@@ -386,7 +431,7 @@ export class RoadTestPage {
   renderTimings(run) {
     const input = run?.input;
     describe(this.elements["input-timings"], [
-      ...(run?.setup?.card?.transcript === "partials" ? [["Release to first words", formatDuration(input?.firstWordsMs)]] : []),
+      ...(run?.setup?.card?.transcript === "partials" ? [["Press to first words", formatDuration(pressToFirstWords(run))]] : []),
       ["Release to text", formatDuration(input?.finalMs)],
       ["Model time", formatDuration(input?.processingMs)],
       ...(input?.loadMs != null ? [["Model start", formatDuration(input.loadMs)]] : []),
@@ -402,11 +447,12 @@ export class RoadTestPage {
     ]);
     const interrupt = run?.interrupt;
     const stopMs = interrupt?.stopMs;
-    const said = interrupt?.text ?? (this.phase === "cut-in" ? "Listening" : this.phase === "cut-in-transcribing" ? "Transcribing" : null);
+    const said = interrupt?.text ?? interrupt?.live?.words
+      ?? (this.phase === "cut-in" ? "Listening" : this.phase === "cut-in-transcribing" ? "Transcribing" : null);
     describe(this.elements["interrupt-timings"], interrupt?.kind === "talk-over" ? [
       ["Voice heard after", formatDuration(interrupt.detectMs)],
       ["Silent after", formatDuration(stopMs)],
-      ["You said", said, "wide"],
+      ["You said", said, interrupt.text == null && interrupt.live?.words ? "wide partial" : "wide"],
     ] : [
       ["Stop to silence", formatDuration(interrupt?.kind === "stop" ? stopMs : null)],
       ["Voice heard after", null],
@@ -440,6 +486,16 @@ export class RoadTestPage {
     this.elements.history.replaceChildren(...rows);
     this.elements["history-section"].hidden = earlier.length === 0;
   }
+}
+
+/**
+ * From the press to the first words on screen: live words where the model
+ * streams, else the final text. Only a streaming model's take shows it.
+ */
+function pressToFirstWords(run) {
+  if (run?.setup?.card?.transcript !== "partials") return null;
+  const firstWordsAt = run.live?.firstWordsAt ?? run.input?.finalAt;
+  return firstWordsAt != null && run.pressedAt != null ? firstWordsAt - run.pressedAt : null;
 }
 
 /** From the owner's release to the voice's first sound at the output. */

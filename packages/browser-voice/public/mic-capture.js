@@ -63,11 +63,11 @@ export class MicCapture {
     this.take = null;
   }
 
-  /** Starts a take led by the last PRE_ROLL_MS of idle audio. */
+  /** Starts a take led by the last PRE_ROLL_MS of idle audio; returns that pre roll. */
   beginTake() {
     const preRoll = this.ring.take();
     this.take = { frames: [preRoll], preRollSamples: preRoll.length };
-    return this.take.preRollSamples;
+    return preRoll;
   }
 
   /** Resolves with the take's samples once the worklet flushed its tail. */

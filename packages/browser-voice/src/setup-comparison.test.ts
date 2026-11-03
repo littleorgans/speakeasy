@@ -30,6 +30,7 @@ class FakeExecutor implements SetupExecutor {
   onLoad?: (id: SetupId, context: SetupExecutionContext) => Promise<void>;
   onExecute?: (request: SetupExecution, context: SetupExecutionContext) => Promise<SetupExecutionResult>;
   onRelease?: (id: SetupId) => Promise<void>;
+  onFeed?: (id: SetupId, samples: Float32Array, start: boolean) => Promise<void>;
 
   async guard<T>(label: string, run: () => Promise<T>): Promise<T> {
     this.calls.push(label);
@@ -52,6 +53,12 @@ class FakeExecutor implements SetupExecutor {
   }
   release(id: SetupId): Promise<void> {
     return this.guard(`release:${id}`, async () => { await this.onRelease?.(id); this.used.delete(id); });
+  }
+  feed(id: SetupId, samples: Float32Array, start: boolean, _context: SetupExecutionContext) {
+    return this.guard(`feed:${id}:${samples.length}${start ? ":start" : ""}`, async () => {
+      await this.onFeed?.(id, samples, start);
+      return { stable: ` ${samples.length}`, tentative: " more", processingMs: 4 };
+    });
   }
   async close(): Promise<void> { this.calls.push("close"); this.closed = true; }
 }
@@ -451,4 +458,91 @@ test("queued comparisons release expired unused models between jobs and wait for
   assert.ok(!h.executor.calls.includes(`release:${QWEN}`), "recently used models remain resident");
   assert.equal((await h.take([V3]).done).rows[0].timings.firstUse, true);
   assert.equal(h.executor.maxActive, 1);
+});
+
+test("live words load once, then feed everything queued in one slice, the first opening the stream", async () => {
+  const { executor, service } = harness();
+  const events: unknown[] = [];
+  let leases = 0;
+  const gate = barrier();
+  executor.onFeed = async () => { await gate.promise; };
+  const take = service.live(V3, { onEvent: (event) => events.push(event), acquire: () => { leases++; return () => { leases--; }; } });
+  take.push(new Float32Array(320));
+  await delay(5);
+  take.push(new Float32Array(320));
+  take.push(new Float32Array(160));
+  gate.resolve();
+  await delay(5);
+  assert.deepEqual(executor.calls, [`load:${V3}`, `feed:${V3}:320:start`, `feed:${V3}:480`]);
+  assert.deepEqual(events, [{ type: "loading" }, { type: "ready", cold: true },
+    { type: "partial", stable: " 320", tentative: " more", processingMs: 4 },
+    { type: "partial", stable: " 480", tentative: " more", processingMs: 4 }]);
+  executor.onFeed = async (_id, samples) => { if (samples.length !== 480) throw new Error("unexpected feed"); };
+  take.push(new Float32Array(480));
+  await delay(5);
+  assert.equal(events.length, 4, "unchanged words are not reported again");
+  take.push(new Float32Array(10));
+  await take.stop();
+  assert.equal(leases, 0, "stopping returns the host lease");
+  assert.equal(executor.calls.length, 4, "audio after stop is dropped");
+});
+
+test("a comparison stops live words and runs only after the feed in flight settles", async () => {
+  const { executor, service, take } = harness();
+  const gate = barrier();
+  executor.onFeed = async () => { await gate.promise; };
+  const live = service.live(V3, { onEvent() {}, acquire: () => () => {} });
+  live.push(new Float32Array(320));
+  await delay(5);
+  assert.equal(executor.calls.at(-1), `feed:${V3}:320:start`);
+  const comparison = take();
+  live.push(new Float32Array(320));
+  await delay(5);
+  assert.equal(executor.calls.at(-1), `feed:${V3}:320:start`, "the comparison waits for the feed");
+  gate.resolve();
+  const result = await comparison.done;
+  assert.equal(result.rows[0]!.status, "complete");
+  assert.deepEqual(executor.calls.slice(2), [`load:${V3}`, `execute:${V3}`], "no feed after the comparison arrived");
+  assert.equal(executor.maxActive, 1);
+});
+
+test("live words wait while a comparison runs or the host lease is taken, and keep their audio", async () => {
+  const { executor, service, take } = harness();
+  const gate = barrier();
+  executor.onExecute = async () => { await gate.promise; return output(); };
+  const comparison = take();
+  await delay(5);
+  let free = false;
+  const live = service.live(V3, { onEvent() {}, acquire: () => (free ? () => {} : undefined) });
+  live.push(new Float32Array(100));
+  gate.resolve();
+  await comparison.done;
+  await delay(80);
+  assert.ok(!executor.calls.some((call) => call.startsWith("feed")), "no feed while the lease is taken");
+  live.push(new Float32Array(60));
+  free = true;
+  await delay(80);
+  assert.equal(executor.calls.at(-1), `feed:${V3}:160:start`);
+  await live.stop();
+});
+
+test("a failed feed reports once and ends live words; close cancels them", async () => {
+  const { executor, service } = harness();
+  const events: any[] = [];
+  executor.onFeed = async () => { throw new Error("feed failed"); };
+  const failing = service.live(V3, { onEvent: (event) => events.push(event), acquire: () => () => {} });
+  failing.push(new Float32Array(4));
+  await failing.settled;
+  assert.deepEqual(events.at(-1), { type: "error", message: "feed failed" });
+  assert.equal(failing.stopped, true);
+  const gate = barrier();
+  let aborted = false;
+  executor.onFeed = async () => { await gate.promise; };
+  const open = service.live(V3, { onEvent() {}, acquire: () => () => {} });
+  open.push(new Float32Array(4));
+  await delay(5);
+  const closing = service.close();
+  setTimeout(() => { aborted = true; gate.resolve(); }, 5);
+  await closing;
+  assert.ok(aborted && executor.closed, "close waits for the cancelled feed, then closes the executor");
 });

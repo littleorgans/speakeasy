@@ -50,7 +50,7 @@ Unknown setups or fields are refused at startup.
 1. Add an entry to `runtime/setups.json`. Required: `id`, `label`, `card`,
    `model`, `revision`, `runtime`, `controls`, `operation` (`transcribe`) and
    `maxSamples`. `card.runtime` is the plain text runtime line on the model
-   card; `card.transcript` is `final` or `partials`. The card's size is
+   card; `card.transcript` is `final` or `partials` (Live words below). The card's size is
    measured from the configured model files. A setup with `baseSetup` also
    loads that setup: it is ready only when its base is, and its size counts both.
 2. Add the id to `SETUP_IDS` in `src/setup-protocol.ts`, in manifest order.
@@ -58,13 +58,31 @@ Unknown setups or fields are refused at startup.
    (`SETUP_MANIFEST_SHA256`, the SHA256 of `JSON.stringify` of the parsed file).
 4. Give it a backend. Python backends live in `runtime/<name>.py` with a
    `Backend` class (`load`, `transcribe`, `close`); register it in `BACKENDS` in
-   `runtime/worker.py` and `PYTHON_SETUPS` in `src/setup-workers.ts`. A native
+   `runtime/worker.py` and `PYTHON_WORKERS` in `src/setup-workers.ts`. A native
    binary goes behind a Python backend; `runtime/hex_unified.py` is the
-   example.
+   example. Its build script builds into a directory of its own under
+   `~/Library/Caches/speakeasy/`; after a change to `runtime/hex/worker.rs`,
+   rebuild to a new directory and point `runnerPath` at it, so a running
+   server keeps the binary it started with.
 5. Teach `src/server-options.ts` its files: a native path beyond the model goes
    in `EXTRA_LOCATIONS`, and `inspectSetupReadiness` checks the files exist.
 6. Add its paths to `models/road-test-runtime.json` and to
    `road-test-runtime.example.json`, restart, and try it in the page.
+
+### Live words
+
+A setup whose engine truly streams sets `card.transcript` to `partials`. While
+the owner holds the key, the page streams the take's mic frames over the
+`/live-words` socket; the host feeds them to the worker whenever it is free,
+and the page shows the words one tone quieter until the final text replaces
+them. The final is still the setup's full pass on the whole take, after the
+live stream stops. The backend adds `feed(samples, start)`: `start` opens a
+fresh stream, and it returns `stable` (settled text), `tentative` (text the
+model may still change) and `processingMs`. Feed whole engine chunks and keep
+a remainder for the next call (`STREAM` in `runtime/parakeet.py`, the 2,560
+sample feeds in `runtime/hex/worker.rs`). A setup with `baseSetup` shows its
+base's words. Never fake partials by decoding the growing take again: an
+engine that only gives final text keeps `final`.
 
 ## Speech out
 

@@ -16,6 +16,7 @@ import { safeSpeechOutputError, SpeechOutputError, type SpeechOutputEvent } from
 import {
   decodeMicFrame,
   parseClientCommand,
+  rawBytes,
   type BrowserHostEvent,
   type ClientCommand,
 } from "./protocol.ts";
@@ -412,16 +413,6 @@ export function runtimeConfigFor(
 
 function rawText(data: RawData): string {
   return Buffer.isBuffer(data) ? data.toString("utf8") : Buffer.from(rawBytes(data)).toString("utf8");
-}
-
-function rawBytes(data: RawData): Uint8Array {
-  if (Array.isArray(data)) {
-    return Buffer.concat(data);
-  }
-  if (data instanceof ArrayBuffer) {
-    return new Uint8Array(data);
-  }
-  return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
 }
 
 export function safeMessage(error: unknown): string {
