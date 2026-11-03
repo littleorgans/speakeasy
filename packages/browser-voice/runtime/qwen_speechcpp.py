@@ -171,3 +171,5 @@ class Backend:
         except Exception:
             process.kill()
             process.wait()
+        finally:
+            process.stdout.close()

@@ -65,6 +65,8 @@ class QwenTtsTest(unittest.TestCase):
         process = backend._model
         backend.close()
         self.assertEqual(process.returncode, 0)
+        self.assertTrue(process.stdin.closed)
+        self.assertTrue(process.stdout.closed, "retired workers must release their output pipe")
 
     def test_stock_settings_send_exactly_todays_request(self):
         backend = self.backend()
