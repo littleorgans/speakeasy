@@ -1,8 +1,8 @@
 import { EventEmitter } from "node:events";
 import { performance } from "node:perf_hooks";
 import type { EmptyEvent, FinalEvent, STTSession } from "../contract.ts";
+import { concatFrames, samplesToMs } from "../audio/pcm.js";
 import type { ResultDetail } from "./result.ts";
-import { samplesToMs } from "./sherpa.ts";
 
 /**
  * Push to talk session for whole utterance engines, independent of the
@@ -109,12 +109,7 @@ export class BufferedOfflineSession extends EventEmitter implements STTSession {
   }
 
   #take(): Float32Array {
-    const audio = new Float32Array(this.#samples);
-    let offset = 0;
-    for (const frame of this.#frames) {
-      audio.set(frame, offset);
-      offset += frame.length;
-    }
+    const audio = concatFrames(this.#frames, this.#samples);
     this.reset();
     return audio;
   }

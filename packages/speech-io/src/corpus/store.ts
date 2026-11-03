@@ -1,5 +1,6 @@
 import { access, link, mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { concatFrames } from "../audio/pcm.js";
 import { encodeWavFloat32 } from "../bench/wav.ts";
 
 /**
@@ -191,15 +192,4 @@ function parseSidecar(raw: string, path: string): CorpusSidecar {
     record.expected = null;
   }
   return record as CorpusSidecar;
-}
-
-function concatFrames(frames: Float32Array[]): Float32Array {
-  const total = frames.reduce((sum, frame) => sum + frame.length, 0);
-  const samples = new Float32Array(total);
-  let offset = 0;
-  for (const frame of frames) {
-    samples.set(frame, offset);
-    offset += frame.length;
-  }
-  return samples;
 }

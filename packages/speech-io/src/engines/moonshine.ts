@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { join } from "node:path";
 import * as ort from "onnxruntime-node";
 import llamaTokenizer from "llama-tokenizer-js";
+import { concatFrames } from "../audio/pcm.js";
 import type { STTConfig, STTSession, VoiceToText } from "../contract.ts";
 import { downloadFile, hasNonEmptyFile } from "./assets.ts";
 import { argMax } from "./logits.ts";
@@ -289,19 +290,6 @@ function tensorInt64(values: number[]): ort.Tensor {
     BigInt64Array.from(values.map((value) => BigInt(value))),
     [1, values.length],
   );
-}
-
-function concatFrames(
-  frames: Float32Array[],
-  sampleCount: number,
-): Float32Array {
-  const audio = new Float32Array(sampleCount);
-  let offset = 0;
-  for (const frame of frames) {
-    audio.set(frame, offset);
-    offset += frame.length;
-  }
-  return audio;
 }
 
 function formatError(error: unknown): string {
