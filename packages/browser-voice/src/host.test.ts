@@ -549,3 +549,41 @@ async function waitFor(predicate: () => boolean): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }
+
+test("voice copy recordings upload to memory, bounded by origin, type, rate, length and count, and forget", async () => {
+  const host = await startBrowserVoiceServer({ port: 0 });
+  const post = (samples: Float32Array, sampleRate: string | number, headers: Record<string, string> = {}) =>
+    fetch(`${host.url}/speech-output/references?sampleRate=${sampleRate}`, { method: "POST",
+      headers: { origin: host.url, "content-type": "application/octet-stream", ...headers }, body: samples.slice().buffer });
+  const second = (rate: number, seconds = 1, value = 0.25) => new Float32Array(rate * seconds).fill(value);
+  try {
+    const stored = await post(second(16_000, 2), 16_000);
+    assert.equal(stored.status, 201);
+    const { id, seconds } = await stored.json() as { id: string; seconds: number };
+    assert.match(id, /^[0-9a-f]{64}$/);
+    assert.equal(seconds, 2);
+    for (const [samples, rate, headers, status] of [
+      [second(16_000), 16_000, { origin: "https://example.com" }, 403],
+      [second(16_000), 16_000, { "content-type": "audio/wav" }, 415],
+      [second(16_000), 8_000, {}, 400], [second(16_000), "abc", {}, 400], [second(16_000), 100_000, {}, 400],
+      [new Float32Array(15_000), 16_000, {}, 400], [second(16_000, 31), 16_000, {}, 400 as number],
+    ] as const) {
+      assert.equal((await post(samples, rate, headers)).status, status, `${rate} ${JSON.stringify(headers)} ${samples.length}`);
+    }
+    const forget = (target: string, origin = host.url) => fetch(`${host.url}/speech-output/references/${target}`,
+      { method: "DELETE", headers: { origin } });
+    assert.equal((await forget(id, "https://example.com")).status, 403);
+    assert.equal((await forget(id)).status, 200);
+    assert.equal((await forget(id)).status, 404, "forgotten once");
+    const ids: string[] = [];
+    for (let index = 0; index < 5; ++index) {
+      ids.push((await (await post(second(16_000, 1, index / 10), 16_000)).json() as { id: string }).id);
+    }
+    assert.equal((await forget(ids[0]!)).status, 404, "the oldest of five is evicted");
+    assert.equal((await forget(ids[4]!)).status, 200);
+    assert.equal((await fetch(`${host.url}/speech-output/picks/qwen3-tts-0.6b/ryan`)).status, 404, "a speaker is no pick");
+    assert.equal((await fetch(`${host.url}/speech-output/picks/qwen3-tts-0.6b-base/recording`)).status, 404);
+  } finally {
+    await host.close();
+  }
+});

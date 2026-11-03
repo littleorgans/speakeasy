@@ -2,6 +2,11 @@ import { createHash } from "node:crypto";
 import { ProviderError, parseTimingObservation } from "@speakeasy/speech-io/providers";
 import type { SpeechOutputConfig, SpeechTiming, TimingObservation } from "@speakeasy/speech-io/providers";
 import type { AudioSegment, TextToSpeech, TTSSession } from "../../speech-io/src/tts/contract.ts";
+import { resolveSettings, SettingsError, type Settings } from "../../speech-io/src/settings.ts";
+import { resolveLocalOutput } from "../../speech-io/src/tts/catalogue.ts";
+import { RECORDING_VOICE } from "../../speech-io/src/tts/qwen-voices.ts";
+import type { SynthExecution } from "../../speech-io/src/tts/synth.ts";
+import type { VoiceReferenceStore } from "./voice-references.ts";
 import type { ProviderPolicy } from "./provider-policy.ts";
 import type { SpeechOutputCatalogue } from "./speech-output-catalog.ts";
 import { encodeAudioPacket } from "./protocol.ts";
@@ -17,6 +22,8 @@ export type SpeechOutputContext = {
   apiKey: (() => string) | undefined;
   /** Attach the adapter's per request observations, without inferred metrics. */
   observe: (observation: SampleProviderObservation) => void;
+  /** The reading's resolved voice settings and reference; absent for a model that declares none. */
+  execution?: SynthExecution;
 };
 
 export type SpeechOutputSessionOptions = {
@@ -27,6 +34,8 @@ export type SpeechOutputSessionOptions = {
   /** Wait for queued/running native work, even when close only suppressed audio. */
   quiesce: (config: SpeechOutputConfig) => Promise<void>;
   acquire: () => (() => void) | undefined;
+  /** The owner's recordings for voice copy; without it a recording voice is refused. */
+  references?: Pick<VoiceReferenceStore, "get">;
   sendEvent: (event: SpeechOutputEvent) => void;
   sendAudio: (packet: Uint8Array) => void;
   now?: () => number;
@@ -35,6 +44,7 @@ export type SpeechOutputSessionOptions = {
 
 type Trial = {
   command: Extract<SpeechOutputCommand, { type: "speak-sample" }>;
+  execution?: SynthExecution;
   playbackId: number;
   generation: number;
   admittedAt: number;
@@ -120,13 +130,14 @@ export class SpeechOutputSession {
     const entry = catalogue.output.find(({ config }) => config.provider.kind === command.selection.provider.kind &&
       config.model === command.selection.model);
     if (!entry?.selectable) throw new ProviderError("PROVIDER_UNAVAILABLE");
+    const execution = this.#execution(command, catalogue);
     if (this.#playbackId === 0xffff_ffff) throw new SpeechOutputError("SESSION_CLOSED");
     const release = this.#options.acquire();
     if (!release) throw new SpeechOutputError("BUSY");
     let settleOperation!: () => void;
     const operationSettled = new Promise<void>((resolve) => { settleOperation = resolve; });
     const job: Trial = {
-      command, playbackId: ++this.#playbackId, generation: ++this.#generation, admittedAt,
+      command, execution, playbackId: ++this.#playbackId, generation: ++this.#generation, admittedAt,
       textId: createHash("sha256").update(command.text).digest("hex"),
       controller: new AbortController(), release, produced: false, timing: unavailableTiming(), segments: [], requests: [], operationSettled,
     };
@@ -135,8 +146,36 @@ export class SpeechOutputSession {
     job.timer = setTimeout(() => this.#fail(job, new SpeechOutputError("TIMEOUT")), this.#timeoutMs);
     job.timer.unref();
     this.#emit({ type: "sample-accepted", requestId: command.requestId, playbackId: job.playbackId,
-      generation: job.generation, selection: structuredClone(command.selection), text: command.text, textId: job.textId });
+      generation: job.generation, selection: structuredClone(command.selection), text: command.text, textId: job.textId,
+      settings: { ...execution?.settings } });
     void this.#produce(job).finally(settleOperation);
+  }
+
+  /**
+   * The reading's settings against the model's declarations, defaults filled
+   * in, and the recording a voice copy reads from. Nothing for a model that
+   * declares no settings, so other voices speak exactly as before.
+   */
+  #execution(command: Trial["command"], catalogue: SpeechOutputCatalogue): SynthExecution | undefined {
+    const { selection } = command;
+    const model = catalogue.models.find((entry) => entry.provider.kind === selection.provider.kind && entry.id === selection.model);
+    if (selection.provider.kind !== "local") {
+      if (command.settings || command.reference) throw new ProviderError("CONFIG_UNSUPPORTED");
+      return undefined;
+    }
+    let settings: Settings;
+    try { settings = resolveSettings(model?.settings ?? [], command.settings ?? {}); }
+    catch (error) { throw error instanceof SettingsError ? new SpeechOutputError("SETTINGS_INVALID") : error; }
+    const recording = resolveLocalOutput(selection).voice.id === RECORDING_VOICE;
+    if (!recording) {
+      if (command.reference) throw new SpeechOutputError("COMMAND_INVALID");
+      return model?.settings?.length ? { settings } : undefined;
+    }
+    const stored = command.reference && this.#options.references?.get(command.reference.id);
+    if (!stored) throw new SpeechOutputError("REFERENCE_MISSING");
+    const transcript = command.reference!.transcript.trim();
+    if (settings.copyMode === "words-and-voice" && !transcript) throw new SpeechOutputError("SETTINGS_INVALID");
+    return { settings, reference: { ...stored, transcript: transcript || null } };
   }
 
   async #produce(job: Trial): Promise<void> {
@@ -158,6 +197,7 @@ export class SpeechOutputSession {
             observe: (observation) => {
               if (this.#current(job) && !job.produced) job.requests.push(providerObservation(observation));
             },
+            ...(job.execution ? { execution: job.execution } : {}),
           });
           recheck();
           job.session = await output.open();

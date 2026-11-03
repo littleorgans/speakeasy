@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { CatalogueEntry, OutputApiKind, SpeechOutputConfig, SpeechOutputRegistry } from "@speakeasy/speech-io/providers";
+import type { VoiceSetting } from "../../speech-io/src/settings.ts";
 import { localOutputSizeBytes, type getLocalOutputCatalogue } from "../../speech-io/src/tts/catalogue.ts";
 import { MAX_SAMPLE_TEXT_LENGTH } from "./speech-output-protocol.ts";
 
@@ -11,7 +12,9 @@ export type SpeechOutputModel = {
   /** Plain text model card facts; absent for providers that publish neither. */
   runtime?: string;
   sizeBytes?: number;
-  voices: { id: string | number; label: string; languages: readonly string[] }[];
+  /** A voice copy voice says where its reference comes from; a pick carries its pinned transcript. */
+  voices: { id: string | number; label: string; languages: readonly string[]; origin?: "synthetic" | "recording";
+    transcript?: string }[];
   defaultVoice: string | number;
   defaultSpeed: number;
   speed: { min: number; max: number };
@@ -20,6 +23,8 @@ export type SpeechOutputModel = {
   licence: string;
   /** The card's terms line, where the licence is not plainly permissive. */
   terms?: string;
+  /** Per reading controls the model declares; absent where it has none. */
+  settings?: readonly VoiceSetting[];
   readiness: { state: "ready" | "assets-missing" | "runtime-missing" | "adapter-deferred" | "failed"; reason: string | null };
   configured: boolean;
 };
@@ -54,7 +59,8 @@ export function buildSpeechOutputCatalogue(options: {
     provider: { kind: "local" },
     runtime: model.runtime,
     sizeBytes: localOutputSizeBytes(model.id),
-    voices: model.voices.map(({ id, label, languages }) => ({ id, label, languages: [...languages] })),
+    voices: model.voices.map((voice) => ({ id: voice.id, label: voice.label, languages: [...voice.languages],
+      ...("origin" in voice ? { origin: voice.origin } : {}), ...("transcript" in voice ? { transcript: voice.transcript } : {}) })),
     defaultVoice: model.defaultVoice,
     defaultSpeed: options.local.default.speed,
     speed: { ...options.localRegistry.find((entry) => entry.kind === "local" && entry.model === model.id)!.speed },
@@ -62,6 +68,7 @@ export function buildSpeechOutputCatalogue(options: {
     streaming: model.streaming,
     licence: model.licence,
     ...("terms" in model ? { terms: model.terms } : {}),
+    ...("settings" in model ? { settings: structuredClone(model.settings) } : {}),
     readiness: { ...model.readiness },
     configured: true,
   }));

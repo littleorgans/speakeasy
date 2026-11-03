@@ -233,3 +233,15 @@ test("missing hosted execution handles never fall back or touch local output", a
   assert.throws(() => factory.create({ ...cartesia, provider: { kind: "elevenlabs" } }), /unsupported/);
   await factory.close();
 });
+
+test("an execution reaches the local factory; an API voice refuses one", () => {
+  const executions: unknown[] = [];
+  const factory = new SpeechOutputFactory({ local: {
+    create: (_selection, execution) => { executions.push(execution); return { open: async () => ({ async *speak() {}, async close() {} }) }; },
+    quiesce: async () => {}, close: async () => {},
+  } });
+  const execution = { settings: { seed: 3 } };
+  factory.create(DEFAULT_LOCAL_OUTPUT, { execution });
+  assert.deepEqual(executions, [execution]);
+  assert.throws(() => factory.create(cartesia, { execution }), (error: Error & { code?: string }) => error.code === "CONFIG_UNSUPPORTED");
+});

@@ -2,10 +2,13 @@ import { HoldReleaseGate } from "/hold-release.js";
 import { LiveWords } from "/live-words.js";
 import { MicCapture } from "/mic-capture.js";
 import { trailItems, trailSummary } from "/live-trail.js";
-import { formatDuration, inputCard, liveLine, liveSettingsNote, outputCard, outputLatency, readEvents } from "/road-test-text.js";
+import { formatDuration, inputCard, liveLine, outputCard, outputLatency, readEvents } from "/road-test-text.js";
+import { appliedLive, describe, finalNote, HISTORY_COLUMNS, historyTrail, liveDiffers, pressToFirstWords, releaseToVoice } from "/take-history.js";
 import { chosenSettings, fill, settingColumns } from "/setting-controls.js";
 import { TalkOverDetector } from "/talk-over.js";
+import { VoiceCopy } from "/voice-copy.js";
 import { VoiceReadback } from "/voice-readback.js";
+import { settingsNote, VoiceSettings } from "/voice-settings.js";
 
 /**
  * Road test: pick a local speech in model and voice, hold to speak, see the
@@ -28,18 +31,6 @@ const HISTORY_LIMIT = 20;
 const PLACEHOLDER = "The transcript appears here, and the voice reads it back.";
 const LISTENING = "Listening. Release when you finish.";
 const DONE = "Done";
-/** Earlier takes columns; the transcript spans a line of its own, and narrow screens label each cell with these. */
-const HISTORY_COLUMNS = [
-  { label: "Speech in", cell: (run) => [run.setup.label, [finalNote(run), liveNote(run)].filter(Boolean).join(" · ")] },
-  { label: "Voice", cell: (run) => [run.output ? run.voiceLabel : null] },
-  { label: "Transcript", kind: "said-cell", cell: (run) => [run.input.error || run.input.text || "Nothing heard"], trail: true },
-  { label: "Press to first words", kind: "num", cell: (run) => [formatDuration(pressToFirstWords(run))] },
-  { label: "Release to text", kind: "num", cell: (run) => [formatDuration(run.input.finalMs),
-    run.input.loadMs != null ? `Model start ${formatDuration(run.input.loadMs)}` : null] },
-  { label: "Text to first audio", kind: "num", cell: (run) => [formatDuration(run.output?.firstAudioMs),
-    run.output?.loadMs != null ? `Model start ${formatDuration(run.output.loadMs)}` : null] },
-  { label: "Release to voice", kind: "num", cell: (run) => [formatDuration(releaseToVoice(run))] },
-];
 
 export class RoadTestPage {
   constructor() {
@@ -47,8 +38,12 @@ export class RoadTestPage {
       "status", "input-model", "input-card", "output-model", "output-voice", "output-card", "hold", "stop", "level",
       "transcript", "take-models", "input-timings", "output-timings", "interrupt-timings", "replay-take",
       "replay-talk-over", "replay-voice", "echo", "talk-over", "history", "history-head", "history-section", "level-track",
-      "live-model", "live-settings", "live-line", "trail", "trail-summary", "trail-list", "final-settings",
+      "live-model", "live-settings", "live-line", "trail", "trail-summary", "trail-list", "final-settings", "read-again",
     ].map((id) => [id, document.getElementById(id)]));
+    this.voiceSettings = new VoiceSettings({ document, root: document.getElementById("voice-settings"), onChange: () => this.render() });
+    this.voiceCopy = new VoiceCopy({ document, root: document.getElementById("voice-copy"), onChange: () => this.render(),
+      audio: async () => { this.context ??= new AudioContext({ latencyHint: "interactive" }); await this.context.resume(); return this.context; },
+      play: (samples, rate) => this.playSamples(samples, rate) });
     this.setups = [];
     this.voices = [];
     this.liveSelects = new Map();
@@ -109,14 +104,17 @@ export class RoadTestPage {
     this.elements.echo.addEventListener("change", () => void this.reopenMic());
     for (const which of ["take", "talk-over"]) this.elements[`replay-${which}`].addEventListener("click", () => this.replay(which));
     this.elements["replay-voice"].addEventListener("click", () => this.replay("voice"));
+    this.elements["read-again"].addEventListener("click", () => void this.readAgain());
+    const typing = (target) => target?.closest?.("textarea, input:not([type=checkbox])");
     document.addEventListener("keydown", (event) => {
-      if (event.code === "Space") {
+      if (event.code === "Space" && !typing(event.target)) {
         event.preventDefault();
+        this.keyboardHold = true;
         if (!event.repeat) this.press(event.timeStamp);
       } else if (event.code === "Escape") this.stopVoice(event.timeStamp);
     });
     document.addEventListener("keyup", (event) => {
-      if (event.code === "Space") { event.preventDefault(); this.release(event.timeStamp); }
+      if (event.code === "Space" && this.keyboardHold) { this.keyboardHold = false; event.preventDefault(); this.release(event.timeStamp); }
     });
   }
 
@@ -124,6 +122,7 @@ export class RoadTestPage {
     const model = this.outputModel();
     fill(this.elements["output-voice"], (model?.voices ?? []).map((voice) => ({ value: String(voice.id), label: voice.label })),
       String(model?.defaultVoice ?? ""));
+    this.voiceSettings.show(model);
   }
 
   setup() {
@@ -205,7 +204,8 @@ export class RoadTestPage {
     const interrupt = this.stopVoice(at);
     this.phase = "recording";
     this.run = { setup: this.setup(), liveChoice: this.liveChoice(), finalChoice: this.finalChoice(),
-      selection: this.selection(), voiceLabel: this.voiceLabel(), pressedAt: at, ...(interrupt ? { interrupt } : {}) };
+      selection: this.selection(), voiceLabel: this.voiceLabel(), reading: this.voiceSettings.request(),
+      pressedAt: at, ...(interrupt ? { interrupt } : {}) };
     this.status(LISTENING);
     this.render();
     void this.openAudio().then(() => {
@@ -348,14 +348,21 @@ export class RoadTestPage {
 
   async speak(run) {
     if (!run.selection) { this.phase = "idle"; this.status("Choose a voice to hear the transcript."); return; }
+    const copyMode = run.reading?.settings.copyMode;
+    const copy = this.voiceCopy.request(copyMode, run.selection.voice);
+    if (copy.error) { this.phase = "idle"; this.status(copy.error); return; }
     this.phase = "speaking";
     this.detector.reset();
     this.status(`Reading back with ${run.voiceLabel}`);
-    const speaking = this.readback.speak({ selection: run.selection, catalogueRevision: this.catalogueRevision, text: run.input.text });
+    const speaking = this.readback.speak({ selection: run.selection, catalogueRevision: this.catalogueRevision, text: run.input.text,
+      settings: run.reading?.settings, reference: copy.reference,
+      restore: copy.restore });
     run.voiceRequestedAt = performance.now();
     this.render();
     const output = await speaking;
     run.output = output;
+    // The take row names every setting the host applied off its default.
+    run.voiceLabel = [run.voiceLabel, settingsNote(run.reading?.declared, output.settings, run.reading?.always)].filter(Boolean).join(" · ");
     // Only a stopped reading times its interrupt; a finished one leaves a stop carried from the last take alone.
     if (output.outcome === "stopped" && run.interrupt) run.interrupt.stopMs = output.stopMs;
     run.outputLatency = outputLatency(this.context);
@@ -418,11 +425,27 @@ export class RoadTestPage {
     this.render();
   }
 
+  /** D3: the latest transcript again, in the voice and settings chosen now; the last take moves to Earlier takes. */
+  async readAgain() {
+    const last = this.run;
+    if (!last?.input?.text || this.phase !== "idle" || !this.readback) return;
+    this.stopReplay();
+    const run = this.run = { setup: last.setup, liveChoice: last.liveChoice, live: last.live, input: last.input, take: last.take,
+      selection: this.selection(), voiceLabel: this.voiceLabel(), reading: this.voiceSettings.request() };
+    await this.speak(run);
+    this.remember(run);
+    this.render();
+  }
+
   /** Replays the latest take, what was said over the voice, or the voice. */
   replay(which) {
     const run = this.run;
     const [samples, rate] = { take: [run?.take, SAMPLE_RATE], "talk-over": [run?.cutInTake, SAMPLE_RATE],
       voice: [run?.output?.samples, run?.output?.sampleRate] }[which];
+    this.playSamples(samples, rate);
+  }
+
+  playSamples(samples, rate) {
     if (!samples?.length || !rate || !this.context) return;
     this.stopReplay();
     const buffer = this.context.createBuffer(1, samples.length, rate);
@@ -471,6 +494,7 @@ export class RoadTestPage {
     const model = this.outputModel();
     this.elements["input-card"].textContent = setup ? inputCard(setup) : "";
     this.elements["output-card"].textContent = model ? outputCard(model) : "";
+    this.voiceCopy.show(model, this.elements["output-voice"].value);
     hold.setAttribute("aria-pressed", String(this.gate.capturing));
     hold.disabled = !setup?.readiness?.ready || this.phase === "cut-in";
     stop.disabled = !this.readback?.active;
@@ -488,6 +512,7 @@ export class RoadTestPage {
     this.elements["replay-take"].disabled = !run?.take;
     this.elements["replay-talk-over"].hidden = !run?.cutInTake;
     this.elements["replay-voice"].disabled = !run?.output?.samples?.length;
+    this.elements["read-again"].disabled = !run?.input?.text || this.phase !== "idle";
     this.renderTimings(run);
     this.renderHistory();
   }
@@ -577,88 +602,11 @@ export class RoadTestPage {
   }
 }
 
-/**
- * From the press to the first words on screen: live words where they came,
- * else the final text. Only a take with live words on shows it, and a take
- * where no words came shows none.
- */
-function pressToFirstWords(run) {
-  if (!run?.liveChoice) return null;
-  const firstWordsAt = run.live?.firstWordsAt ?? (run.input?.text?.trim() ? run.input.finalAt : null);
-  return firstWordsAt != null && run.pressedAt != null ? firstWordsAt - run.pressedAt : null;
-}
-
-/** A take's live choice with the settings the host applied, where it reported them; null with live words off. */
-function appliedLive(run) {
-  const choice = run.liveChoice;
-  return choice && { ...choice, settings: run.live?.stream?.settings ?? choice.settings };
-}
-
 /** Whether a take used this speech in and this live choice, settings included. */
 function sameChoice(run, setup, choice) {
   const used = run.liveChoice;
   if (run.setup.id !== setup?.id || Boolean(used) !== Boolean(choice)) return false;
   return !used || (used.setup.id === choice.setup.id && JSON.stringify(used.settings) === JSON.stringify(choice.settings));
-}
-
-/** An earlier take's live words: the live model where it differs from the final one, and its settings. */
-function liveNote(run) {
-  if (!run.liveChoice) return null;
-  return [liveDiffers(run) ? `Live words ${run.liveChoice.setup.label}` : null, liveSettingsNote(appliedLive(run))]
-    .filter(Boolean).join(" · ");
-}
-
-/** A take's final settings as the host applied them: "Names gentle"; null before its text or without any. */
-function finalNote(run) {
-  const settings = run.input?.settings;
-  return settings && run.setup.final ? liveSettingsNote({ stream: run.setup.final, settings }) : null;
-}
-
-/** Whether another model than the final one made the take's live words. */
-function liveDiffers(run) {
-  return Boolean(run.liveChoice && run.liveChoice.setup.id !== run.setup.id);
-}
-
-/** An earlier take's trail, collapsed to its one line summary. */
-function historyTrail(run) {
-  const details = document.createElement("details");
-  details.className = "trail";
-  const summary = document.createElement("summary");
-  summary.className = "note";
-  summary.textContent = trailSummary(run.live.updates);
-  const list = document.createElement("ol");
-  list.replaceChildren(...trailItems(document, run.live.updates, run.input?.text ?? null, formatDuration));
-  details.append(summary, list);
-  return details;
-}
-
-/** From the owner's release to the voice's first sound at the output. */
-function releaseToVoice(run) {
-  const firstAudioMs = run?.output?.firstAudioMs;
-  if (firstAudioMs == null || run.voiceRequestedAt == null || run.releasedAt == null) return null;
-  return run.voiceRequestedAt + firstAudioMs - run.releasedAt;
-}
-
-/** Fills a timing list; missing values show a quiet dash, and a note names the figure's model. */
-function describe(list, entries) {
-  const rows = entries.map(([label, value, kind, note]) => {
-    const row = document.createElement("div");
-    if (kind) row.className = kind;
-    const term = document.createElement("dt");
-    term.textContent = label;
-    if (note) {
-      const quiet = document.createElement("span");
-      quiet.className = "note";
-      quiet.textContent = note;
-      term.append(quiet);
-    }
-    const detail = document.createElement("dd");
-    detail.textContent = value ?? "–";
-    if (value == null) detail.className = "missing";
-    row.append(term, detail);
-    return row;
-  });
-  list.replaceChildren(...rows);
 }
 
 async function json(url) {

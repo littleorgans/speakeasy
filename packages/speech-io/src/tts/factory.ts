@@ -3,6 +3,7 @@ import type { TextToSpeech, TTSSession } from "./contract.ts";
 import { DEFAULT_LOCAL_OUTPUT, isWorkerOutput, resolveLocalOutput, type LocalOutputModelId } from "./catalogue.ts";
 import { LOCAL_TTS_MODELS } from "./models.ts";
 import type { LoadedTtsSynth } from "./sherpa-tts.ts";
+import type { SynthExecution } from "./synth.ts";
 
 export type LocalSpeechOutputOptions = {
   /** Server supplied location. Never part of portable configuration. */
@@ -33,18 +34,19 @@ export class LocalSpeechOutputFactory {
     this.#options = options;
   }
 
-  create(config: SpeechOutputConfig = DEFAULT_LOCAL_OUTPUT): TextToSpeech {
+  /** execution carries one reading's resolved settings and reference; without it the voice speaks as today. */
+  create(config: SpeechOutputConfig = DEFAULT_LOCAL_OUTPUT, execution?: SynthExecution): TextToSpeech {
     resolveLocalOutput(config);
     const selected = { ...config, provider: { ...config.provider } };
     return {
       open: async (override = {}) => {
         if (Object.keys(override).length) throw new Error("Selected output configuration is fixed");
-        return this.open(selected);
+        return this.open(selected, execution);
       },
     };
   }
 
-  async open(config: SpeechOutputConfig = DEFAULT_LOCAL_OUTPUT): Promise<TTSSession> {
+  async open(config: SpeechOutputConfig = DEFAULT_LOCAL_OUTPUT, execution?: SynthExecution): Promise<TTSSession> {
     if (this.#closed) throw new Error("Local speech output factory is closed");
     const { model, voice, speed } = resolveLocalOutput(config);
     const started = performance.now();
@@ -53,7 +55,8 @@ export class LocalSpeechOutputFactory {
     const synth = await this.#load(model.id);
     if (this.#closed) throw new Error("Local speech output factory is closed");
     const { SherpaTextToSpeech } = await import("./sherpa-tts.ts");
-    const session = await new SherpaTextToSpeech(async () => synth).open({ model: model.id, voice: voice.speakerId, speed });
+    const session = await new SherpaTextToSpeech(async () => synth).open({ model: model.id, voice: voice.speakerId, speed },
+      execution);
     return cold ? Object.assign(session, { loadMs: performance.now() - started }) : session;
   }
 

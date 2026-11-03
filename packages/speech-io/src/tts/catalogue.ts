@@ -1,7 +1,12 @@
 import { parseSpeechOutputConfig, type SpeechOutputConfig, type SpeechOutputRegistry } from "../provider-config.ts";
+import type { VoiceSetting } from "../settings.ts";
 import { CMU_DICT, resolveTtsFrontendAssets } from "./frontend.ts";
 import { join } from "node:path";
 import { LOCAL_TTS_MODELS, payloadDir, TTS_ROOT, verifyTtsFiles } from "./models.ts";
+import { QWEN_COPY_SETTINGS, QWEN_COPY_VOICES, QWEN_CUSTOM_17B_SETTINGS, QWEN_CUSTOM_SETTINGS, QWEN_SPEAKERS } from "./qwen-voices.ts";
+
+const QWEN_COPY_LICENCE = "Apache 2.0 weights and qwen-tts code (Qwen); retain the licence and notices. " +
+  "Copy only your own voice or the synthetic references.";
 
 /** Only owner approved browser choices. The legacy sweep registry stays separate. */
 export const LOCAL_OUTPUT_MODELS = [
@@ -105,10 +110,44 @@ export const LOCAL_OUTPUT_MODELS = [
     sampleRate: 24_000,
     streaming: "sentence",
     licence: "Apache 2.0 weights (Qwen); speech.cpp MIT. Retain the licence and notices. Speaker consent and generated audio rights unverified.",
-    voices: [
-      { id: "ryan", label: "Ryan", languages: ["en"], speakerId: 0 },
-      { id: "aiden", label: "Aiden", languages: ["en"], speakerId: 1 },
-    ],
+    voices: QWEN_SPEAKERS,
+    settings: QWEN_CUSTOM_SETTINGS,
+  },
+  {
+    id: "qwen3-tts-1.7b",
+    label: "Qwen3 TTS 1.7B",
+    provider: { kind: "local" },
+    runtime: "speech.cpp 0.10.0, Metal GPU, Q8_0",
+    defaultVoice: "ryan",
+    sampleRate: 24_000,
+    streaming: "sentence",
+    licence: "Apache 2.0 weights (Qwen); speech.cpp MIT. Retain the licence and notices. Speaker consent and generated audio rights unverified.",
+    voices: QWEN_SPEAKERS,
+    settings: QWEN_CUSTOM_17B_SETTINGS,
+  },
+  {
+    id: "qwen3-tts-0.6b-base",
+    label: "Qwen3 TTS 0.6B voice copy",
+    provider: { kind: "local" },
+    runtime: "qwen-tts 0.1.1 on PyTorch, Metal GPU (MPS), float32",
+    defaultVoice: "ref-10s",
+    sampleRate: 24_000,
+    streaming: "sentence",
+    licence: QWEN_COPY_LICENCE,
+    voices: QWEN_COPY_VOICES,
+    settings: QWEN_COPY_SETTINGS,
+  },
+  {
+    id: "qwen3-tts-1.7b-base",
+    label: "Qwen3 TTS 1.7B voice copy",
+    provider: { kind: "local" },
+    runtime: "qwen-tts 0.1.1 on PyTorch, Metal GPU (MPS), float32",
+    defaultVoice: "ref-10s",
+    sampleRate: 24_000,
+    streaming: "sentence",
+    licence: QWEN_COPY_LICENCE,
+    voices: QWEN_COPY_VOICES,
+    settings: QWEN_COPY_SETTINGS,
   },
   {
     id: "kokoro-ane-heart",
@@ -166,6 +205,12 @@ export function resolveLocalOutput(config: SpeechOutputConfig = DEFAULT_LOCAL_OU
 /** Pinned payload bytes, for the plain text model card. */
 export function localOutputSizeBytes(modelId: LocalOutputModelId): number {
   return LOCAL_TTS_MODELS[modelId].files.reduce((sum, file) => sum + file.bytes, 0);
+}
+
+/** The voice settings a model declares; none for a model without per reading controls. */
+export function localOutputSettings(modelId: LocalOutputModelId): readonly VoiceSetting[] {
+  const model: LocalOutputModel = LOCAL_OUTPUT_MODELS.find((entry) => entry.id === modelId)!;
+  return "settings" in model ? model.settings : [];
 }
 
 /** True for a voice the host runs in its own worker runtime, never sherpa. */

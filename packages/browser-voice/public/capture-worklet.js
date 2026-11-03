@@ -1,11 +1,13 @@
 const TARGET_RATE = 16_000;
 const FRAME_MS = 20;
 
+// processorOptions.targetRate picks another output rate; the context's own rate passes samples unchanged.
 class SpeakEasyCapture extends AudioWorkletProcessor {
-  constructor() {
+  constructor(options) {
     super();
-    this.ratio = sampleRate / TARGET_RATE;
-    this.outputSamples = Math.round((TARGET_RATE * FRAME_MS) / 1_000);
+    this.targetRate = options?.processorOptions?.targetRate ?? TARGET_RATE;
+    this.ratio = sampleRate / this.targetRate;
+    this.outputSamples = Math.round((this.targetRate * FRAME_MS) / 1_000);
     this.source = new Float32Array(4096);
     this.sourceLength = 0;
     this.endFrame = 0;
@@ -39,7 +41,7 @@ class SpeakEasyCapture extends AudioWorkletProcessor {
   // samples present, so no source sample is dropped. Then the buffer is
   // cleared, so the next frame holds no earlier samples.
   flush() {
-    const count = Math.ceil((this.sourceLength * TARGET_RATE) / sampleRate);
+    const count = Math.ceil((this.sourceLength * this.targetRate) / sampleRate);
     this.post(count, this.sourceLength, this.sourceLength, { flush: true });
   }
 

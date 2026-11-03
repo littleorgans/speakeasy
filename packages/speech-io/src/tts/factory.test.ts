@@ -296,3 +296,23 @@ test("only the open that loads a voice reports its load time", async () => {
     await factory.close();
   } finally { performance.now = now; }
 });
+
+test("a reading's settings and reference reach every segment; the first clause split stays in the planner", async () => {
+  const requests: SynthRequest[] = [];
+  const factory = new LocalSpeechOutputFactory({ createWorkerSynth: async () => ({ numSpeakers: 9, sampleRate: 24000,
+    close: async () => {}, synth: async (request) => { requests.push(request); return result(24000); } }) });
+  const reference = { sha256: "a".repeat(64), samples: Float32Array.of(0.1), sampleRate: 48_000, transcript: "Hello." };
+  const config = { ...DEFAULT_LOCAL_OUTPUT, model: "qwen3-tts-0.6b", voice: "aiden" };
+  const whole = await factory.create(config, { settings: { firstClause: false, seed: 7 }, reference }).open();
+  await collect(whole.speak("I mean, we've got so much going on. Then stop."));
+  assert.deepEqual(requests.map((request) => [request.text, request.sid, request.settings, request.reference]),
+    [["I mean, we've got so much going on.", 1, { seed: 7 }, reference], ["Then stop.", 1, { seed: 7 }, reference]]);
+  requests.length = 0;
+  const today = await factory.create(config).open();
+  await collect(today.speak("I mean, we've got so much going on."));
+  assert.deepEqual(requests.map((request) => [request.text, "settings" in request, "reference" in request]),
+    [["I mean,", false, false], ["we've got so much going on.", false, false]], "no execution speaks as today");
+  await whole.close();
+  await today.close();
+  await factory.close();
+});

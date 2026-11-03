@@ -21,7 +21,7 @@ const EXTRA_LOCATIONS: Partial<Record<PythonSetupId, "libraryPath" | "runnerPath
 const SYSTEM_MANAGED = new Set<PythonSetupId>(["apple/speech"]);
 /** The one native location a worker voice needs beyond its interpreter. */
 const VOICE_EXTRA_LOCATIONS: Partial<Record<LocalOutputModelId, "runnerPath">> = {
-  "piper-kristin-split": "runnerPath", "kokoro-coreml": "runnerPath", "qwen3-tts-0.6b": "runnerPath",
+  "piper-kristin-split": "runnerPath", "kokoro-coreml": "runnerPath", "qwen3-tts-0.6b": "runnerPath", "qwen3-tts-1.7b": "runnerPath",
   "kokoro-ane-heart": "runnerPath", "kokoro-ane-folded-heart": "runnerPath",
 };
 const DEFAULT_SETUP_TIMEOUT_MS = 120_000;

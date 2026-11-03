@@ -69,11 +69,12 @@ export async function readWavFrames(
 }
 
 /**
- * Decode finite 16 kHz mono samples without clipping, quantization or padding.
- * IEEE Float32 WAVs preserve every sample bit, including signed zero.
+ * Decode finite mono samples at exactly `sampleRate` (16 kHz unless given)
+ * without clipping, quantization or padding. IEEE Float32 WAVs preserve every
+ * sample bit, including signed zero.
  */
-export function decodeWavSamples(bytes: Uint8Array): Float32Array {
-  const { view, format, dataOffset, dataLength } = parseWav(bytes, true);
+export function decodeWavSamples(bytes: Uint8Array, sampleRate = TARGET_SAMPLE_RATE): Float32Array {
+  const { view, format, dataOffset, dataLength } = parseWav(bytes, true, sampleRate);
   return decodeSamples(view, dataOffset, dataLength, format, true);
 }
 
@@ -101,7 +102,7 @@ export function decodeWavFrames(
   };
 }
 
-function parseWav(bytes: Uint8Array, strict: boolean): ParsedWav {
+function parseWav(bytes: Uint8Array, strict: boolean, sampleRate = TARGET_SAMPLE_RATE): ParsedWav {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   assertRiffWave(view);
   if (strict && view.getUint32(4, true) + 8 !== view.byteLength) {
@@ -133,7 +134,7 @@ function parseWav(bytes: Uint8Array, strict: boolean): ParsedWav {
   if (dataOffset === undefined || dataLength === undefined) {
     throw new Error("WAV is missing a data chunk");
   }
-  validateFormat(format);
+  validateFormat(format, sampleRate);
   if (strict && dataLength % format.blockAlign !== 0) {
     throw new Error("WAV data must contain whole samples");
   }
@@ -234,10 +235,10 @@ function readFormatChunk(
   };
 }
 
-function validateFormat(format: FormatChunk): void {
-  if (format.sampleRate !== TARGET_SAMPLE_RATE) {
+function validateFormat(format: FormatChunk, sampleRate: number): void {
+  if (format.sampleRate !== sampleRate) {
     throw new Error(
-      `Expected ${TARGET_SAMPLE_RATE} Hz WAV, received ${format.sampleRate} Hz`,
+      `Expected ${sampleRate} Hz WAV, received ${format.sampleRate} Hz`,
     );
   }
   if (format.channels !== TARGET_CHANNELS) {

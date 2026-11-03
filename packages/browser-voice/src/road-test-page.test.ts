@@ -8,6 +8,8 @@ import * as text from "../public/road-test-text.js";
 import * as trail from "../public/live-trail.js";
 import { finalSetup } from "./final-settings.ts";
 import { liveStream } from "./live-settings.ts";
+import { QWEN_COPY_SETTINGS, QWEN_COPY_VOICES, QWEN_CUSTOM_17B_SETTINGS, QWEN_CUSTOM_SETTINGS, QWEN_SPEAKERS }
+  from "../../speech-io/src/tts/qwen-voices.ts";
 import { END_SILENCE_MS, TalkOverDetector } from "../public/talk-over.js";
 import { VoiceReadback } from "../public/voice-readback.js";
 
@@ -202,13 +204,34 @@ test("mic capture leads a take with pre roll and ends it at the worklet's flush 
   assert.equal(mic.ring.samples, 320, "frames after the flush reply feed the next pre roll");
 });
 
+test("a voice copy mic records at the context rate with its own constraints, and its pre roll keeps 300 ms at that rate", async () => {
+  const nodeOptions: unknown[] = [];
+  const asked: unknown[] = [];
+  class Node { port = { onmessage: undefined as any, postMessage() {} }; constructor(_context: unknown, _name: string, options: unknown) {
+    nodeOptions.push(options); } connect(node: unknown) { return node; } }
+  const context = vm.createContext({ ...preRoll, navigator: { mediaDevices: { getUserMedia: async (constraints: unknown) => {
+    asked.push(constraints); return { getTracks: () => [] }; } } }, AudioWorkletNode: Node, Float32Array, Promise });
+  vm.runInContext(source("capture-constraints.js"), context);
+  vm.runInContext(source("mic-capture.js") + "\nglobalThis.Mic = MicCapture;", context);
+  const audio = { destination: {}, audioWorklet: { async addModule() {} },
+    createGain: () => ({ gain: { value: 1 }, connect: (node: unknown) => node }), createMediaStreamSource: () => ({ connect() {}, disconnect() {} }) };
+  const raw = { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+  const mic = new context.Mic({ context: audio, rate: 48_000, constraints: raw });
+  await mic.start(false);
+  assert.equal(JSON.stringify(nodeOptions), JSON.stringify([{ processorOptions: { targetRate: 48_000 } }]));
+  assert.equal(JSON.stringify(asked), JSON.stringify([{ audio: raw }]));
+  for (let index = 0; index < 20; index++) mic.node.port.onmessage({ data: { kind: "frame", samples: new Float32Array(960), level: 0 } });
+  assert.equal(mic.beginTake().length, 14_400);
+  assert.equal(new preRoll.PreRollRing().limit, 4_800, "16 kHz unless asked");
+});
+
 /**
  * The page with real gate, detector and text helpers; the mic and voice are
  * scripted fakes. With holdVoice the voice plays until stopped, then reports
  * a 41 ms stop; clearing the readback's hold lets later readings finish. Each mic take is one sample longer than the last, so replays
  * show which take they play. With transcript "partials" the setup streams: live records what reaches the live words channel.
  */
-function pageHarness({ holdVoice = false, transcript = "final" } = {}, rows: unknown[] = [
+function pageHarness({ holdVoice = false, transcript = "final", models = [] as unknown[] } = {}, rows: unknown[] = [
   { type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status: "processing", text: null, timings: {} } },
   { type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status: "complete", text: "Clear the screen.", timings: { firstUse: false, processingMs: 90 } } },
 ]) {
@@ -222,10 +245,11 @@ function pageHarness({ holdVoice = false, transcript = "final" } = {}, rows: unk
     setAttribute() {}, append(...nodes: any[]) { this.children.push(...nodes); }, replaceChildren(...nodes: any[]) { this.children = nodes; } });
   const select = (): any => Object.assign(element(), { options: [] as any[],
     replaceChildren(this: any, ...options: any[]) { this.options = options; this.value = options[0]?.value ?? ""; } });
-  const document = { getElementById(id: string) {
+  const document = { listeners: new Map<string, (event: any) => void>(), getElementById(id: string) {
     if (!elements.has(id)) elements.set(id, id.endsWith("-model") || id.endsWith("-voice") ? select() : element());
     return elements.get(id);
-  }, createElement: (tag: string) => Object.assign(tag === "select" ? select() : element(), { tag }), addEventListener() {} };
+  }, createElement: (tag: string) => Object.assign(tag === "select" ? select() : element(), { tag }),
+  addEventListener(type: string, listener: (event: any) => void) { this.listeners.set(type, listener); } };
   const spoken: any[] = [];
   const posted: string[] = [];
   const played: number[] = [];
@@ -239,14 +263,19 @@ function pageHarness({ holdVoice = false, transcript = "final" } = {}, rows: unk
     }
     push() { if (this.takeId) live.pushed++; }
     end() { if (this.takeId) live.ended++; this.takeId = null; } }
-  class Mic { open = true; recording = false; async start() {} beginTake() { this.recording = true; return new Float32Array(4_800); }
+  const microphones: any[] = [];
+  class Mic { open = true; recording = false; rate: number;
+    constructor({ rate = 16_000 } = {}) { this.rate = rate; microphones.push(this); }
+    async start() { this.open = true; } stop() { this.open = this.recording = false; }
+    beginTake() { this.recording = true; return new Float32Array(4_800); }
     async endTake() { this.recording = false; return { samples: new Float32Array(8_000 + takes++).fill(0.1), preRollSamples: 0 }; } }
   let voiceLoads = [4_900];
   const voice = () => ({ firstAudioMs: 120, samples: new Float32Array(4), sampleRate: 22_050, loadMs: voiceLoads.shift() ?? null });
   class Readback { active = false; playing = false; hold = holdVoice; stopped?: (result: unknown) => void; async prepare() {}
     speak(request: any) {
       spoken.push(request);
-      if (!this.hold) return Promise.resolve({ ...voice(), outcome: "finished", totalMs: 900 });
+      // The host echoes the settings it applied; a reading without settings gets none back here.
+      if (!this.hold) return Promise.resolve({ ...voice(), outcome: "finished", totalMs: 900, settings: request.settings ?? null });
       this.active = this.playing = true;
       return new Promise((resolve) => { this.stopped = resolve; });
     }
@@ -266,9 +295,15 @@ function pageHarness({ holdVoice = false, transcript = "final" } = {}, rows: unk
       readiness: { ready: true, sizeBytes: 1 }, live: null, liveDefault: null, final: finalSetup("cohere/transcribe") },
   ] };
   const voices = { revision: "rev", default: { model: "piper-kristin-medium" }, models: [{ id: "piper-kristin-medium", label: "Piper Kristin medium",
-    provider: { kind: "local" }, defaultVoice: "kristin", defaultSpeed: 1, voices: [{ id: "kristin", label: "Kristin" }], readiness: { state: "ready" } }] };
-  const fetch = async (url: string) => {
+    provider: { kind: "local" }, defaultVoice: "kristin", defaultSpeed: 1, voices: [{ id: "kristin", label: "Kristin" }], readiness: { state: "ready" } },
+    ...models] };
+  // Like the browser's fetch, a call with any receiver but the window throws.
+  let realm: unknown;
+  async function fetch(this: unknown, url: string, init?: { method?: string }) {
+    if (this !== undefined && this !== realm) throw new TypeError("Illegal invocation");
     posted.push(url);
+    if (url.startsWith("/speech-output/picks/")) return { ok: true, arrayBuffer: async () => new ArrayBuffer(8) };
+    if (url.startsWith("/speech-output/references")) return { ok: true, json: async () => (init?.method === "POST" ? { id: "d".repeat(64) } : {}) };
     if (url === "/prompt-reader/setups") return { ok: true, json: async () => setups };
     if (url === "/speech-output/models") return { ok: true, json: async () => voices };
     const body = new ReadableStream({ start(controller) {
@@ -276,16 +311,19 @@ function pageHarness({ holdVoice = false, transcript = "final" } = {}, rows: unk
       controller.close();
     } });
     return { ok: true, status: 200, body };
-  };
-  const context = vm.createContext({ document, fetch, performance, setTimeout, clearTimeout, URLSearchParams, TextEncoder, TextDecoder,
+  }
+  const context = vm.createContext({ document, fetch, performance, Math, Number, String, Object, setInterval, clearInterval, setTimeout, clearTimeout, URLSearchParams, TextEncoder, TextDecoder,
     JSON, Float32Array, Promise, Option: function(label: string, value: string) { return { label, value }; },
     HoldReleaseGate, MicCapture: Mic, VoiceReadback: Readback, LiveWords, TalkOverDetector, ...text, ...trail,
-    AudioContext: class { currentTime = 0; destination = {}; async resume() {}
+    AudioContext: class { currentTime = 0; sampleRate = 48_000; destination = {}; async resume() {}
       createBuffer(_channels: number, length: number) { return { length, copyToChannel() {} }; }
+      async decodeAudioData() { return { sampleRate: 24_000, getChannelData: () => new Float32Array(2_400) }; }
       createBufferSource() { const source = { buffer: { length: 0 }, connect() {}, stop() {}, start() { played.push(source.buffer.length); } }; return source; } },
     window: { setTimeout, clearTimeout } });
-  vm.runInContext(source("setting-controls.js") + source("road-test.js") + "\nglobalThis.Page = RoadTestPage;", context);
-  return { page: new context.Page(), elements, spoken, posted, played, live };
+  realm = vm.runInContext("globalThis", context);
+  vm.runInContext(["setting-controls.js", "voice-settings.js", "voice-copy.js", "take-history.js", "road-test.js"].map(source).join("\n")
+    + "\nglobalThis.Page = RoadTestPage;", context);
+  return { page: new context.Page(), elements, spoken, posted, played, live, document, microphones };
 }
 
 const until = async (done: () => unknown) => {
@@ -673,4 +711,355 @@ test("Cohere shows its Names setting under Speech in; each take sends it, and th
   elements.get("input-model").listeners.get("change")!();
   assert.equal(elements.get("final-settings").hidden, true);
   assert.equal(page.finalChoice(), null, "a setup without final settings sends none");
+});
+
+const qwen = (id: string, settings: unknown, voices: readonly unknown[] = QWEN_SPEAKERS) => ({ id, label: id, provider: { kind: "local" },
+  defaultVoice: (voices[0] as { id: string }).id, defaultSpeed: 1, voices, settings, readiness: { state: "ready" } });
+const QWEN_MODELS = [qwen("qwen3-tts-1.7b", QWEN_CUSTOM_17B_SETTINGS), qwen("qwen3-tts-0.6b", QWEN_CUSTOM_SETTINGS),
+  qwen("qwen3-tts-0.6b-base", QWEN_COPY_SETTINGS, QWEN_COPY_VOICES)];
+
+/** Every node under root, depth first. */
+function nodes(root: any): any[] {
+  return [root, ...(root.children ?? []).flatMap(nodes)];
+}
+/** The control in the setting column labelled `label`: its select or input, or for Seed the mode and number pair. */
+function control(root: any, label: string): any {
+  const column = nodes(root).find((node) => node.className === "setting" && node.children[0]?.textContent === label);
+  return column?.children[1];
+}
+const choose = (select: any, label: string) => {
+  const index = select.options.findIndex((option: any) => option.label === label);
+  assert.ok(index >= 0, `${label} among ${select.options.map((option: any) => option.label)}`);
+  select.value = select.options[index].value;
+  select.listeners.get("change")?.();
+};
+async function pickModel(harness: ReturnType<typeof pageHarness>, id: string) {
+  const output = harness.elements.get("output-model");
+  output.value = id;
+  output.listeners.get("change")();
+}
+
+test("Space types in voice settings and the reference transcript; on any other control it still records", async () => {
+  const { page, document } = pageHarness({ models: QWEN_MODELS });
+  await page.start();
+  const calls: string[] = [];
+  page.press = () => calls.push("press");
+  page.release = () => calls.push("release");
+  const space = (tag: string | null) => {
+    calls.length = 0;
+    const event = { code: "Space", timeStamp: 1, target: { closest: (selector: string) => tag && selector.includes(tag) ? {} : null },
+      preventDefault: () => calls.push("prevent") };
+    document.listeners.get("keydown")!(event);
+    document.listeners.get("keyup")!(event);
+    return [...calls];
+  };
+  for (const tag of ["input", "textarea"]) assert.deepEqual(space(tag), [], `Space types in ${tag}`);
+  for (const tag of ["select", "button", null]) {
+    assert.deepEqual(space(tag), ["prevent", "press", "prevent", "release"], `Space records from ${tag ?? "the page"}`);
+  }
+});
+
+test("each Qwen model shows its own controls with notes: Instruction only on 1.7B, First clause split in the main row", async () => {
+  const harness = pageHarness({ models: QWEN_MODELS });
+  await harness.page.start();
+  const root = harness.elements.get("voice-settings");
+  assert.equal(root.hidden, true, "Kristin declares no settings");
+  await pickModel(harness, "qwen3-tts-1.7b");
+  assert.equal(root.hidden, false);
+  const [main, sampling] = root.children;
+  const labels = (node: any) => nodes(node).filter((entry) => entry.className === "setting").map((entry) => entry.children[0].textContent);
+  assert.deepEqual(labels(main), ["Instruction", "Language", "Seed", "First clause split", "Longest part", "Preset"]);
+  assert.equal(sampling.tag, "details");
+  assert.ok(labels(sampling).includes("Greedy") && labels(sampling).includes("Fine detail top k"));
+  assert.equal(control(root, "First clause split").options[Number(control(root, "First clause split").value)].label, "Off");
+  assert.ok(nodes(main).filter((entry) => entry.className === "setting").every((entry) => entry.children[2]?.textContent?.trim()),
+    "every column has its note");
+  await pickModel(harness, "qwen3-tts-0.6b");
+  assert.equal(labels(root.children[0])[0], "Language", "0.6B takes no instruction");
+  assert.equal(harness.elements.get("voice-copy").hidden, true);
+});
+
+test("greedy greys out its sampling; the Soft preset fills controls; changed settings are sent and named on the take row", async () => {
+  const harness = pageHarness({ models: QWEN_MODELS });
+  await harness.page.start();
+  await pickModel(harness, "qwen3-tts-1.7b");
+  const root = harness.elements.get("voice-settings");
+  choose(control(root, "Preset"), "Soft");
+  assert.equal(control(root, "Temperature").options[Number(control(root, "Temperature").value)].label, "0.7");
+  choose(control(root, "Greedy"), "On");
+  for (const label of ["Temperature", "Top p", "Top k"]) assert.equal(control(root, label).disabled, true, label);
+  assert.equal(control(root, "Repetition penalty").disabled, false);
+  assert.equal(control(root, "Preset").options.at(-1).label, "Custom", "greedy matches no preset");
+  choose(control(root, "Greedy"), "Off (stock)");
+  choose(control(root, "Preset"), "Stock");
+  choose(control(root, "First clause split"), "On");
+  const instruction = control(root, "Instruction");
+  instruction.value = "Speak slowly.";
+  control(root, "Seed").children[1].value = "7";
+  await take(harness.page, 100);
+  await until(() => harness.page.run?.output);
+  assert.equal(JSON.stringify(harness.spoken[0].settings), JSON.stringify({ instructions: "Speak slowly.", seed: 7, firstClause: true }));
+  assert.equal(harness.elements.get("take-models").textContent,
+    'Parakeet v3 MLX · qwen3-tts-1.7b, Ryan · instruction "Speak slowly.", seed 7, first clause split on');
+});
+
+test("New each reading draws an integer seed per reading and the take row shows it, even when it equals the default", async () => {
+  const harness = pageHarness({ models: QWEN_MODELS });
+  await harness.page.start();
+  await pickModel(harness, "qwen3-tts-0.6b");
+  const root = harness.elements.get("voice-settings");
+  const [mode, seed] = control(root, "Seed").children;
+  choose(mode, "New each reading");
+  assert.equal(seed.disabled, true);
+  await take(harness.page, 100);
+  await until(() => harness.page.run?.output);
+  await take(harness.page, 2_000);
+  await until(() => harness.spoken.length === 2 && harness.page.run?.output);
+  const seeds = harness.spoken.map((request: any) => request.settings?.seed ?? 1);
+  assert.ok(seeds.every((value: number) => Number.isSafeInteger(value) && value >= 0));
+  assert.match(harness.elements.get("take-models").textContent, new RegExp(`seed ${seeds[1]}$`));
+});
+
+test("Read again speaks the latest transcript in the voice chosen now and keeps the last take as an earlier row", async () => {
+  const harness = pageHarness({ models: QWEN_MODELS });
+  await harness.page.start();
+  assert.equal(harness.elements.get("read-again").disabled, true);
+  await take(harness.page, 100);
+  await until(() => harness.page.run?.output && harness.page.phase === "idle");
+  harness.page.render();
+  assert.equal(harness.elements.get("read-again").disabled, false);
+  await pickModel(harness, "qwen3-tts-0.6b");
+  choose(control(harness.elements.get("voice-settings"), "First clause split"), "On");
+  harness.elements.get("read-again").listeners.get("click")();
+  await until(() => harness.spoken.length === 2 && harness.page.run?.output);
+  assert.equal(harness.spoken[1].text, "Clear the screen.");
+  assert.equal(harness.spoken[1].selection.model, "qwen3-tts-0.6b");
+  assert.equal(JSON.stringify(harness.spoken[1].settings), JSON.stringify({ firstClause: true }));
+  assert.equal(harness.elements.get("history").children.length, 1, "the first reading moves to Earlier takes");
+});
+
+test("interrupting Read again with a new take preserves the interrupted reading in history", async () => {
+  const { page } = pageHarness();
+  await page.start();
+  await take(page, 100);
+  await until(() => page.phase === "idle");
+  page.readback.hold = true;
+  const reading = page.readAgain();
+  await until(() => page.phase === "speaking");
+  const repeated = page.run;
+  page.press(3_000);
+  await reading;
+  assert.notEqual(page.run, repeated);
+  assert.ok(page.history.includes(repeated), "Read again must remember its own reading after a new take replaces it");
+  assert.equal(repeated.output.outcome, "stopped");
+  assert.equal(page.phase, "recording", "the old reading cannot reset the new take's phase");
+  page.readback.hold = false;
+  page.release(3_400);
+  await until(() => page.phase === "idle");
+});
+
+test("a voice copy model shows the consent note; My recording needs a recording and its transcript before sending", async () => {
+  const harness = pageHarness({ models: QWEN_MODELS });
+  await harness.page.start();
+  await pickModel(harness, "qwen3-tts-0.6b-base");
+  const panel = harness.elements.get("voice-copy");
+  harness.page.render();
+  assert.equal(panel.hidden, false);
+  assert.ok(nodes(panel).some((node) => node.textContent?.startsWith("Copy only your own voice or the synthetic references.")));
+  const voice = harness.elements.get("output-voice");
+  voice.value = "recording";
+  harness.page.render();
+  const textarea = nodes(panel).find((node) => node.tag === "textarea");
+  // A refused reading never speaks, so wait for the status line rather than the voice.
+  const refused = async (at: number, message: string) => {
+    harness.page.press(at);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    harness.page.release(at + 400);
+    await until(() => harness.elements.get("status").textContent === message);
+  };
+  assert.match(textarea.value, /^The window is open/, "a script to read pre fills the transcript");
+  await refused(100, "Record a reference first.");
+  assert.equal(harness.spoken.length, 0);
+  harness.page.voiceCopy.recording = { samples: new Float32Array(48_000), rate: 48_000, id: "a".repeat(64) };
+  textarea.value = " ";
+  await refused(2_000, "Type the words you read, or choose Copy: Voice only.");
+  textarea.value = "The window is open.";
+  await take(harness.page, 4_000);
+  await until(() => harness.spoken.length === 1);
+  assert.equal(JSON.stringify(harness.spoken[0].reference), JSON.stringify({ id: "a".repeat(64), transcript: "The window is open." }));
+  assert.equal(typeof harness.spoken[0].restore, "function");
+});
+
+test("readback sends settings and a reference, keeps the applied settings, and uploads again once when the host lost it", async () => {
+  const { readback, sockets } = readbackHarness();
+  let restored = 0;
+  const reference = { id: "a".repeat(64), transcript: "Hello." };
+  const done = readback.speak({ selection, catalogueRevision: "rev", text: "Hi.", settings: { seed: 3 }, reference,
+    restore: async () => { restored++; return { ...reference, id: "b".repeat(64) }; } });
+  while (!sockets[0]?.sent.length) await new Promise((resolve) => setTimeout(resolve, 1));
+  const socket = sockets[0]!;
+  const ask = (index: number) => socket.event({ type: "output-selected", requestId: socket.sent[index].requestId,
+    catalogueRevision: "rev", selectionRevision: 1, selection });
+  ask(0);
+  assert.deepEqual([socket.sent[1].settings, socket.sent[1].reference], [{ seed: 3 }, reference]);
+  socket.event({ type: "sample-error", requestId: socket.sent[1].requestId, code: "REFERENCE_MISSING", message: "missing" });
+  while (socket.sent.length < 3) await new Promise((resolve) => setTimeout(resolve, 1));
+  ask(2);
+  assert.equal(socket.sent[3].reference.id, "b".repeat(64));
+  socket.event({ type: "sample-accepted", requestId: socket.sent[3].requestId, playbackId: 5, settings: { seed: 3, topP: 1 } });
+  socket.event({ type: "sample-error", requestId: socket.sent[3].requestId, code: "REFERENCE_MISSING", message: "missing" });
+  const result = await done;
+  assert.equal(restored, 1, "only once");
+  assert.equal(result.outcome, "error");
+  assert.deepEqual(result.settings, { seed: 3, topP: 1 });
+});
+
+test("replacing a reading while its playback clear is pending settles both readings", async () => {
+  const { readback, sockets, ports } = readbackHarness();
+  const first = readback.speak({ selection, catalogueRevision: "rev", text: "First." });
+  await until(() => sockets[0]?.sent.length);
+  const socket = sockets[0]!;
+  const requestId = socket.sent[0].requestId;
+  socket.event({ type: "sample-accepted", requestId, playbackId: 1 });
+  socket.event({ type: "playback", requestId, action: "start", playbackId: 1, sampleRate: 22_050 });
+  const second = readback.speak({ selection, catalogueRevision: "rev", text: "Second." });
+  await until(() => socket.sent.some((event) => event.type === "select-output" && event.requestId !== requestId));
+  ports[0]!.onmessage!({ data: { kind: "drained", playbackId: 1, audioTime: 10.5 } });
+  const next = socket.sent.at(-1).requestId;
+  socket.event({ type: "sample-error", requestId: next, code: "SETTINGS_INVALID", message: "bad setting" });
+  assert.equal((await second).outcome, "error");
+  const result = await Promise.race([first, new Promise<null>((resolve) => setTimeout(() => resolve(null), 1_100))]);
+  assert.equal(result?.outcome, "stopped", "replacing a job must resolve the reading it displaced");
+});
+
+test("a reading keeps its selected reference and retry transcript when the voice copy panel changes", async () => {
+  const harness = pageHarness({ models: QWEN_MODELS });
+  const { page, spoken } = harness;
+  await page.start();
+  await pickModel(harness, "qwen3-tts-0.6b-base");
+  harness.elements.get("output-voice").value = "recording";
+  page.render();
+  page.voiceCopy.recording = { samples: new Float32Array(48_000), rate: 48_000, id: "a".repeat(64) };
+  page.voiceCopy.transcript.value = "The original words.";
+  page.transcribe = async () => {
+    harness.elements.get("output-voice").value = "ref-10s";
+    page.render();
+    return { text: "Hello.", finalMs: 1 };
+  };
+  await take(page, 100);
+  await until(() => page.run?.output);
+  assert.equal(spoken[0].selection.voice, "recording");
+  assert.equal(spoken[0].reference?.id, "a".repeat(64), "the panel's new voice must not replace the take's reference");
+  page.voiceCopy.fetch = async () => ({ ok: true, json: async () => ({ id: "b".repeat(64) }) });
+  page.voiceCopy.transcript.value = "Edited after sending.";
+  assert.equal(JSON.stringify(await spoken[0].restore()), JSON.stringify({ id: "b".repeat(64), transcript: "The original words." }));
+  page.voiceCopy.recording = null;
+  assert.equal(await spoken[0].restore(), null, "Forget must prevent a retry from restoring that recording");
+});
+
+test("voice copy reaches the host through the page's own fetch: Listen on a pick, upload and Forget", async () => {
+  const harness = pageHarness({ models: QWEN_MODELS });
+  await harness.page.start();
+  await pickModel(harness, "qwen3-tts-0.6b-base");
+  const copy = harness.page.voiceCopy;
+  const pick = harness.elements.get("output-voice").value;
+  await copy.hear();
+  assert.equal(copy.problem, "");
+  assert.deepEqual(harness.played, [2_400], "the pick plays");
+  copy.recording = { samples: new Float32Array(48_000), rate: 48_000, id: null };
+  assert.equal(await copy.upload(), "d".repeat(64));
+  await copy.discard();
+  assert.equal(copy.problem, "");
+  assert.deepEqual(harness.posted.filter((url) => url.startsWith("/speech-output/")).slice(-3), [
+    `/speech-output/picks/qwen3-tts-0.6b-base/${pick}`, "/speech-output/references?sampleRate=48000", `/speech-output/references/${"d".repeat(64)}`]);
+});
+
+test("Forget removes a reference even when its upload is still in flight", async () => {
+  const harness = pageHarness({ models: QWEN_MODELS });
+  await harness.page.start();
+  const copy = harness.page.voiceCopy;
+  const id = "c".repeat(64);
+  const deleted: string[] = [];
+  let uploaded!: () => void;
+  copy.recording = { samples: new Float32Array(48_000), rate: 48_000, id: null };
+  copy.fetch = async (url: string, { method }: { method: string }) => {
+    if (method === "DELETE") { deleted.push(url); return { ok: true }; }
+    await new Promise<void>((resolve) => { uploaded = resolve; });
+    return { ok: true, json: async () => ({ id }) };
+  };
+  const upload = copy.upload();
+  await copy.discard();
+  uploaded();
+  assert.equal(await upload, null, "an upload that was forgotten cannot become usable");
+  assert.deepEqual(deleted, [`/speech-output/references/${id}`]);
+  assert.equal(copy.recording, null);
+});
+
+test("reference recording reuses its stopped capture graph across repeated recordings", async () => {
+  const harness = pageHarness({ models: QWEN_MODELS });
+  await harness.page.start();
+  const copy = harness.page.voiceCopy;
+  for (let index = 0; index < 3; ++index) {
+    await copy.start();
+    await copy.stop();
+  }
+  assert.equal(harness.microphones.length, 1, "each capture owns a worklet connected to the long lived context");
+  assert.equal(harness.microphones[0].open, false, "the stopped graph retains no microphone stream");
+});
+
+test("reference capture waits for the previous worklet flush before it can record again", async (t) => {
+  const harness = pageHarness({ models: QWEN_MODELS });
+  await harness.page.start();
+  const copy = harness.page.voiceCopy;
+  t.after(() => clearInterval(copy.ticker));
+  await copy.start();
+  const capture = copy.capture;
+  let flushed!: (take: unknown) => void;
+  capture.endTake = () => new Promise((resolve) => { flushed = resolve; });
+  const stopped = copy.stop();
+  let restarted = false;
+  capture.beginTake = () => { restarted = true; };
+  await copy.start();
+  flushed({ samples: new Float32Array(8_000) });
+  await stopped;
+  assert.equal(restarted, false, "a pending flush still owns the capture graph");
+});
+
+test("reference recording failures stay visible after the panel refreshes", async () => {
+  const harness = pageHarness({ models: QWEN_MODELS });
+  await harness.page.start();
+  await pickModel(harness, "qwen3-tts-0.6b-base");
+  harness.elements.get("output-voice").value = "recording";
+  harness.page.render();
+  const copy = harness.page.voiceCopy;
+  const audio = copy.audio;
+  copy.audio = async () => { throw new Error("permission denied"); };
+  await copy.start();
+  assert.match(copy.status.textContent, /Microphone unavailable: permission denied/);
+  copy.recording = { samples: new Float32Array(48_000), rate: 48_000, id: null };
+  copy.fetch = async () => { throw new Error("connection lost"); };
+  await copy.upload();
+  harness.page.render();
+  assert.match(copy.status.textContent, /Upload failed: connection lost/);
+  copy.recording = null;
+  copy.audio = audio;
+  await copy.start();
+  await copy.stop();
+  assert.match(copy.status.textContent, /Too short\. Record at least a second\./);
+});
+
+test("readings that overlap while the speech socket opens share one connection", async () => {
+  const { readback, sockets } = readbackHarness();
+  let connected!: () => void;
+  const pending = new Promise<void>((resolve) => { connected = resolve; });
+  readback.prepare = () => pending;
+  const first = readback.speak({ selection, catalogueRevision: "rev", text: "First." });
+  const second = readback.speak({ selection, catalogueRevision: "rev", text: "Second." });
+  connected();
+  await until(() => sockets.some((socket) => socket.sent.length));
+  const socket = sockets.find((socket) => socket.sent.length)!;
+  socket.event({ type: "sample-error", requestId: socket.sent[0].requestId, code: "SETTINGS_INVALID", message: "bad setting" });
+  assert.equal((await first).outcome, "stopped");
+  assert.equal((await second).outcome, "error");
+  assert.equal(sockets.length, 1, "a superseded preparation must not open a second socket");
 });

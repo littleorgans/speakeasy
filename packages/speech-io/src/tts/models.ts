@@ -106,6 +106,43 @@ const KOKORO_ANE_FILES = [
   { name: "voices/af_heart.bin", bytes: 522_240, sha256: "d583ccff3cdca2f7fae535cb998ac07e9fcb90f09737b9a41fa2734ec44a8f0b" },
 ] as const;
 
+/** Qwen/Qwen3-TTS-12Hz-0.6B-Base@5d839924, every snapshot file but .gitattributes. */
+const QWEN_BASE_06B_FILES = [
+  { name: "README.md", bytes: 3_640, sha256: "181187b6057906bd960bc7f938d0b7a16652509776a0d52c4885b4ae5ccda0ea" },
+  { name: "config.json", bytes: 4_494, sha256: "2e714c787c8edb98b05432685cddb634add2de4d4e645f653d68251ef72ba011" },
+  { name: "generation_config.json", bytes: 245, sha256: "f1b90b4513f3b34c62851049e2492d7b4c5940daf1276f89c82b8ef04127f3aa" },
+  { name: "merges.txt", bytes: 1_671_839, sha256: "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3" },
+  { name: "model.safetensors", bytes: 1_829_344_272, sha256: "180b3b10eb1c9f1b4db7806d5475bae3071c0243c299d49926bab1da3b6946f6" },
+  { name: "preprocessor_config.json", bytes: 127, sha256: "efdde1022ea9d76928bf7a9cd53139138f5ba2e466e837f08f6105ab1af1c119" },
+  { name: "speech_tokenizer/config.json", bytes: 2_336, sha256: "ee65bb901c876664ab8707c487157aa1a6ee57c65969b28fb5ec9dc211e68167" },
+  { name: "speech_tokenizer/configuration.json", bytes: 76, sha256: "6bc26d64eb5024b4d1dab5a52371958b429256d6c9d59787f1f5294a54e0cebd" },
+  { name: "speech_tokenizer/model.safetensors", bytes: 682_293_092, sha256: "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258" },
+  { name: "speech_tokenizer/preprocessor_config.json", bytes: 234, sha256: "fcb3805e597e786d4067706e602f6688524640f8d3396790e2e09b5942fcbdfb" },
+  { name: "tokenizer_config.json", bytes: 7_344, sha256: "dc3c31c3bdaedd5016382bb3cbe07323026775ad51f5a4fb564505992ae4a670" },
+  { name: "vocab.json", bytes: 2_776_833, sha256: "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910" },
+] as const;
+/** Qwen/Qwen3-TTS-12Hz-1.7B-Base@fd4b2543, every snapshot file but .gitattributes. */
+const QWEN_BASE_17B_FILES = [
+  { name: "README.md", bytes: 57_817, sha256: "621b7e88f1867bc03d817176fc1f7f55f4b5a70654b2a07fdcda1e169efb024b" },
+  { name: "config.json", bytes: 4_494, sha256: "b4f01752d15a488abde3e1ab44723ae4f4b9e68a4037257b098b3737893cc1f9" },
+  { name: "generation_config.json", bytes: 245, sha256: "f1b90b4513f3b34c62851049e2492d7b4c5940daf1276f89c82b8ef04127f3aa" },
+  { name: "merges.txt", bytes: 1_671_839, sha256: "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3" },
+  { name: "model.safetensors", bytes: 3_857_413_744, sha256: "38fc7fc51c5e776e840414b6fd443962e9411b9654888fd7913e4da643cb857c" },
+  { name: "preprocessor_config.json", bytes: 127, sha256: "efdde1022ea9d76928bf7a9cd53139138f5ba2e466e837f08f6105ab1af1c119" },
+  { name: "speech_tokenizer/config.json", bytes: 2_336, sha256: "ee65bb901c876664ab8707c487157aa1a6ee57c65969b28fb5ec9dc211e68167" },
+  { name: "speech_tokenizer/configuration.json", bytes: 76, sha256: "6bc26d64eb5024b4d1dab5a52371958b429256d6c9d59787f1f5294a54e0cebd" },
+  { name: "speech_tokenizer/model.safetensors", bytes: 682_293_092, sha256: "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258" },
+  { name: "speech_tokenizer/preprocessor_config.json", bytes: 234, sha256: "fcb3805e597e786d4067706e602f6688524640f8d3396790e2e09b5942fcbdfb" },
+  { name: "tokenizer_config.json", bytes: 7_344, sha256: "dc3c31c3bdaedd5016382bb3cbe07323026775ad51f5a4fb564505992ae4a670" },
+  { name: "vocab.json", bytes: 2_776_833, sha256: "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910" },
+] as const;
+/** The synthetic Aiden picks (references.json in the voice copy research), the same in both payloads. */
+const QWEN_COPY_REFERENCE_FILES = [
+  { name: "references/ref-3s.wav", bytes: 180_524, sha256: "60387aaf96bc7fedef62df7fe25f441d915fe30741273c15cdd83916e433128d" },
+  { name: "references/ref-10s.wav", bytes: 556_844, sha256: "a5af317f48485ae4557ea4b34797971361868f9593e701bcd6646d0d1d6e0603" },
+  { name: "references/ref-20s.wav", bytes: 1_198_124, sha256: "e2cb4360a3828ad11cfa5ec3619f1b2ee411b804f622566e9131e526a35aa79e" },
+] as const;
+
 /** Payload pins from the approved local research records. Explicit provisioning only. */
 export const LOCAL_TTS_MODELS = {
   "piper-kristin-medium": {
@@ -265,12 +302,45 @@ export const LOCAL_TTS_MODELS = {
     note: "Qwen3 TTS 12Hz 0.6B CustomVoice Q8_0 GGUF, sakasegawa/Qwen3-TTS-12Hz-0.6B-CustomVoice-GGUF@fd9df936, 24000 Hz",
     family: "worker",
     sampleRate: 24_000,
-    numSpeakers: 2,
+    numSpeakers: 9,
     hub: { repo: "sakasegawa/Qwen3-TTS-12Hz-0.6B-CustomVoice-GGUF", revision: "fd9df9364613a92a86b4137074bc281204823033" },
     files: [
       { name: "Qwen3-TTS-12Hz-0.6B-CustomVoice-Q8_0.gguf", bytes: 1_213_534_464, sha256: "f606ea3981aa42762b16db9a94826d2d560eb60f0b102001618f40d5a2f78cc6" },
       { name: "README.md", bytes: 7_634, sha256: "cb6328d302edd8b282b347b8f4fa6f5469f2f42cf3693924408edd132eb596c3" },
     ],
+    attribution: ["README.md"],
+  },
+  "qwen3-tts-1.7b": {
+    name: "qwen3-tts-1.7b-customvoice-q8-a72e6c65",
+    note: "Qwen3 TTS 12Hz 1.7B CustomVoice Q8_0 GGUF, sakasegawa/Qwen3-TTS-12Hz-1.7B-CustomVoice-GGUF@a72e6c65, 24000 Hz",
+    family: "worker",
+    sampleRate: 24_000,
+    numSpeakers: 9,
+    hub: { repo: "sakasegawa/Qwen3-TTS-12Hz-1.7B-CustomVoice-GGUF", revision: "a72e6c6575d67652488cdffc1c863215a9899978" },
+    files: [
+      { name: "Qwen3-TTS-12Hz-1.7B-CustomVoice-Q8_0.gguf", bytes: 2_287_780_352, sha256: "1bc0ef69547c003507b6536639a6080c8856382f4d0963b15d4475528330592d" },
+      { name: "README.md", bytes: 7_569, sha256: "5717a9648781fd0e6735cc659297846f09d985497ceebfeebb73da1570b72c60" },
+    ],
+    attribution: ["README.md"],
+  },
+  "qwen3-tts-0.6b-base": {
+    name: "qwen3-tts-0.6b-base-5d839924",
+    note: "Qwen3 TTS 12Hz 0.6B Base for voice copy, Qwen/Qwen3-TTS-12Hz-0.6B-Base@5d839924, three synthetic references, 24000 Hz",
+    family: "worker",
+    sampleRate: 24_000,
+    numSpeakers: 4,
+    hub: { repo: "Qwen/Qwen3-TTS-12Hz-0.6B-Base", revision: "5d83992436eae1d760afd27aff78a71d676296fc" },
+    files: [...QWEN_BASE_06B_FILES, ...QWEN_COPY_REFERENCE_FILES],
+    attribution: ["README.md"],
+  },
+  "qwen3-tts-1.7b-base": {
+    name: "qwen3-tts-1.7b-base-fd4b2543",
+    note: "Qwen3 TTS 12Hz 1.7B Base for voice copy, Qwen/Qwen3-TTS-12Hz-1.7B-Base@fd4b2543, three synthetic references, 24000 Hz",
+    family: "worker",
+    sampleRate: 24_000,
+    numSpeakers: 4,
+    hub: { repo: "Qwen/Qwen3-TTS-12Hz-1.7B-Base", revision: "fd4b254389122332181a7c3db7f27e918eec64e3" },
+    files: [...QWEN_BASE_17B_FILES, ...QWEN_COPY_REFERENCE_FILES],
     attribution: ["README.md"],
   },
   "kokoro-ane-heart": {

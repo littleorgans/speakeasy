@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import type { SpeechOutputConfig } from "@speakeasy/speech-io/providers";
 import { DEFAULT_LOCAL_OUTPUT, LOCAL_OUTPUT_MODELS, LOCAL_OUTPUT_REGISTRY } from "../../speech-io/src/tts/catalogue.ts";
 import { LocalSpeechOutputFactory } from "../../speech-io/src/tts/factory.ts";
 import type { AudioSegment } from "../../speech-io/src/tts/contract.ts";
@@ -43,6 +44,7 @@ function harness(t: TestContext, options: {
   timeoutMs?: number;
   apiProvider?: "cartesia" | "openai";
   combinedPolicy?: boolean;
+  references?: SpeechOutputSessionOptions["references"];
 } = {}) {
   const events: SpeechOutputEvent[] = [];
   const packets: Uint8Array[] = [];
@@ -67,7 +69,7 @@ function harness(t: TestContext, options: {
   const serviceCatalogue = () => state.useCombinedRevision && providers
     ? { ...catalogue, revision: providers.catalogue().revision } : catalogue;
   const session = new SpeechOutputSession({
-    sessionId: "protected-session", catalogue: serviceCatalogue, policy,
+    sessionId: "protected-session", catalogue: serviceCatalogue, policy, references: options.references,
     createOutput: async (config, context) => {
       ++state.created;
       contexts.push(context);
@@ -455,4 +457,58 @@ test("a voice's load on opening is reported as it starts producing and in the co
   const producing = warm.events.find((event) => event.type === "sample-phase" && event.phase === "producing");
   assert.ok(producing?.type === "sample-phase" && producing.loadMs === undefined);
   assert.equal(warm.completions()[0].timing.loadMs.status, "unavailable");
+});
+
+test("a reading's voice settings are resolved, echoed and passed on; unoffered values never reach a voice", async (t) => {
+  const h = harness(t);
+  const qwen: SpeechOutputConfig = { schema: 1, provider: { kind: "local" }, model: "qwen3-tts-1.7b", voice: "aiden", speed: 1 };
+  h.speak("tuned", qwen, { settings: { seed: 7, temperature: 0.7, instructions: "Calm." } });
+  await until(() => h.state.created === 1);
+  const accepted = h.events.find((event) => event.type === "sample-accepted");
+  assert.ok(accepted?.type === "sample-accepted");
+  assert.equal(accepted.settings.seed, 7);
+  assert.equal(accepted.settings.firstClause, false, "defaults filled in");
+  assert.equal(accepted.settings.topP, 1);
+  assert.deepEqual(h.contexts[0]!.execution, { settings: accepted.settings });
+  h.send({ type: "cancel-sample", requestId: "tuned" });
+  await until(() => !h.state.leaseHeld);
+  for (const [requestId, selection, extra, code] of [
+    ["unoffered", qwen, { settings: { temperature: 0.6 } }, "SETTINGS_INVALID"],
+    ["unknown", qwen, { settings: { speed: 2 } }, "SETTINGS_INVALID"],
+    ["stepped-aside", qwen, { settings: { greedy: true, topK: 10 } }, "SETTINGS_INVALID"],
+    ["small", { ...qwen, model: "qwen3-tts-0.6b" }, { settings: { instructions: "Calm." } }, "SETTINGS_INVALID"],
+    ["kokoro", h.catalogue.default, { settings: { seed: 2 } }, "SETTINGS_INVALID"],
+    ["api", apiOutput(h.catalogue), { settings: { seed: 2 } }, "CONFIG_UNSUPPORTED"],
+    ["pick", { ...qwen, model: "qwen3-tts-0.6b-base", voice: "ref-3s" }, { reference: { id: "a".repeat(64), transcript: "x" } },
+      "COMMAND_INVALID"],
+    ["recording", { ...qwen, model: "qwen3-tts-0.6b-base", voice: "recording" }, {}, "REFERENCE_MISSING"],
+  ] as const) {
+    h.speak(requestId, selection, extra);
+    const error = h.events.at(-1);
+    assert.ok(error?.type === "sample-error" && error.code === code, `${requestId}: ${JSON.stringify(error)}`);
+  }
+  assert.equal(h.state.created, 1, "refused before any voice opens");
+  h.speak("plain");
+  await until(() => h.state.created === 2);
+  assert.equal(h.contexts[1]!.execution, undefined, "a model without settings speaks as before");
+});
+
+test("My recording reads from the host's store with its transcript; a forgotten one is missing", async (t) => {
+  const stored = { sha256: "b".repeat(64), samples: Float32Array.of(0.25), sampleRate: 48_000 };
+  const h = harness(t, { references: { get: (id) => id === stored.sha256 ? stored : undefined } });
+  const recording: SpeechOutputConfig = { schema: 1, provider: { kind: "local" }, model: "qwen3-tts-0.6b-base",
+    voice: "recording", speed: 1 };
+  h.speak("forgotten", recording, { reference: { id: "c".repeat(64), transcript: "Hello." } });
+  h.speak("blank", recording, { reference: { id: stored.sha256, transcript: " " } });
+  assert.deepEqual(h.events.filter((event) => event.type === "sample-error").map((event) => event.code),
+    ["REFERENCE_MISSING", "SETTINGS_INVALID"], "words and voice needs the transcript");
+  h.speak("copy", recording, { reference: { id: stored.sha256, transcript: " Hello there. " } });
+  await until(() => h.state.created === 1);
+  assert.deepEqual(h.contexts[0]!.execution?.reference, { ...stored, transcript: "Hello there." });
+  assert.equal(h.contexts[0]!.execution?.settings.maxSeconds, 20);
+  h.send({ type: "cancel-sample", requestId: "copy" });
+  await until(() => !h.state.leaseHeld);
+  h.speak("voice-only", recording, { settings: { copyMode: "voice-only" }, reference: { id: stored.sha256, transcript: "" } });
+  await until(() => h.state.created === 2);
+  assert.equal(h.contexts[1]!.execution?.reference?.transcript, null);
 });

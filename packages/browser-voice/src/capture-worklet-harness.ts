@@ -40,10 +40,10 @@ export function loadCapture(
 ): {
   context: { currentFrame: number };
   messages: FrameMessage[];
-  Processor: new () => CaptureInstance;
+  Processor: new (options?: { processorOptions?: { targetRate?: number } }) => CaptureInstance;
 } {
   const messages: FrameMessage[] = [];
-  let registered: (new () => CaptureInstance) | undefined;
+  let registered: (new (options?: { processorOptions?: { targetRate?: number } }) => CaptureInstance) | undefined;
   class AudioWorkletProcessorFake {
     readonly port: CaptureInstance["port"] & {
       postMessage(message: FrameMessage): void;
@@ -60,7 +60,7 @@ export function loadCapture(
     Math,
     sampleRate,
     currentFrame: 0,
-    registerProcessor: (_name: string, Processor: new () => CaptureInstance) => {
+    registerProcessor: (_name: string, Processor: new (options?: { processorOptions?: { targetRate?: number } }) => CaptureInstance) => {
       registered = Processor;
     },
   }) as { currentFrame: number };

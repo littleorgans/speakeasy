@@ -6,6 +6,7 @@
     <meta name="theme-color" content="#111213" />
     <title>Speak Easy · Road test</title>
     <link rel="stylesheet" href="/road-test.css" />
+    <link rel="stylesheet" href="/voice-settings.css" />
     <script src="/road-test.js" type="module"></script>
   </head>
   <body>
@@ -33,6 +34,8 @@
             <select id="output-voice" aria-label="Voice"></select>
           </span>
           <span class="quiet card" id="output-card"></span>
+          <div class="voice-settings" id="voice-settings" aria-label="Voice settings" hidden></div>
+          <div class="voice-copy" id="voice-copy" aria-label="Voice copy" hidden></div>
         </div>
       </section>
 
@@ -58,6 +61,7 @@
           <button id="replay-take" type="button" disabled>Replay my take</button>
           <button id="replay-talk-over" type="button" hidden>Replay my talk over</button>
           <button id="replay-voice" type="button" disabled>Replay voice</button>
+          <button id="read-again" type="button" disabled>Read again</button>
         </p>
       </section>
 

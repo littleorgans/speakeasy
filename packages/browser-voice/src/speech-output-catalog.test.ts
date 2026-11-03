@@ -51,3 +51,15 @@ test("API eligibility uses injected presence only and never exposes unconfigured
   assert.notEqual(absent.revision, present.revision);
   assert.equal(present.revision, buildSpeechOutputCatalogue({ local: local(), apiModels: [api], configured: () => true }).revision);
 });
+
+test("Qwen models publish their voice settings and voice copy voices their origin and pinned transcript", () => {
+  const catalogue = buildSpeechOutputCatalogue({ local: local() });
+  const model = (id: string) => catalogue.models.find((entry) => entry.id === id)!;
+  assert.ok(model("qwen3-tts-1.7b").settings?.some((setting) => setting.id === "instructions"));
+  assert.equal(model("kokoro-v1.0").settings, undefined);
+  const voices = model("qwen3-tts-0.6b-base").voices;
+  assert.deepEqual(voices.map((voice) => voice.origin), ["synthetic", "synthetic", "synthetic", "recording"]);
+  assert.ok(voices[1]!.transcript?.startsWith("This is a calm and steady"));
+  assert.equal(voices[3]!.transcript, undefined);
+  assert.equal(JSON.stringify(catalogue).includes("references/"), false, "no payload file names");
+});

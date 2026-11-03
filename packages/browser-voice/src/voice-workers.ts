@@ -1,9 +1,12 @@
 import { join } from "node:path";
+import { decodeWavSamples } from "../../speech-io/src/bench/wav.ts";
 import { LOCAL_OUTPUT_MODELS, type LocalOutputModelId } from "../../speech-io/src/tts/catalogue.ts";
 import type { WorkerTtsSynth } from "../../speech-io/src/tts/factory.ts";
 import { createTtsFrontend, type TtsFrontend } from "../../speech-io/src/tts/frontend.ts";
 import { LOCAL_TTS_MODELS, payloadDir, type WorkerTtsModel } from "../../speech-io/src/tts/models.ts";
-import { PythonSetupWorker } from "./setup-workers.ts";
+import type { VoiceReference } from "../../speech-io/src/tts/synth.ts";
+import { pcmDigest, PythonSetupWorker } from "./setup-workers.ts";
+import { readPinnedPick } from "./voice-references.ts";
 
 /** Machine paths for one worker voice, from the setup runtime file. */
 export type VoiceRuntimeLocation = {
@@ -18,7 +21,9 @@ const PART_SEPARATOR = "\u001f";
  * one speak request to the Python worker, which attests the registry's pins
  * and loads the voice here, so its load counts as the voice's start. The pipeline's speaker index is the
  * voice's position in the registry. A phoneme runtime receives the segment as
- * Piper Plus phoneme characters, one part per frontend sentence.
+ * Piper Plus phoneme characters, one part per frontend sentence. A voice
+ * copy pick is a pinned reference in the payload, read and decoded once; the
+ * owner's recording arrives on the request.
  */
 export async function createWorkerVoiceSynth(modelId: LocalOutputModelId, location: VoiceRuntimeLocation, root: string,
   workerPath?: string): Promise<WorkerTtsSynth> {
@@ -31,6 +36,7 @@ export async function createWorkerVoiceSynth(modelId: LocalOutputModelId, locati
     expectedIdentity: { setupId: modelId },
     loadTimeoutMs: location.loadTimeoutMs, operationTimeoutMs: location.operationTimeoutMs });
   await worker.load();
+  const picks = new Map<string, Promise<VoiceReference>>();
   return {
     numSpeakers: payload.numSpeakers,
     sampleRate: payload.sampleRate,
@@ -40,7 +46,9 @@ export async function createWorkerVoiceSynth(modelId: LocalOutputModelId, locati
       const start = performance.now();
       const text = frontend ? phonemeParts(frontend, request.text) : request.text;
       // Text with nothing to say renders as silence, as the sherpa frontend does.
-      const result = text ? await worker.speak(text, voice.id, request.speed ?? 1)
+      const reference = "file" in voice ? await pinnedReference(picks, payload, root, voice) : request.reference;
+      const result = text ? await worker.speak(text, voice.id, request.speed ?? 1, undefined,
+        { ...(request.settings ? { settings: request.settings } : {}), ...(reference ? { reference } : {}) })
         : { samples: new Float32Array(0), sampleRate: payload.sampleRate };
       if (result.sampleRate !== payload.sampleRate) throw new Error("Voice worker sample rate differs from its pin");
       const totalSynthMs = performance.now() - start;
@@ -50,6 +58,21 @@ export async function createWorkerVoiceSynth(modelId: LocalOutputModelId, locati
     },
     close: () => worker.close(),
   };
+}
+
+/** A pick's pinned WAV, checked against its pin, as reference PCM at the voice's rate with its transcript. */
+function pinnedReference(picks: Map<string, Promise<VoiceReference>>, payload: WorkerTtsModel, root: string,
+  voice: { id: string; file: string; transcript: string }): Promise<VoiceReference> {
+  let pick = picks.get(voice.id);
+  if (!pick) {
+    pick = (async () => {
+      const samples = decodeWavSamples(await readPinnedPick(payload, root, voice.file), payload.sampleRate);
+      return { sha256: pcmDigest(samples), samples, sampleRate: payload.sampleRate, transcript: voice.transcript };
+    })();
+    pick.catch(() => picks.delete(voice.id));
+    picks.set(voice.id, pick);
+  }
+  return pick;
 }
 
 function phonemeFrontend(voiceId: NonNullable<WorkerTtsModel["phonemesFrom"]>, root: string): Promise<TtsFrontend> {

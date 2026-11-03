@@ -1,12 +1,14 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
-import { PythonSetupWorker, SetupWorkers, MAX_WORKER_PCM_BYTES, MAX_WORKER_TEXT_BYTES } from "./setup-workers.ts";
+import { encodeWavFloat32 } from "../../speech-io/src/bench/wav.ts";
+import { pcmDigest, PythonSetupWorker, SetupWorkers, MAX_WORKER_PCM_BYTES, MAX_WORKER_TEXT_BYTES } from "./setup-workers.ts";
+import { readPinnedPick } from "./voice-references.ts";
 import { createWorkerVoiceSynth } from "./voice-workers.ts";
 import { createCanonicalPcm, sha256, type SetupExecution, type SetupLoadResult } from "./setup-protocol.ts";
 import { CPU_PRESETS, type CpuReady } from "./transcriber.ts";
@@ -29,6 +31,8 @@ class Fake:
         self.options = options
         self.calls = 0
         mode = options.get("mode", "")
+        # A voice copy fake takes settings and a reference; every other voice refuses both in the worker.
+        self.takes_settings = self.takes_reference = mode == "copy"
     def mark(self):
         path = self.options.get("marker")
         if path:
@@ -72,7 +76,11 @@ class Fake:
         self.fed = (0 if start else getattr(self, "fed", 0)) + len(samples)
         chosen = " " + json.dumps(settings, sort_keys=True) if settings else ""
         return {"stable": " heard %d" % self.fed, "tentative": " maybe" + chosen, "processingMs": 2}
-    def speak(self, text, voice, speed):
+    def speak(self, text, voice, speed, settings=None, reference=None):
+        if mode == "copy":
+            pcm = struct.pack("<4f", (settings or {}).get("seed", -1), reference["sampleRate"] if reference else -1,
+                              len(reference["samples"]) if reference else -1, len((reference or {}).get("transcript") or ""))
+            return {"samples": pcm, "sampleRate": 24000, "processingMs": 1}
         if mode == "badAudio":
             return {"samples": b"\\0\\0\\xc0\\x7f", "sampleRate": 24000, "processingMs": 1}
         pcm = struct.pack("<4f", len(text), speed, -0.0, len(voice))
@@ -544,6 +552,36 @@ test("a worker voice speaks one segment and returns its exact PCM, checked again
     t.after(() => failing.close());
     await assert.rejects(failing.speak("Hi.", "af_heart", 1), mode === "badAudio" ? /finite/ : /invalid voice audio/);
   }
+});
+
+test("a voice copy speak carries settings in its header and the reference as a hashed body", async (t) => {
+  const voice = (mode: string) => new PythonSetupWorker({ setupId: "qwen3-tts-0.6b-base", pythonPath: PYTHON, workerPath: fixture,
+    backendOptions: { mode }, expectedIdentity: { revision: "pinned" }, loadTimeoutMs: 3000, operationTimeoutMs: 3000 });
+  const samples = Float32Array.of(0.5, -0.25, 0.125);
+  const reference = { sha256: pcmDigest(samples), samples, sampleRate: 48_000, transcript: "Hello." };
+  const copy = voice("copy");
+  t.after(() => copy.close());
+  const read = await copy.speak("Hi.", "recording", 1, undefined, { settings: { seed: 7 }, reference });
+  assert.deepEqual([...read.samples], [7, 48_000, 3, 6]);
+  assert.deepEqual([...(await copy.speak("Hi.", "ref-3s", 1, undefined, { settings: { seed: 2 } })).samples], [2, -1, -1, 0]);
+  await assert.rejects(copy.speak("Hi.", "recording", 1, undefined, { reference: { ...reference, sha256: "0".repeat(64) } }),
+    /reference identity mismatch/, "the host refuses a reference whose PCM differs from its id");
+  const plain = voice("");
+  t.after(() => plain.close());
+  await assert.rejects(plain.speak("Hi.", "ref-3s", 1, undefined, { settings: { seed: 2 } }), /takes no settings/);
+  await assert.rejects(plain.speak("Hi.", "ref-3s", 1, undefined, { reference }), /takes no reference/);
+});
+
+test("a voice copy pick is read only when its bytes match the payload pin", async () => {
+  const bytes = encodeWavFloat32(Float32Array.of(0.5), 24_000);
+  await mkdir(join(directory, "picks", "references"), { recursive: true });
+  await writeFile(join(directory, "picks", "references", "pick.wav"), bytes);
+  const payload = { name: "picks", note: "", family: "worker" as const, sampleRate: 24_000, numSpeakers: 1, attribution: [],
+    files: [{ name: "references/pick.wav", bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") }] };
+  assert.deepEqual(await readPinnedPick(payload, directory, "references/pick.wav"), Buffer.from(bytes));
+  await assert.rejects(readPinnedPick({ ...payload, files: [{ ...payload.files[0]!, sha256: "0".repeat(64) }] }, directory,
+    "references/pick.wav"), /differs from its pin/);
+  await assert.rejects(readPinnedPick(payload, directory, "references/other.wav"));
 });
 
 test("a worker voice synth maps the pipeline's speaker to the registry voice and passes the pins", async (t) => {

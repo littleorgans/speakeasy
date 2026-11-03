@@ -144,3 +144,19 @@ test("normal frames match the pre flush worklet byte for byte", () => {
     assert.deepEqual([messages.length, digest.digest("hex")], expected, `${rate} Hz`);
   }
 });
+
+test("a target rate equal to the context's passes every sample unchanged, as a voice copy recording needs", () => {
+  const { context, messages, Processor } = loadCapture(48_000);
+  const worklet = new Processor({ processorOptions: { targetRate: 48_000 } });
+  const input = Float32Array.from({ length: 128 * 10 }, (_, index) => Math.sin(index / 7) / 2);
+  for (let block = 0; block < 10; block += 1) {
+    context.currentFrame = block * 128;
+    worklet.process([[input.slice(block * 128, (block + 1) * 128)]], [[new Float32Array(128)]]);
+  }
+  flush(worklet);
+  assert.deepEqual(messages.slice(0, -1).map((message) => message.samples.length), [960]);
+  const out = new Float32Array(messages.reduce((sum, message) => sum + message.samples.length, 0));
+  let offset = 0;
+  for (const message of messages) { out.set(message.samples, offset); offset += message.samples.length; }
+  assert.deepEqual(out, input, "no sample resampled, dropped or added");
+});
