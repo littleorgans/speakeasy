@@ -79,9 +79,14 @@ func parseNames(_ json: String) throws -> [String] {
     var names: [String] = []
     for item in array {
         guard let raw = item as? String else { throw Failure.badRequest }
-        let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Rust trims Unicode White_Space; Foundation also trims U+200B, which the host preserves.
+        var scalars = raw.unicodeScalars[...]
+        while scalars.first?.properties.isWhitespace == true { scalars.removeFirst() }
+        while scalars.last?.properties.isWhitespace == true { scalars.removeLast() }
+        let name = String(scalars)
         guard !name.contains("\0"), name.utf8.count <= maxNameBytes else { throw Failure.badRequest }
-        if !name.isEmpty, !names.contains(name) { names.append(name) }
+        // Swift String equality folds canonical equivalents; the hosts and hex compare exact bytes.
+        if !name.isEmpty, !names.contains(where: { $0.utf8.elementsEqual(name.utf8) }) { names.append(name) }
     }
     guard names.count <= maxNames else { throw Failure.badRequest }
     return names
