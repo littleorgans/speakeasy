@@ -32,7 +32,7 @@ HEX_MODEL = {"file": "parakeet-unified-en-0.6b-Q8_0.gguf", "backend": "metal",
 HEX_LIVE = {"setting": "lookaheadMs", "default": 2080, "values": {2080: (1040, 1040), 1120: (560, 560), 480: (160, 320)}}
 APPLE_LIVE = {"setting": "fastResults", "default": 0, "values": {0: (0, 0), 1: (1, 0)}}
 # Cohere's one final setting (src/final-settings.ts): the logit bias toward its
-# five names, sent as the worker's `B` take; Off sends today's `T` take.
+# six names, sent as the worker's `B` take; Off sends today's `T` take.
 COHERE_FINAL = {"setting": "namesBias", "default": 0, "values": (0, 1.25, 2.5)}
 # Every setup a native worker runs: its model pin, worker mode and pipeline.
 SETUPS = {

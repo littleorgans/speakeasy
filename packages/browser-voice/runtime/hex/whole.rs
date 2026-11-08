@@ -12,12 +12,12 @@ const MINIMUM_SAMPLES: usize = 24_000;
 const TRAILING_SAMPLES: usize = 6_400;
 const COHERE_WINDOW: usize = 560_000;
 const NAMES: [&str; 6] = ["Claude", "GPT", "Grok", "Codex", "TM", "whoami"];
-/// Cohere's biased names, Grok Claude Codex GPT TM, as the pinned GGUF's SentencePiece ids
-/// without then with the leading space marker (ct-pbias tokenizations.json); the patch
-/// biases every prefix of each.
-const NAME_SEQUENCES: [&[i32]; 10] = [&[13842, 564, 13788], &[13814, 750, 1974], &[13814, 2295, 13809],
-    &[13842, 13815, 13806], &[13806, 13816], &[710, 564, 13788], &[627, 750, 1974], &[627, 2295, 13809],
-    &[710, 13815, 13806], &[598, 13816]];
+/// Cohere's biased names, Grok Claude Codex GPT TM Hibiki, as the pinned GGUF's SentencePiece
+/// ids without then with the leading space marker (ct-pbias tokenizations.json; Hibiki from
+/// the GGUF's embedded vocabulary); the patch biases every prefix of each.
+const NAME_SEQUENCES: [&[i32]; 12] = [&[13842, 564, 13788], &[13814, 750, 1974], &[13814, 2295, 13809],
+    &[13842, 13815, 13806], &[13806, 13816], &[13837, 838, 1720, 13770], &[710, 564, 13788], &[627, 750, 1974],
+    &[627, 2295, 13809], &[710, 13815, 13806], &[598, 13816], &[694, 838, 1720, 13770]];
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Whole { Vocabulary, Cohere }

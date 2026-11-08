@@ -9,7 +9,7 @@ test("Cohere's one final setting is Names: Off by default, then Gentle and Stron
   assert.deepEqual(FINAL_SETUPS.map((setup) => setup.setupId), [COHERE]);
   const [names] = finalSetup(COHERE)!.settings;
   assert.equal(names!.label, "Names");
-  assert.equal(names!.note, "Biases Cohere toward Grok, Claude, Codex, GPT, TM; can turn similar words into these names");
+  assert.equal(names!.note, "Biases Cohere toward Grok, Claude, Codex, GPT, TM, Hibiki; can turn similar words into these names");
   assert.deepEqual(names!.options.map((option) => [option.label, option.value]), [["Off", 0], ["Gentle", 1.25], ["Strong", 2.5]]);
   assert.equal(names!.default, 0, "Off is today's output");
   const pinned = getSetup(COHERE).controls.namesBias as { default: number; values: number[] };
