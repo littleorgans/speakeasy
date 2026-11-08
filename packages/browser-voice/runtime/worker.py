@@ -25,6 +25,7 @@ BACKENDS = {
     "cohere/transcribe": "native_asr",
     "nemotron/streaming": "nemotron",
     "apple/speech": "native_asr",
+    "apple/dictation": "native_asr",
     "kokoro-mlx-bf16": "kokoro_mlx",
     "pocket-18m": "pocket_18m",
     "piper-kristin-split": "native_voice",

@@ -26,7 +26,7 @@ def setUpModule():
 
 FAKE_WORKER = """#!{python}
 import json, struct, sys
-mode = sys.argv[2:]
+mode = [arg for arg in sys.argv[1:] if arg.startswith("--")]
 print(json.dumps({{"kind": "ready", "backend": "{backend}", "device": "MTL0", "variant": "{variant}", "loadMs": 5}}), flush=True)
 fed = 0
 while True:
@@ -179,6 +179,26 @@ class HexUnifiedTest(unittest.TestCase):
         self.assertEqual(backend.transcribe(samples)["text"], "heard 3")
         backend.close()
         self.assertEqual(worker.BACKENDS["apple/speech"], "native_asr")
+
+    def test_apple_dictation_runs_the_same_worker_as_a_module_with_frequent_finalization_on_request(self):
+        backend = hexu.Backend({"setupId": "apple/dictation", "runnerPath": str(self.runner("dictation-transcriber", "apple"))})
+        self.assertEqual(backend.load()["modelSha256"], None)
+        samples = memoryview(array.array("f", [0.1] * 3).tobytes()).cast("f")
+        self.assertEqual(backend.transcribe(samples)["text"], "heard 3 --module=dictation")
+        self.assertEqual(backend.feed(samples, True)["tentative"], " at 0+0", "Off by default")
+        self.assertEqual(backend.feed(samples, True, {"frequentFinalization": 0})["tentative"], " at 0+0")
+        self.assertEqual(backend.feed(samples, True, {"frequentFinalization": 1})["tentative"], " at 1+0")
+        for bad in ({"fastResults": 1}, {"frequentFinalization": 2}, {"frequentFinalization": True}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                backend.feed(samples, True, bad)
+        backend.close()
+        self.assertEqual(worker.BACKENDS["apple/dictation"], "native_asr")
+
+    def test_apple_dictation_refuses_a_speech_only_worker(self):
+        backend = hexu.Backend({"setupId": "apple/dictation", "runnerPath": str(self.runner("speech-transcriber", "apple"))})
+        with self.assertRaisesRegex(RuntimeError, "identity mismatch"):
+            backend.load()
+        self.assertIsNone(backend.process)
 
     def test_identity_mismatch_retires_the_worker(self):
         backend = self.backend(self.runner(variant="other"))

@@ -1,5 +1,6 @@
 // Apple on device speech for the browser voice host: SpeechAnalyzer with
-// SpeechTranscriber for en-US, on system managed weights. Ported from the
+// SpeechTranscriber, or with `--module=dictation` DictationTranscriber, for
+// en-US, on system managed weights. Ported from the
 // stt-ux apple track (Main.swift makeModule and runTake, Audio.swift
 // feedAudio): volatile results, audio time ranges, 2,560 sample buffers
 // through AnalyzerInputConverter, finalizeAndFinishThroughEndOfInput.
@@ -8,17 +9,20 @@
 // sample count, then f32 LE samples at 16 kHz mono. `T` transcribes a whole
 // take; `S` starts a live stream and `F` feeds it, each answered with the
 // stream's committed and volatile text. `S` carries two i32 LE before its
-// samples: 1 for fast results, then 0. Any other request ends the live
-// stream. stdout: one JSON line at ready, then one per request.
+// samples: 1 for the module's live option (speech: fast results; dictation:
+// frequent finalization), then 0. Any other request ends the live stream.
+// stdout: one JSON line at ready, then one per request.
 import AVFoundation
 import Foundation
 import Speech
 
 enum Failure: String, Error { case unavailable, assetsMissing, unsupportedFormat, badRequest, conversion }
 
-struct Request: Sendable { let op: UInt8; let fast: Bool; let samples: [Float] }
+struct Request: Sendable { let op: UInt8; let live: Bool; let samples: [Float] }
 
 let maxSamples = 1_920_000
+/// Names each dictation take's analyzer is told to expect; Apple documents contextual strings for DictationTranscriber.
+let names = ["Grok", "Claude", "Codex", "GPT", "GPT-SOL", "TM", "Hibiki"]
 let natural = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false)!
 
 func emit(_ record: [String: Any]) {
@@ -48,25 +52,65 @@ func requests() -> AsyncThrowingStream<Request, Error> {
                 let op = head[0], count = Int(little(head, 1, UInt32.self))
                 guard count <= maxSamples, [UInt8(ascii: "T"), UInt8(ascii: "S"), UInt8(ascii: "F")].contains(op),
                       op != UInt8(ascii: "T") || count > 0 else { continuation.finish(throwing: Failure.badRequest); return }
-                var fast = false
+                var live = false
                 if op == UInt8(ascii: "S") {
                     guard let extra = readExact(8) else { break }
-                    fast = little(extra, 0, Int32.self) == 1
+                    live = little(extra, 0, Int32.self) == 1
                 }
                 guard let body = readExact(count * 4) else { break }
                 let samples = body.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
                 guard samples.allSatisfy(\.isFinite) else { continuation.finish(throwing: Failure.badRequest); return }
-                continuation.yield(Request(op: op, fast: fast, samples: samples))
+                continuation.yield(Request(op: op, live: live, samples: samples))
             }
             continuation.finish()
         }.start()
     }
 }
 
-func makeModule(_ locale: Locale, fast: Bool) -> SpeechTranscriber {
-    SpeechTranscriber(locale: locale, transcriptionOptions: [],
-                      reportingOptions: fast ? [.volatileResults, .fastResults] : [.volatileResults],
-                      attributeOptions: [.audioTimeRange])
+/// Each result as its text and whether it is final.
+typealias Results = any AsyncSequence<(text: String, isFinal: Bool), any Error> & Sendable
+
+/// The transcriber this worker runs, chosen once by argv.
+enum Module: Sendable {
+    case speech, dictation
+
+    init(arguments: [String]) throws {
+        switch arguments {
+        case []: self = .speech
+        case ["--module=dictation"]: self = .dictation
+        default: throw Failure.badRequest
+        }
+    }
+
+    var variant: String { self == .speech ? "speech-transcriber" : "dictation-transcriber" }
+    /// The analyzer's general contextual strings; step 1 measured no effect on SpeechTranscriber.
+    var contextualStrings: [String]? { self == .dictation ? names : nil }
+
+    /// The SDK gives DictationTranscriber no isAvailable; its supported locale stands for it.
+    func locale() async -> Locale? {
+        let english = Locale(identifier: "en-US")
+        switch self {
+        case .speech: return SpeechTranscriber.isAvailable ? await SpeechTranscriber.supportedLocale(equivalentTo: english) : nil
+        case .dictation: return await DictationTranscriber.supportedLocale(equivalentTo: english)
+        }
+    }
+
+    /// A fresh transcriber with or without the live option, and its results.
+    func make(_ locale: Locale, live: Bool) -> (any SpeechModule, Results) {
+        switch self {
+        case .speech:
+            let module = SpeechTranscriber(locale: locale, transcriptionOptions: [],
+                                           reportingOptions: live ? [.volatileResults, .fastResults] : [.volatileResults],
+                                           attributeOptions: [.audioTimeRange])
+            return (module, module.results.map { (String($0.text.characters), $0.isFinal) })
+        case .dictation:
+            let module = DictationTranscriber(locale: locale, contentHints: [], transcriptionOptions: [.punctuation],
+                                              reportingOptions: live ? [.volatileResults, .frequentFinalization]
+                                                                     : [.volatileResults],
+                                              attributeOptions: [.audioTimeRange])
+            return (module, module.results.map { (String($0.text.characters), $0.isFinal) })
+        }
+    }
 }
 
 /// One analyzer over one take: finalized results are committed, the latest volatile one may still change.
@@ -79,21 +123,25 @@ func makeModule(_ locale: Locale, fast: Bool) -> SpeechTranscriber {
     var volatile = ""
     var frames: AVAudioFramePosition = 0
 
-    init(locale: Locale, fast: Bool) async throws {
-        let module = makeModule(locale, fast: fast)
+    init(_ kind: Module, locale: Locale, live: Bool) async throws {
+        let (module, results) = kind.make(locale, live: live)
         guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [module], considering: natural)
         else { throw Failure.unsupportedFormat }
         // The worker owns the model for its lifetime; the host's idle release ends the worker.
         analyzer = SpeechAnalyzer(modules: [module], options: .init(priority: .userInitiated,
             modelRetention: .processLifetime, ignoresResourceLimits: false))
+        if let strings = kind.contextualStrings {
+            let context = AnalysisContext()
+            context.contextualStrings[.general] = strings
+            try await analyzer.setContext(context)
+        }
         converter = AnalyzerInputConverter(analyzerFormat: format)
         let pair = AsyncThrowingStream<AnalyzerInput, Error>.makeStream()
         input = pair.continuation
         try await analyzer.prepareToAnalyze(in: format)
         collector = Task { @MainActor [unowned self] in
-            for try await result in module.results {
-                let text = String(result.text.characters)
-                if result.isFinal { committed += text; volatile = "" } else { volatile = text }
+            for try await (text, isFinal) in results {
+                if isFinal { committed += text; volatile = "" } else { volatile = text }
             }
         }
         try await analyzer.start(inputSequence: pair.stream)
@@ -137,10 +185,9 @@ func elapsed(_ start: ContinuousClock.Instant) -> Double {
     @MainActor static func main() async {
         do {
             let started = ContinuousClock.now
-            guard SpeechTranscriber.isAvailable,
-                  let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: "en-US"))
-            else { throw Failure.unavailable }
-            let module = makeModule(locale, fast: false)
+            let kind = try Module(arguments: Array(CommandLine.arguments.dropFirst()))
+            guard let locale = await kind.locale() else { throw Failure.unavailable }
+            let (module, _) = kind.make(locale, live: false)
             // System managed weights: reserve the locale, then install its assets if the system has not.
             var reservedHere = false
             if !(await AssetInventory.reservedLocales).contains(locale) {
@@ -152,7 +199,7 @@ func elapsed(_ start: ContinuousClock.Instant) -> Double {
                 try await request.downloadAndInstall()
             }
             guard await AssetInventory.status(forModules: [module]) == .installed else { throw Failure.assetsMissing }
-            emit(["kind": "ready", "backend": "apple", "variant": "speech-transcriber", "locale": locale.identifier,
+            emit(["kind": "ready", "backend": "apple", "variant": kind.variant, "locale": locale.identifier,
                   "reservedHere": reservedHere, "loadMs": elapsed(started)])
             var live: Take?
             for try await request in requests() {
@@ -160,7 +207,7 @@ func elapsed(_ start: ContinuousClock.Instant) -> Double {
                 do {
                     if request.op == UInt8(ascii: "T") {
                         await live?.cancel(); live = nil
-                        let take = try await Take(locale: locale, fast: false)
+                        let take = try await Take(kind, locale: locale, live: false)
                         try take.feed(request.samples)
                         let text = try await take.finish()
                         emit(["kind": "result", "text": text, "rawText": text, "processingMs": elapsed(clock)])
@@ -168,7 +215,7 @@ func elapsed(_ start: ContinuousClock.Instant) -> Double {
                     }
                     if request.op == UInt8(ascii: "S") {
                         await live?.cancel()
-                        live = try await Take(locale: locale, fast: request.fast)
+                        live = try await Take(kind, locale: locale, live: request.live)
                     }
                     guard let take = live else { throw Failure.badRequest }
                     try take.feed(request.samples)
