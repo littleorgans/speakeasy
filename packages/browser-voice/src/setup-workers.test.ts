@@ -150,6 +150,29 @@ worker.write_frame = write
 sys.exit(worker.main())
 `;
 
+// The production worker and native_asr bridge; only the runner hash is stubbed, so no digest cache is written.
+const NATIVE_WORKER = `
+import sys
+sys.path.insert(0, ${JSON.stringify(RUNTIME)})
+import native_asr, worker
+native_asr.file_sha256 = lambda path: "0" * 64
+sys.exit(worker.main())
+`;
+// An Apple speech runner that answers ready, records its pid on the first take, then stays busy
+// as native inference does, never reading the input EOF its Python owner's exit leaves.
+const BUSY_RUNNER = `
+import json, os, signal, sys, time
+if os.environ.get("BUSY_RUNNER_IGNORE_TERM"):
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+sys.stdout.write(json.dumps({"kind": "ready", "backend": "apple", "variant": "speech-transcriber"}) + "\\n")
+sys.stdout.flush()
+sys.stdin.buffer.read(5)
+with open(os.environ["BUSY_RUNNER_MARKER"], "w") as target:
+    target.write(str(os.getpid()))
+while True:
+    time.sleep(1)
+`;
+
 before(async () => {
   // Resolve the interpreter once so per request deadlines exclude a version manager shim.
   PYTHON = execFileSync("python3", ["-c", "import sys; print(sys.executable)"], { encoding: "utf8" }).trim();
@@ -355,6 +378,40 @@ test("active cancellation holds the slot until SIGTERM resistant process exits; 
   const next = await worker.transcribe(new Float32Array([0.25]));
   assert.notEqual(next.metadata.pid, pid);
   assert.equal(next.firstUse, true);
+});
+
+test("retirement ends a busy native runner before the slot is reusable, even one that ignores SIGTERM", async (t) => {
+  const workerPath = join(directory, "native_worker.py");
+  const runnerPath = join(directory, "busy_runner");
+  await writeFile(workerPath, NATIVE_WORKER);
+  await writeFile(runnerPath, `#!${PYTHON}\n${BUSY_RUNNER}`, { mode: 0o755 });
+  for (const ignoreTerm of [false, true]) {
+    await t.test(ignoreTerm ? "SIGTERM ignored" : "default SIGTERM", async (s) => {
+      const marker = join(directory, `busy-runner-${ignoreTerm}.pid`);
+      process.env.BUSY_RUNNER_MARKER = marker;
+      if (ignoreTerm) process.env.BUSY_RUNNER_IGNORE_TERM = "1";
+      else delete process.env.BUSY_RUNNER_IGNORE_TERM;
+      s.after(() => { delete process.env.BUSY_RUNNER_MARKER; delete process.env.BUSY_RUNNER_IGNORE_TERM; });
+      const worker = new PythonSetupWorker({ setupId: "apple/speech", pythonPath: PYTHON, workerPath,
+        backendOptions: { runnerPath }, loadTimeoutMs: 3000, operationTimeoutMs: 3000 });
+      s.after(() => worker.close());
+      const controller = new AbortController();
+      const rejected = assert.rejects(worker.transcribe(new Float32Array([0.5]), controller.signal), /cancelled/);
+      const pid = await markerPid(marker);
+      controller.abort();
+      // The slot is held until the runner's inherited stderr closes, so a surviving runner holds it indefinitely.
+      let deadline: NodeJS.Timeout | undefined;
+      const retired = await Promise.race([rejected.then(() => true),
+        new Promise<false>((resolve) => { deadline = setTimeout(() => resolve(false), 2000); })]);
+      clearTimeout(deadline);
+      if (!retired) {
+        process.kill(pid, "SIGKILL");
+        await rejected;
+        assert.fail("retirement left the busy native runner alive");
+      }
+      assertExited(pid);
+    });
+  }
 });
 
 test("operation timeout, process crash and explicit release recover on a later request", async (t) => {
