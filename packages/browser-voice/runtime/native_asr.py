@@ -13,13 +13,12 @@ may carry its one final setting, the names bias.
 """
 
 import copy
-import json
 from pathlib import Path
 import struct
-import subprocess
 import sys
 import time
 
+from native_runner import read_reply, start, stop
 from pins import file_sha256
 
 
@@ -76,12 +75,7 @@ class Backend:
         self.metadata = None
 
     def _reply(self):
-        line = self.process.stdout.readline()
-        if not line:
-            raise RuntimeError(f"Hex worker exited with {self.process.poll()}")
-        reply = json.loads(line)
-        if not isinstance(reply, dict):
-            raise RuntimeError("Hex worker reply must be an object")
+        reply = read_reply(self.process, "Hex")
         if reply.get("kind") == "error":
             raise RuntimeError(f"Hex worker: {reply.get('error')}")
         return reply
@@ -94,10 +88,8 @@ class Backend:
             raise ValueError("Hex model SHA256 mismatch")
         try:
             started = time.perf_counter()
-            # Native diagnostics go to the transport's stderr, never the protocol.
-            model = [str(self.model_path)] if self.model_path else []
-            self.process = subprocess.Popen([str(self.runner_path), *model, *self.spec["mode"]],
-                                            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=sys.stderr)
+            model = [self.model_path] if self.model_path else []
+            self.process = start([self.runner_path, *model, *self.spec["mode"]])
             ready = self._reply()
             if (ready.get("kind") != "ready" or ready.get("backend") != self.spec["backend"]
                     or ready.get("variant") != self.spec["variant"]):
@@ -180,11 +172,5 @@ class Backend:
     def close(self):
         process, self.process = self.process, None
         self.metadata = None
-        if process is None:
-            return
-        try:
-            process.stdin.close()
-            process.wait(timeout=5)
-        except Exception:
-            process.kill()
-            process.wait()
+        if process is not None:
+            stop(process)

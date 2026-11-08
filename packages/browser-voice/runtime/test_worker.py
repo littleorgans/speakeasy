@@ -264,6 +264,54 @@ class WorkerTests(unittest.TestCase):
                                           + frame("transcribe", 2, setup_id=setup), setup_id=setup)
         self.assertEqual(code, 1)
 
+    def test_text_cleanup_validates_its_fields_and_answers_only_load_cleanup_and_close(self):
+        class Context(Backend):
+            takes_context = True
+
+            def cleanup(self, text, **context):
+                self.calls.append((text, context))
+                return {"text": text.upper(), "processingMs": 1}
+
+        fm, s1 = "apple/foundation-models", "superwhisper/s1-mini"
+        context = {"instruction": "Clean it.", "names": ["Sean", "Speak Easy"], "earlier": ["Before.", ""]}
+        code, replies, backend, _, _ = self.run_worker(
+            frame("load", setup_id=fm, options={}) + frame("cleanup", 2, setup_id=fm, text="um hi", **context)
+            + frame("cleanup", 3, setup_id=fm, text="") + frame("close", 4, setup_id=fm), setup_id=fm, backend=Context())
+        self.assertEqual(code, 0)
+        self.assertEqual([r["type"] for r in replies], ["ready", "result", "result", "closed"])
+        self.assertEqual(replies[1]["result"]["text"], "UM HI")
+        self.assertEqual(backend.calls, [("um hi", context), ("", {})])
+        code, replies, backend, _, _ = self.run_worker(
+            frame("load", setup_id=s1, options={}) + frame("cleanup", 2, setup_id=s1, text="um hi"), setup_id=s1)
+        self.assertEqual(code, 0)
+        self.assertEqual(backend.calls, ["um hi"], "a text only model gets its text alone")
+        body = struct.pack("<f", 0.5)
+        pcm = {k: v for k, v in identity(body).items() if k != "pcmBytes"}
+        refused = {
+            "basePcm": (fm, frame("cleanup", 2, setup_id=fm, text="x", basePcm=identity(b""))),
+            "Ultra fields": (fm, frame("cleanup", 2, setup_id=fm, text="x", B=None)),
+            "context for a text only model": (s1, frame("cleanup", 2, setup_id=s1, text="x", names=["Sean"])),
+            "text type": (fm, frame("cleanup", 2, setup_id=fm, text=3)),
+            "text bound": (fm, frame("cleanup", 2, setup_id=fm, text="x" * (worker.MAX_TEXT_BYTES + 1))),
+            "instruction bound": (fm, frame("cleanup", 2, setup_id=fm, text="x", instruction="x" * 2001)),
+            "names type": (fm, frame("cleanup", 2, setup_id=fm, text="x", names="Sean")),
+            "blank name": (fm, frame("cleanup", 2, setup_id=fm, text="x", names=[" "])),
+            "names bound": (fm, frame("cleanup", 2, setup_id=fm, text="x", names=["x" * 401])),
+            "earlier count": (fm, frame("cleanup", 2, setup_id=fm, text="x", earlier=["a", "b", "c", "d"])),
+            "earlier bound": (fm, frame("cleanup", 2, setup_id=fm, text="x", earlier=["x" * 4097])),
+            "transcribe": (fm, frame("transcribe", 2, body, setup_id=fm, **pcm)),
+            "feed": (s1, frame("feed", 2, body, setup_id=s1, start=True, **pcm)),
+            "speak": (s1, frame("speak", 2, setup_id=s1, text="hi", voice="v", speed=1)),
+        }
+        for label, (setup, request) in refused.items():
+            with self.subTest(label):
+                owner = Context() if setup == fm else Backend()
+                code, replies, owner, _, _ = self.run_worker(frame("load", setup_id=setup, options={}) + request,
+                                                             setup_id=setup, backend=owner)
+                self.assertEqual(code, 1)
+                self.assertEqual(replies[-1]["type"], "error")
+                self.assertEqual(owner.calls, [])
+
     def test_backend_exception_preserves_partial_text_and_exits(self):
         class PartialError(Exception):
             rawText = "partial\n"

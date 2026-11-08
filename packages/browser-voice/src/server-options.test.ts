@@ -7,6 +7,7 @@ import { createSetupRuntime, DEFAULT_OUTPUT_ROOT, DEFAULT_SETUP_RUNTIME, parseSe
   readBrowserVoiceOptions } from "./server-options.ts";
 import { SETUPS } from "./setup-registry.ts";
 import { CPU_SETUP_IDS, isCpuSetupId } from "./transcriber.ts";
+import { CLEANUP_MODEL_IDS } from "./text-cleanup.ts";
 import { isWorkerOutput, LOCAL_OUTPUT_MODELS } from "../../speech-io/src/tts/catalogue.ts";
 
 test("server options keep the model and use the cascade TTS voice", () => {
@@ -137,6 +138,45 @@ test("the committed example runtime file parses and names every Python setup and
     SETUPS.map((setup) => setup.id).filter((id) => !isCpuSetupId(id)).sort());
   assert.deepEqual(Object.keys(parsed.voices!).sort(),
     LOCAL_OUTPUT_MODELS.map((model) => model.id).filter(isWorkerOutput).sort());
+  assert.deepEqual(Object.keys(parsed.cleanups!).sort(), [...CLEANUP_MODEL_IDS].sort());
+});
+
+test("text cleanup models take their own section: S1-mini a snapshot, Apple a runner, unknown ids refused", async (t) => {
+  const s1 = { pythonPath: "/runtime/python", modelPath: "/models/s1-mini", operationTimeoutMs: 15000 };
+  const fm = { pythonPath: "/runtime/python", runnerPath: "/runtime/apple-cleanup-worker" };
+  const config = { cleanups: { "superwhisper/s1-mini": s1, "apple/foundation-models": fm } };
+  assert.deepEqual(parseSetupRuntimeLocations(config), config);
+  for (const invalid of [{ "superwhisper/s1-mini": { pythonPath: "/p" } },
+    { "superwhisper/s1-mini": { ...s1, runnerPath: "/r" } },
+    { "apple/foundation-models": { ...fm, modelPath: "/m" } },
+    { "apple/foundation-models": { ...fm, runnerPath: "relative" } },
+    { "mlx-cleanup/qwen-targeted": s1 },
+    { "cohere/transcribe": s1 }]) {
+    assert.throws(() => parseSetupRuntimeLocations({ cleanups: invalid }), JSON.stringify(invalid));
+  }
+  const root = await mkdtemp(join(tmpdir(), "speakeasy-cleanup-runtime-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const modelPath = join(root, "s1-mini");
+  await mkdir(modelPath);
+  await writeFile(join(modelPath, "config.json"), "{}");
+  const runtimeFile = join(root, "runtime.json");
+  await writeFile(runtimeFile, JSON.stringify({ cleanups: { "superwhisper/s1-mini": { pythonPath: process.execPath, modelPath },
+    "apple/foundation-models": { pythonPath: process.execPath, runnerPath: process.execPath } } }));
+  const missingWeights = await createSetupRuntime(runtimeFile);
+  t.after(() => missingWeights.cleanups.close());
+  assert.deepEqual(missingWeights.cleanups.readiness("superwhisper/s1-mini"),
+    { ready: false, reason: "runtime or model files need setup" });
+  assert.deepEqual(missingWeights.cleanups.readiness("apple/foundation-models"), { ready: true },
+    "system managed weights: ready with its runner, no measured size");
+  await writeFile(join(modelPath, "model.safetensors"), "weights");
+  const ready = await createSetupRuntime(runtimeFile);
+  t.after(() => ready.cleanups.close());
+  assert.deepEqual(ready.cleanups.readiness("superwhisper/s1-mini"), { ready: true, sizeBytes: "{}".length + "weights".length });
+  const missing = join(root, "road-test-runtime.json");
+  const absent = await createSetupRuntime(missing, { optional: true });
+  t.after(() => absent.cleanups.close());
+  assert.deepEqual(absent.cleanups.readiness("apple/foundation-models"),
+    { ready: false, reason: `setup runtime file missing: ${missing}` });
 });
 
 test("worker voices take an interpreter from the runtime file; only an existing one makes them configured", async (t) => {

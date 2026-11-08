@@ -22,7 +22,8 @@ type SettingBase = Readonly<{
 
 export type VoiceSetting =
   | SettingBase & Readonly<{ kind: "choice"; default: SettingValue; options: readonly SettingOption[] }>
-  | SettingBase & Readonly<{ kind: "text"; default: string; maxLength: number }>
+  /** lines: shown as a box of that many lines rather than one line. */
+  | SettingBase & Readonly<{ kind: "text"; default: string; maxLength: number; lines?: number }>
   | SettingBase & Readonly<{ kind: "integer"; default: number; min: number; max: number }>;
 
 export type Settings = Readonly<Record<string, SettingValue>>;

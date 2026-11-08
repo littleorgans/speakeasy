@@ -6,6 +6,7 @@ import { SETUPS } from "./setup-registry.ts";
 import type { SetupExecution, SetupExecutor, SetupId } from "./setup-protocol.ts";
 import { buildSpeechOutputCatalogue } from "./speech-output-catalog.ts";
 import { LOCAL_OUTPUT_MODELS, LOCAL_OUTPUT_REGISTRY } from "../../speech-io/src/tts/catalogue.ts";
+import { TextCleanups, type CleanupWorker } from "./text-cleanup.ts";
 
 class FakeExecutor implements SetupExecutor {
   calls: SetupExecution[] = [];
@@ -42,7 +43,8 @@ test("the road test flag serves the road test page at the root; the room keeps t
   assert.match(await (await fetch(room.url + "/")).text(), /<title>[^<]*<\/title>/);
   assert.doesNotMatch(await (await fetch(room.url + "/")).text(), /Road test/);
   assert.match(await (await fetch(room.url + "/road-test")).text(), /Road test/, "the road test stays reachable on any host");
-  for (const asset of ["/road-test.css", "/road-test.js", "/road-test-text.js", "/capture-session.js", "/voice-readback.js", "/talk-over.js"]) {
+  for (const asset of ["/road-test.css", "/road-test.js", "/road-test-text.js", "/capture-session.js", "/voice-readback.js", "/talk-over.js",
+    "/text-cleanup.js"]) {
     assert.equal((await fetch(road.url + asset)).status, 200, asset);
   }
 });
@@ -78,6 +80,49 @@ test("a live take transcribes without a prompt reader; saved takes still need on
     headers: { origin: server.url, "content-type": "application/json" },
     body: JSON.stringify({ requestId: "road-2", setupIds: ["mlx-parakeet/ultra-greedy"], source: { kind: "saved", takeName: "x.wav" } }) });
   assert.equal(saved.status, 404);
+});
+
+test("cleanup models are listed and clean a final's text through the host, holding no audio lease", async (t) => {
+  let open!: () => void;
+  const held = new Promise<void>((resolve) => { open = resolve; });
+  const worker: CleanupWorker = {
+    load: async () => ({ startupMs: null, loadMs: 30, firstUse: true }),
+    cleanText: async () => {
+      await held;
+      return { text: "Ship it.", processingMs: 4, metadata: {}, firstUse: true, startupLoadWallMs: 30, workerWallMs: 35 };
+    },
+    release: async () => {}, close: async () => {},
+  };
+  const textCleanups = new TextCleanups({ workers: { "apple/foundation-models": worker },
+    readiness: () => ({ "apple/foundation-models": { ready: true } }) });
+  const { server, executor } = await host(t, { home: "road-test", textCleanups });
+  const listing = await (await fetch(`${server.url}/prompt-reader/cleanups`)).json() as { schema: number;
+    models: { id: string; readiness: { ready: boolean; reason?: string }; settings: { default: unknown }[] }[] };
+  assert.equal(listing.schema, 1);
+  assert.deepEqual(listing.models.map((model) => [model.id, model.readiness.ready]),
+    [["superwhisper/s1-mini", false], ["apple/foundation-models", true]]);
+  assert.equal(listing.models[0].readiness.reason, "runtime not configured");
+  const post = (body: unknown, origin = server.url) => fetch(`${server.url}/prompt-reader/cleanups`, { method: "POST",
+    headers: { origin, "content-type": "application/json" }, body: JSON.stringify(body) });
+  const pending = post({ requestId: "clean-1", modelId: "apple/foundation-models", text: "um ship it" });
+  // The cleanup holds no lease: a comparison runs to completion while it waits.
+  const query = new URLSearchParams({ requestId: "road-3", setupIds: JSON.stringify(["mlx-parakeet/ultra-greedy"]) });
+  const comparison = await fetch(`${server.url}/prompt-reader/comparisons?${query}`, { method: "POST",
+    headers: { origin: server.url, "content-type": "application/octet-stream" }, body: new Blob([new Float32Array(1_600).buffer]) });
+  assert.equal(comparison.status, 200);
+  await comparison.text();
+  assert.equal(executor.calls.length, 1);
+  open();
+  const reply = await pending;
+  assert.equal(reply.status, 200);
+  assert.deepEqual(await reply.json(), { requestId: "clean-1", modelId: "apple/foundation-models", status: "complete",
+    text: "Ship it.", processingMs: 4, workerWallMs: 35, loadMs: 30, firstUse: true,
+    settings: { instruction: listing.models[1].settings[0].default, names: "Grok, Claude, Codex, GPT, TM", earlier: false } });
+  const skipped = await (await post({ modelId: "superwhisper/s1-mini", text: "um" })).json() as Record<string, unknown>;
+  assert.deepEqual([skipped.status, skipped.code, skipped.reason], ["skipped", "unavailable", "runtime not configured"]);
+  assert.equal((await post({ modelId: "superwhisper/s1-mini", text: "um", settings: {} })).status, 400);
+  assert.equal((await post({ modelId: "apple/foundation-models", text: "x".repeat(16_384) })).status, 413);
+  assert.equal((await post({ modelId: "apple/foundation-models", text: "x" }, "http://evil.example")).status, 403);
 });
 
 test("a Cohere take carries its names setting to the executor and its row; values not offered are refused", async (t) => {

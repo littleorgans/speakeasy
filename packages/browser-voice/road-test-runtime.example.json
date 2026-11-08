@@ -44,6 +44,16 @@
   "cpu": {
     "modelRoot": "/absolute/path/to/speak-easy/models/sherpa"
   },
+  "cleanups": {
+    "superwhisper/s1-mini": {
+      "pythonPath": "/absolute/path/to/cleanup-py3.13.2/bin/python",
+      "modelPath": "/absolute/path/to/hf/models--superwhisper--s1-mini/snapshots/88f6b15896c73bbb13a3b596e0afe8ea0d5150b4"
+    },
+    "apple/foundation-models": {
+      "pythonPath": "/absolute/path/to/any/python3.11-or-later",
+      "runnerPath": "/absolute/path/to/apple-cleanup/<hash>/apple-cleanup-worker"
+    }
+  },
   "voices": {
     "kokoro-mlx-bf16": {
       "pythonPath": "/absolute/path/to/kokoro-mlx-py3.12/bin/python"

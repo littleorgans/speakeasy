@@ -44,6 +44,11 @@ package shows every entry. Omit a setup to leave it unavailable.
   `loadTimeoutMs` and `operationTimeoutMs` as above. Its weights come from the
   output root, so no model path. Without an entry the voice shows
   "needs setup: Voice runtime is not configured".
+- `cleanups.<cleanup model id>`: `pythonPath`, plus `modelPath` (snapshot
+  directory) for `superwhisper/s1-mini` or `runnerPath` for
+  `apple/foundation-models`, whose weights the system manages (Text cleanup
+  below). Optional `loadTimeoutMs` (default 120000) and `operationTimeoutMs`
+  (default 20000).
 
 Unknown setups or fields are refused at startup.
 
@@ -214,11 +219,64 @@ The backend declares `takes_reference = True` and gains
 `speak(text, voice, speed, settings, reference)`, where reference holds
 `samples`, `sampleRate`, `sha256` and `transcript` (null when none applies).
 
+## Text cleanup
+
+After a final shows, the page may send its text for cleanup under Speech in:
+Off, S1-mini by Superwhisper or Apple Foundation Models. The cleaned text
+replaces the final on the page only; readback keeps the final, and cleanup
+takes no audio lease, so the voice never waits on it.
+
+- **Registry:** `CLEANUP_MODELS` in `src/text-cleanup.ts`: id, label, card
+  and declared settings (`packages/speech-io/src/settings.ts`; a text setting
+  with `lines` shows as a box). Cleanup ids are never setups; add a new one to
+  `CLEANUP_MODEL_IDS` and to `TEXT_CLEANUPS` and `BACKENDS` in
+  `runtime/worker.py`.
+- **Routes:** `GET /prompt-reader/cleanups` lists the models with their
+  readiness; `POST /prompt-reader/cleanups` takes `{ requestId, modelId, text,
+  settings?, earlier? }` and answers `complete` with the text and timings, or
+  `skipped` with a code and a fixed reason. A model with no settings refuses
+  `settings` and `earlier`; `earlier` needs the `earlier` setting on. One
+  request runs per model and one waits; a third gets 429.
+- **Backend:** a `Backend` with `load()` and `cleanup(text)`, or, with
+  `takes_context = True`, `cleanup(text, instruction, names, earlier)`. Raise
+  a failure the page may show as `"<code>: <fixed text>"`, code `unavailable`,
+  `load`, `execution` or `limit`; never put take text in an error. Any other
+  error shows as "the model did not load" or "the model failed".
+- **Runtime:** the `cleanups` section of the setup runtime file (above).
+
+The one setup step each model needs, from the repo root:
+
+- **S1-mini by Superwhisper** (`runtime/s1_mini.py`) runs in the cleanup
+  environment (`requirements-cleanup.txt`, Python 3.13.2), on the first party
+  snapshot pinned at `88f6b15896c73bbb13a3b596e0afe8ea0d5150b4` with its
+  LICENSE and NOTICE. Download it once with that environment:
+
+  ```sh
+  $ENV/bin/python -I -B -c 'from huggingface_hub import snapshot_download; print(snapshot_download("superwhisper/s1-mini", revision="88f6b15896c73bbb13a3b596e0afe8ea0d5150b4", allow_patterns=["*.json","*.jinja","*.txt","*.safetensors","LICENSE","NOTICE"]))'
+  ```
+
+  Then set `cleanups."superwhisper/s1-mini".modelPath` to the printed path
+  and `pythonPath` to `$ENV/bin/python`. No token is needed. The licence asks
+  that the name stay "S1-mini" by "Superwhisper".
+- **Apple Foundation Models** (`runtime/apple_cleanup.py` over
+  `runtime/apple_cleanup/worker.swift`) needs macOS 27 with Apple
+  Intelligence on. Build the worker:
+
+  ```sh
+  python3 packages/browser-voice/runtime/apple_speech/build.py --worker cleanup --out ~/Library/Caches/speakeasy/apple-cleanup/$(shasum -a 256 packages/browser-voice/runtime/apple_cleanup/worker.swift | cut -c1-8)
+  ```
+
+  Then set `cleanups."apple/foundation-models".runnerPath` to the printed
+  worker path and `pythonPath` to any Python 3.11 or later (the cleanup
+  environment's will do). Whether Apple Intelligence is on is known only at
+  load; the page then says "Cleanup skipped: Apple Intelligence is off".
+
 ## Check
 
 `pnpm typecheck && pnpm test` from the repo root. The registry tests pin the
 setup ids and revisions, so update them with the new entry. Backends have
 standard library tests:
-`python3 -m unittest discover -s packages/browser-voice/runtime`; with
+`python3 -m unittest discover -s packages/browser-voice/runtime` (the Ultra
+cleanup tests need the cleanup environment's Python 3.13.2); with
 `clang++` installed, `test_cohere_bias.py` also compiles the patch's names bias
 selector and checks it.

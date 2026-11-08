@@ -33,6 +33,8 @@ class Fake:
         mode = options.get("mode", "")
         # A voice copy fake takes settings and a reference; every other voice refuses both in the worker.
         self.takes_settings = self.takes_reference = mode == "copy"
+        # A text cleanup fake takes context only for the model whose backend does.
+        self.takes_context = options.get("setupId") == "apple/foundation-models"
     def mark(self):
         path = self.options.get("marker")
         if path:
@@ -68,7 +70,9 @@ class Fake:
         return {"text": hashlib.sha256(raw).hexdigest(), "processingMs": 3, "decodeMs": 1,
                 "diagnostics": {"hex": raw.hex(), "count": len(samples), "pid": os.getpid(), "calls": self.calls,
                                 **({"settings": settings} if settings is not None else {})}}
-    def cleanup(self, text):
+    def cleanup(self, text, **context):
+        if context:
+            return {"text": json.dumps({"text": text, **context}, sort_keys=True), "processingMs": 1}
         return {"text": text, "rawText": text, "processingMs": 0}
     def feed(self, samples, start, settings):
         if mode == "badPartial":
@@ -257,6 +261,24 @@ test("cleanup keeps exact Unicode, whitespace and completed empty text with zero
   }
   await assert.rejects(worker.cleanup("x".repeat(MAX_WORKER_TEXT_BYTES + 1), base), /limit/);
   await assert.rejects(worker.cleanup("", { ...base, sampleCount: 1 }), /identity/);
+});
+
+test("cleanText sends a final's text and context with zero PCM, loads on first use, and only for cleanup models", async (t) => {
+  const s1 = makeWorker({ setupId: "superwhisper/s1-mini" });
+  const fm = makeWorker({ setupId: "apple/foundation-models" });
+  t.after(() => Promise.all([s1.close(), fm.close()]));
+  const first = await s1.cleanText({ text: "  um café  " });
+  assert.equal(first.text, "  um café  ");
+  assert.equal(first.firstUse, true);
+  assert.ok(first.startupLoadWallMs > 0, "the first call spawns and loads");
+  assert.equal((await s1.cleanText({ text: "again" })).firstUse, false);
+  const context = { instruction: "Clean it.", names: ["Sean", "Michaela"], earlier: ["Before."] };
+  assert.deepEqual(JSON.parse((await fm.cleanText({ text: "um tell shawn", ...context })).text),
+    { text: "um tell shawn", ...context });
+  await assert.rejects(s1.cleanText({ text: "x", names: ["Sean"] }), /takes text only/, "a text only model refuses context");
+  await assert.rejects(fm.cleanText({ text: "x".repeat(MAX_WORKER_TEXT_BYTES + 1) }), /limit/);
+  await assert.rejects(makeWorker().cleanText({ text: "x" }), /not a text cleanup worker/);
+  await assert.rejects(makeWorker({ setupId: "superwhisper/s1-mini" }).transcribe(new Float32Array(4)), /does not transcribe/);
 });
 
 test("nonfinite samples and oversized takes fail before spawning", async (t) => {

@@ -21,7 +21,7 @@ const { output, providers, speechOutput } = createProviderRuntime({ credentials,
 const host = await startBrowserVoiceServer({ ...options,
   createRuntime: (config, context) => createConversationRuntime(config, process.env, undefined,
     { speechOutputFactory: output, speechOutputContext: context?.speechOutputContext }),
-  setupExecutor: setup.executor, setupReadiness: setup.readiness, providers,
+  setupExecutor: setup.executor, setupReadiness: setup.readiness, textCleanups: setup.cleanups, providers,
   speechOutput,
 });
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
