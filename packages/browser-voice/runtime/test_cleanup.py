@@ -13,6 +13,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import cleanup
+from names import names_digest
 
 
 def response(text, token=7, finish="stop"):
@@ -82,7 +83,7 @@ class CleanupTests(unittest.TestCase):
         ):
             item.start()
             self.addCleanup(item.stop)
-        self.backend = cleanup.Backend({"modelPath": str(self.path)})
+        self.backend = cleanup.Backend({"modelPath": str(self.path), "names": ["Grok", "Claude", "GPT-SOL"]})
 
     def test_module_and_constructor_do_not_import_native_runtime_or_read_assets(self):
         import builtins
@@ -120,6 +121,20 @@ class CleanupTests(unittest.TestCase):
         self.assertEqual(ready["python"], "3.13.2")
         self.assertGreaterEqual(ready["loadMs"], 0)
 
+    def test_load_renders_the_names_list_into_the_pinned_template_and_reports_both(self):
+        ready = self.backend.load()
+        self.assertIn("The only known terms are: Grok, Claude, GPT-SOL. Treat", self.backend.system)
+        self.assertNotIn("{names}", self.backend.system)
+        self.assertEqual(ready["promptSha256"], cleanup.PROMPT_SHA256, "the pin names the template, never the list")
+        self.assertEqual(ready["systemSha256"], hashlib.sha256(self.backend.system.encode()).hexdigest())
+        self.assertEqual(ready["namesDigest"], names_digest(["Grok", "Claude", "GPT-SOL"]))
+        empty = cleanup.Backend({"modelPath": str(self.path), "names": []})
+        empty_ready = empty.load()
+        self.assertIn("The only known terms are: none. Treat", empty.system)
+        self.assertEqual(empty_ready["namesDigest"], names_digest([]))
+        self.assertNotEqual(empty_ready["systemSha256"], ready["systemSha256"])
+        self.assertEqual(cleanup.Backend({"modelPath": str(self.path)}).names, [], "absent names mean an empty list")
+
     def test_exact_unicode_payload_native_template_and_fresh_request_controls(self):
         texts = ['  Écoute "claude"\n七 🗣️  ', " \tlaunch\n "]
         rows = [self.backend.cleanup(text) for text in texts]
@@ -129,7 +144,8 @@ class CleanupTests(unittest.TestCase):
             messages = calls[index].args[0]
             expected = json.dumps({"A": text, "B": None}, ensure_ascii=False, separators=(",", ":"))
             self.assertEqual(messages, [
-                {"role": "system", "content": (self.root / "cleanup-prompt.txt").read_text()},
+                {"role": "system", "content": (self.root / "cleanup-prompt.txt").read_text().replace(
+                    "{names}", "Grok, Claude, GPT-SOL")},
                 {"role": "user", "content": expected},
             ])
             self.assertEqual(calls[index].kwargs, {"tokenize": True, "add_generation_prompt": True})
@@ -249,7 +265,9 @@ class CleanupTests(unittest.TestCase):
     def test_options_reject_other_setups_remote_paths_and_control_overrides(self):
         for options in ({}, {"modelPath": "mlx-community/model"},
                         {"modelPath": str(self.path), "setupId": "qwen/context"},
-                        {"modelPath": str(self.path), "temperature": 1}):
+                        {"modelPath": str(self.path), "temperature": 1},
+                        {"modelPath": str(self.path), "names": "Grok, Claude"},
+                        {"modelPath": str(self.path), "names": ["Grok", " Claude"]}):
             with self.subTest(options=options), self.assertRaises(ValueError):
                 cleanup.Backend(options)
         backend = cleanup.Backend({"modelPath": str(self.path), "setupId": cleanup.SETUP_ID})
@@ -395,8 +413,11 @@ class CleanupTests(unittest.TestCase):
 class SourcePinsTests(unittest.TestCase):
     def test_prompt_requirements_and_model_pins_match_the_historical_contract(self):
         root = Path(cleanup.__file__).parent
-        self.assertEqual(hashlib.sha256((root / "cleanup-prompt.txt").read_bytes()).hexdigest(),
-                         "6feb2afb47f1bfcb5ea926ba72588f8776a12eed77e06e4fc9fdf0bc555502fd")
+        template = (root / "cleanup-prompt.txt").read_bytes()
+        self.assertEqual(hashlib.sha256(template).hexdigest(),
+                         "6e0b907eee9ea7b9f2eb464c1e1a2dc684b6ece0215bbcef1001c1855d172f57")
+        self.assertEqual(cleanup.PROMPT_SHA256, hashlib.sha256(template).hexdigest())
+        self.assertEqual(template.count(b"{names}"), 1, "one slot, and no names spelled in the template")
         self.assertEqual(hashlib.sha256((root / "requirements-cleanup.txt").read_bytes()).hexdigest(),
                          "cec49f5b582ac04d8e5963d6bc2010237bb4ece084721eb61d562b1da6c4d3fa")
         self.assertEqual(cleanup.TEMPLATE_SHA256,
