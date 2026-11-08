@@ -1,5 +1,6 @@
 import { trailItems, trailSummary } from "/live-trail.js";
 import { formatDuration, liveSettingsNote } from "/road-test-text.js";
+import { cleanedText, cleanupNote, cleanupTime } from "/text-cleanup.js";
 
 /**
  * Take timings and earlier takes: the figures each take shows, the history
@@ -10,10 +11,13 @@ import { formatDuration, liveSettingsNote } from "/road-test-text.js";
 export const HISTORY_COLUMNS = [
   { label: "Speech in", cell: (run) => [run.setup.label, [finalNote(run), liveNote(run)].filter(Boolean).join(" · ")] },
   { label: "Voice", cell: (run) => [run.output ? run.voiceLabel : null] },
-  { label: "Transcript", kind: "said-cell", cell: (run) => [run.input.error || run.input.text || "Nothing heard"], trail: true },
+  { label: "Transcript", kind: "said-cell", cell: (run) => [cleanedText(run.cleanup) ?? (run.input.error || run.input.text || "Nothing heard"),
+    cleanupNote(run.cleanup)], trail: true },
   { label: "Press to first words", kind: "num", cell: (run) => [formatDuration(pressToFirstWords(run))] },
   { label: "Release to text", kind: "num", cell: (run) => [formatDuration(run.input.finalMs),
     run.input.loadMs != null ? `Model start ${formatDuration(run.input.loadMs)}` : null] },
+  { label: "Cleanup", kind: "num", cell: (run) => [cleanupTime(run.cleanup),
+    run.cleanup?.loadMs != null ? `Model start ${formatDuration(run.cleanup.loadMs)}` : null] },
   { label: "Text to first audio", kind: "num", cell: (run) => [formatDuration(run.output?.firstAudioMs),
     run.output?.loadMs != null ? `Model start ${formatDuration(run.output.loadMs)}` : null] },
   { label: "Release to voice", kind: "num", cell: (run) => [formatDuration(releaseToVoice(run))] },

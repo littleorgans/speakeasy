@@ -6,11 +6,13 @@ import { isAbsolute, join, resolve } from "node:path";
 import { exactFields, isRecord } from "./http-guards.ts";
 import { getSetup, SETUPS } from "./setup-registry.ts";
 import { isSetupId, type SetupId } from "./setup-protocol.ts";
-import { SetupWorkers, type PythonSetupId, type SetupWorkersOptions } from "./setup-workers.ts";
+import { PythonSetupWorker, SetupWorkers, type PythonSetupId, type SetupWorkersOptions } from "./setup-workers.ts";
 import { ChildTranscriber, CPU_SETUP_IDS, isCpuSetupId } from "./transcriber.ts";
 import type { SetupReadiness } from "./setup-routes.ts";
 import { isWorkerOutput, LOCAL_OUTPUT_MODELS, type LocalOutputModelId } from "../../speech-io/src/tts/catalogue.ts";
 import { createWorkerVoiceSynth, type VoiceRuntimeLocation } from "./voice-workers.ts";
+import { CLEANUP_MODEL_IDS, isCleanupModelId, TextCleanups, type CleanupModelId,
+  type CleanupReadiness } from "./text-cleanup.ts";
 
 /** The one native location a Python setup needs beyond its model. */
 const EXTRA_LOCATIONS: Partial<Record<PythonSetupId, "libraryPath" | "runnerPath">> = {
@@ -24,15 +26,23 @@ const VOICE_EXTRA_LOCATIONS: Partial<Record<LocalOutputModelId, "runnerPath">> =
   "piper-kristin-split": "runnerPath", "kokoro-coreml": "runnerPath", "qwen3-tts-0.6b": "runnerPath", "qwen3-tts-1.7b": "runnerPath",
   "kokoro-ane-heart": "runnerPath", "kokoro-ane-folded-heart": "runnerPath",
 };
+/** Each text cleanup model's one location beside its interpreter: a snapshot, or a runner for system managed weights. */
+const CLEANUP_LOCATIONS: Record<CleanupModelId, "modelPath" | "runnerPath"> = {
+  "superwhisper/s1-mini": "modelPath", "apple/foundation-models": "runnerPath",
+};
 const DEFAULT_SETUP_TIMEOUT_MS = 120_000;
+/** A cleanup follows a shown final; a slow one is skipped rather than awaited. */
+const DEFAULT_CLEANUP_TIMEOUT_MS = 20_000;
 /** Gitignored, machine specific; read when no flag or environment value names another. */
 export const DEFAULT_SETUP_RUNTIME = "models/road-test-runtime.json";
 export const DEFAULT_OUTPUT_ROOT = "models/tts";
+type RuntimeLocation = { pythonPath: string; modelPath?: string; libraryPath?: string; runnerPath?: string;
+  loadTimeoutMs?: number; operationTimeoutMs?: number };
 export type SetupRuntimeLocations = {
-  python?: Partial<Record<PythonSetupId, { pythonPath: string; modelPath?: string; libraryPath?: string;
-    runnerPath?: string; loadTimeoutMs?: number; operationTimeoutMs?: number }>>;
+  python?: Partial<Record<PythonSetupId, RuntimeLocation>>;
   cpu?: { modelRoot: string };
   voices?: Partial<Record<LocalOutputModelId, VoiceRuntimeLocation>>;
+  cleanups?: Partial<Record<CleanupModelId, Omit<RuntimeLocation, "libraryPath">>>;
 };
 
 export function readBrowserVoiceOptions(
@@ -76,7 +86,7 @@ export function readBrowserVoiceOptions(
 /** Pure server configuration: paths only, never portable provider preferences. */
 export function parseSetupRuntimeLocations(value: unknown): SetupRuntimeLocations {
   if (!isRecord(value)) throw new Error("setup runtime must be an object");
-  exactFields(value, ["python", "cpu", "voices"]);
+  exactFields(value, ["python", "cpu", "voices", "cleanups"]);
   const result: SetupRuntimeLocations = {};
   if (value.python !== undefined) {
     if (!isRecord(value.python)) throw new Error("python runtimes must be an object");
@@ -103,6 +113,17 @@ export function parseSetupRuntimeLocations(value: unknown): SetupRuntimeLocation
       exactFields(config, ["pythonPath", ...(extra ? [extra] : []), "loadTimeoutMs", "operationTimeoutMs"]);
       result.voices[model.id] = { pythonPath: absoluteLocation(config.pythonPath),
         ...(extra ? { [extra]: absoluteLocation(config[extra]) } : {}), ...deadlines(config) };
+    }
+  }
+  if (value.cleanups !== undefined) {
+    if (!isRecord(value.cleanups)) throw new Error("cleanup runtimes must be an object");
+    result.cleanups = {};
+    for (const [id, config] of Object.entries(value.cleanups)) {
+      if (!isCleanupModelId(id) || !isRecord(config)) throw new Error("unknown text cleanup model");
+      const location = CLEANUP_LOCATIONS[id];
+      exactFields(config, ["pythonPath", location, "loadTimeoutMs", "operationTimeoutMs"]);
+      result.cleanups[id] = { pythonPath: absoluteLocation(config.pythonPath),
+        [location]: absoluteLocation(config[location]), ...deadlines(config) };
     }
   }
   if (value.cpu !== undefined) {
@@ -164,7 +185,14 @@ export async function createSetupRuntime(file?: string, { optional = false } = {
   const executor = new SetupWorkers({ python, cpu });
   const setupReadiness = await inspectSetupReadiness(locations, modelRoot, missingFile);
   const voices = await inspectVoiceRuntimes(locations.voices ?? {});
-  return { executor, readiness: () => setupReadiness, missingFile, voices: {
+  const cleanupReadiness = await inspectCleanupReadiness(locations.cleanups ?? {}, missingFile);
+  const cleanups = new TextCleanups({ readiness: () => cleanupReadiness,
+    workers: Object.fromEntries(Object.entries(locations.cleanups ?? {}).map(([id, config]) => [id, new PythonSetupWorker({
+      setupId: id as CleanupModelId, pythonPath: config.pythonPath,
+      backendOptions: config.modelPath ? { modelPath: config.modelPath } : { runnerPath: config.runnerPath },
+      expectedIdentity: { setupId: id }, loadTimeoutMs: config.loadTimeoutMs ?? DEFAULT_SETUP_TIMEOUT_MS,
+      operationTimeoutMs: config.operationTimeoutMs ?? DEFAULT_CLEANUP_TIMEOUT_MS })])) });
+  return { executor, readiness: () => setupReadiness, missingFile, cleanups, voices: {
     /** Whether a worker voice's runtime files exist; its payload is checked with the catalogue. */
     configured: (id: LocalOutputModelId) => voices.has(id),
     createSynth: (id: LocalOutputModelId, outputRoot: string) => {
@@ -180,10 +208,7 @@ async function inspectVoiceRuntimes(voices: NonNullable<SetupRuntimeLocations["v
   const ready = new Set<LocalOutputModelId>();
   for (const [id, location] of Object.entries(voices) as [LocalOutputModelId, VoiceRuntimeLocation][]) {
     try {
-      for (const path of [location.pythonPath, ...(location.runnerPath ? [location.runnerPath] : [])]) {
-        await access(path, constants.X_OK);
-        if (!(await stat(path)).isFile()) throw new Error();
-      }
+      for (const path of [location.pythonPath, ...(location.runnerPath ? [location.runnerPath] : [])]) await executableFile(path);
       ready.add(id);
     } catch { /* Unavailable: the catalogue reports the runtime as missing. */ }
   }
@@ -205,32 +230,11 @@ async function inspectSetupReadiness(locations: SetupRuntimeLocations, modelRoot
         sizeBytes = await modelBytes(root);
       } else {
         if (!config) throw new Error();
-        await access(config.pythonPath, constants.X_OK);
-        if (!(await stat(config.pythonPath)).isFile()) throw new Error();
-        if (!config.modelPath) {
-          // System managed weights: the worker reserves and installs them at load; no size to measure.
-          if (!config.runnerPath) throw new Error();
-          await access(config.runnerPath, constants.X_OK);
-        } else {
-          const model = await stat(config.modelPath);
-          if (setup.id === "qwen/context") {
-            if (!model.isFile() || !config.libraryPath || !(await stat(config.libraryPath)).isFile()) throw new Error();
-          } else if (EXTRA_LOCATIONS[setup.id] === "runnerPath") {
-            if (!model.isFile() || !config.runnerPath) throw new Error();
-            await access(config.runnerPath, constants.X_OK);
-          } else {
-            if (!model.isDirectory()) throw new Error();
-            for (const name of ["config.json", "model.safetensors"]) {
-              if (!(await stat(join(config.modelPath, name))).isFile()) throw new Error();
-            }
-          }
-          sizeBytes = await modelBytes(config.modelPath);
-        }
+        sizeBytes = await locationBytes(config);
       }
       readiness.push({ setupId: setup.id, ready: true, ...(sizeBytes === undefined ? {} : { sizeBytes }) });
     } catch {
-      readiness.push({ setupId: setup.id, ready: false, reason: !config && missingFile && !isCpuSetupId(setup.id)
-        ? `setup runtime file missing: ${missingFile}` : "runtime or model files need setup" });
+      readiness.push({ setupId: setup.id, ready: false, ...notReady(!config && !isCpuSetupId(setup.id), missingFile) });
     }
     readiness.at(-1)!.deadlines = { loadMs: config?.loadTimeoutMs ?? DEFAULT_SETUP_TIMEOUT_MS,
       operationMs: config?.operationTimeoutMs ?? DEFAULT_SETUP_TIMEOUT_MS };
@@ -247,6 +251,55 @@ async function inspectSetupReadiness(locations: SetupRuntimeLocations, modelRoot
     } else if (entry.sizeBytes !== undefined && base.sizeBytes !== undefined) entry.sizeBytes += base.sizeBytes;
   }
   return readiness;
+}
+
+async function inspectCleanupReadiness(cleanups: NonNullable<SetupRuntimeLocations["cleanups"]>,
+  missingFile?: string): Promise<Partial<Record<CleanupModelId, CleanupReadiness>>> {
+  const readiness: Partial<Record<CleanupModelId, CleanupReadiness>> = {};
+  for (const id of CLEANUP_MODEL_IDS) {
+    const config = cleanups[id];
+    try {
+      if (!config) throw new Error();
+      const sizeBytes = await locationBytes(config);
+      readiness[id] = { ready: true, ...(sizeBytes === undefined ? {} : { sizeBytes }) };
+    } catch { readiness[id] = { ready: false, ...notReady(!config, missingFile) }; }
+  }
+  return readiness;
+}
+
+function notReady(unconfigured: boolean, missingFile?: string): { reason: string } {
+  return { reason: unconfigured && missingFile ? `setup runtime file missing: ${missingFile}`
+    : "runtime or model files need setup" };
+}
+
+/**
+ * One location's files, by the fields it has: an executable interpreter, then
+ * a runner alone for system managed weights (no size), a model file with its
+ * library or runner, or a model directory with config.json and
+ * model.safetensors. Resolves the model's measured size; rejects when any is missing.
+ */
+async function locationBytes(location: RuntimeLocation): Promise<number | undefined> {
+  await executableFile(location.pythonPath);
+  if (location.runnerPath) await executableFile(location.runnerPath);
+  if (!location.modelPath) {
+    if (!location.runnerPath) throw new Error("model or runner required");
+    return undefined;
+  }
+  const model = await stat(location.modelPath);
+  if (location.libraryPath || location.runnerPath) {
+    if (!model.isFile() || location.libraryPath && !(await stat(location.libraryPath)).isFile()) throw new Error();
+  } else {
+    if (!model.isDirectory()) throw new Error();
+    for (const name of ["config.json", "model.safetensors"]) {
+      if (!(await stat(join(location.modelPath, name))).isFile()) throw new Error();
+    }
+  }
+  return modelBytes(location.modelPath);
+}
+
+async function executableFile(path: string): Promise<void> {
+  await access(path, constants.X_OK);
+  if (!(await stat(path)).isFile()) throw new Error();
 }
 
 /** Bytes of a model file, or of the files directly inside a model directory. */

@@ -11,16 +11,18 @@ import {
 import { isCpuSetupId, type ChildTranscriber, type CpuReady, type CpuSetupId } from "./transcriber.ts";
 import { isWorkerOutput, LOCAL_OUTPUT_MODELS, type LocalOutputModelId } from "../../speech-io/src/tts/catalogue.ts";
 import type { SynthRequest } from "../../speech-io/src/tts/synth.ts";
+import { CLEANUP_MODEL_IDS, isCleanupModelId, type CleanupModelId } from "./text-cleanup.ts";
 
 export { MAX_WORKER_HEADER_BYTES, MAX_WORKER_PCM_BYTES, MAX_WORKER_TEXT_BYTES };
 
 const WORKER_PATH = fileURLToPath(new URL("../runtime/worker.py", import.meta.url));
-/** Speech in setups and speech out worker voices share this one Python worker. */
+/** Speech in setups, speech out worker voices and text cleanup models share this one Python worker. */
 const PYTHON_WORKERS = new Set<string>([
   "mlx-parakeet/v3-greedy", "mlx-parakeet/ultra-greedy",
   "mlx-cleanup/qwen-targeted", "qwen/context", "hex/unified", "hex/vocabulary", "cohere/transcribe",
   "nemotron/streaming", "apple/speech",
   ...LOCAL_OUTPUT_MODELS.map((model) => model.id).filter(isWorkerOutput),
+  ...CLEANUP_MODEL_IDS,
 ]);
 
 export type PythonWorkerResult = {
@@ -34,9 +36,11 @@ export type PythonVoiceResult = {
 };
 /** Every speech in setup that runs in the Python worker: all but the sherpa CPU setups. */
 export type PythonSetupId = Exclude<SetupId, CpuSetupId>;
+/** One final's text for a text cleanup model, with the context only a model that takes it receives. */
+export type TextCleanupInput = { text: string; instruction?: string; names?: readonly string[]; earlier?: readonly string[] };
 export type PythonWorkerOptions = {
-  /** A Python speech in setup or a worker voice; the wire field keeps its setupId name. */
-  setupId: PythonSetupId | LocalOutputModelId;
+  /** A Python speech in setup, a worker voice or a text cleanup model; the wire field keeps its setupId name. */
+  setupId: PythonSetupId | LocalOutputModelId | CleanupModelId;
   pythonPath: string;
   workerPath?: string;
   backendOptions?: Record<string, unknown>;
@@ -152,7 +156,7 @@ export class PythonSetupWorker {
   get stderr(): string { return this.#stderr.toString("utf8"); }
 
   transcribe(samples: Float32Array, signal?: AbortSignal): Promise<PythonWorkerResult> {
-    if (this.#options.setupId === "mlx-cleanup/qwen-targeted") {
+    if (this.#options.setupId === "mlx-cleanup/qwen-targeted" || isCleanupModelId(this.#options.setupId)) {
       return Promise.reject(new SetupWorkerError("cleanup worker does not transcribe"));
     }
     try {
@@ -170,6 +174,17 @@ export class PythonSetupWorker {
       }
       return this.#run("cleanup", { text, basePcm: wireIdentity(basePcm), B: null,
         transcriptSha256: hash(text) }, Buffer.alloc(0), signal);
+    } catch (error) { return Promise.reject(error); }
+  }
+
+  /** A text cleanup model's pass over one final's own text; the worker loads on first use. */
+  cleanText({ text, ...context }: TextCleanupInput, signal?: AbortSignal): Promise<PythonWorkerResult> {
+    try {
+      if (!isCleanupModelId(this.#options.setupId)) throw new SetupWorkerError("not a text cleanup worker");
+      if (typeof text !== "string" || Buffer.byteLength(text, "utf8") > MAX_WORKER_TEXT_BYTES) {
+        throw new SetupWorkerError("cleanup text exceeds limit");
+      }
+      return this.#run("cleanup", { text, ...context }, Buffer.alloc(0), signal);
     } catch (error) { return Promise.reject(error); }
   }
 

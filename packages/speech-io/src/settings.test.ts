@@ -7,7 +7,7 @@ const DECLARED: readonly VoiceSetting[] = [
     options: [{ value: 0.5, label: "0.5" }, { value: 0.9, label: "0.9" }] },
   { id: "greedy", label: "Greedy", note: "n", kind: "choice", default: false,
     options: [{ value: false, label: "Off" }, { value: true, label: "On" }] },
-  { id: "instructions", label: "Instruction", note: "n", kind: "text", default: "", maxLength: 5 },
+  { id: "instructions", label: "Instruction", note: "n", kind: "text", default: "", maxLength: 5, lines: 3 },
   { id: "seed", label: "Seed", note: "n", kind: "integer", default: 1, min: 0, max: 100 },
 ];
 

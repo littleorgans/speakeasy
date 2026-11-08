@@ -27,6 +27,7 @@ import { SetupWorkers } from "./setup-workers.ts";
 import type { SetupExecutor } from "./setup-protocol.ts";
 import { SetupRoutes, type ProviderRoutesConfig, type SetupReadiness } from "./setup-routes.ts";
 import { SpeechOutputSession, type SpeechOutputSessionOptions } from "./speech-output-session.ts";
+import { CleanupRoutes, TextCleanups } from "./text-cleanup.ts";
 import { PICK_ROUTE, REFERENCE_ROUTE, servePick, serveVoiceReferences, VoiceReferenceStore } from "./voice-references.ts";
 import { ChildTranscriber, TRANSCRIBE_MODEL_ID, TranscriptionError, type Transcriber } from "./transcriber.ts";
 
@@ -62,6 +63,7 @@ const STATIC_FILES = new Map([
   ["/setting-controls.js", "setting-controls.js"],
   ["/voice-settings.js", "voice-settings.js"],
   ["/voice-copy.js", "voice-copy.js"],
+  ["/text-cleanup.js", "text-cleanup.js"],
   ["/voice-settings.css", "voice-settings.css"],
 ]);
 const PROMPT_READER_API = "/prompt-reader/";
@@ -90,6 +92,8 @@ export type BrowserVoiceServerOptions = {
   transcriber?: Transcriber;
   setupExecutor?: SetupExecutor;
   setupReadiness?: () => readonly SetupReadiness[];
+  /** Text cleanup after a final; defaults to no configured cleanup model. */
+  textCleanups?: TextCleanups;
   providers?: ProviderRoutesConfig;
   speechOutput?: Pick<SpeechOutputSessionOptions, "catalogue" | "createOutput" | "quiesce"> & { close?(): Promise<void> };
   /** Page served at `/`; the road test stays at `/road-test` either way. */
@@ -108,6 +112,7 @@ export async function startBrowserVoiceServer(options: BrowserVoiceServerOptions
   const comparison = new SetupComparison({ executor: options.setupExecutor ?? new SetupWorkers() });
   const setupRoutes = new SetupRoutes({ reader: promptReader, comparison, lease,
     providers: options.providers, readiness: options.setupReadiness ?? (() => []) });
+  const cleanupRoutes = new CleanupRoutes(options.textCleanups ?? new TextCleanups());
   const sessions = new Set<BrowserConversationSession>();
   const references = new VoiceReferenceStore();
   const server = createServer((request, response) => {
@@ -130,6 +135,10 @@ export async function startBrowserVoiceServer(options: BrowserVoiceServerOptions
     }
     if (setupRoutes.handles(pathname)) {
       setupRoutes.serve(request, response);
+      return;
+    }
+    if (cleanupRoutes.handles(pathname)) {
+      cleanupRoutes.serve(request, response);
       return;
     }
     if (request.url === "/health") {
@@ -218,7 +227,7 @@ export async function startBrowserVoiceServer(options: BrowserVoiceServerOptions
       for (const socket of sockets.clients) socket.terminate();
       for (const socket of outputSockets.clients) socket.terminate();
       for (const socket of liveSockets.clients) socket.terminate();
-      const stopped = Promise.allSettled([transcriberClosed, setupRoutes.close(), ...[...sessions].map((session) => session.close()),
+      const stopped = Promise.allSettled([transcriberClosed, setupRoutes.close(), cleanupRoutes.close(), ...[...sessions].map((session) => session.close()),
         ...[...outputSessions].map((session) => session.close()), ...[...liveSessions].map((session) => session.close())]);
       sockets.close();
       outputSockets.close();

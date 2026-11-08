@@ -23,6 +23,14 @@
           <span class="quiet card" id="input-card"></span>
         </label>
         <div class="live" id="final-settings" hidden></div>
+        <div class="cleanup">
+          <label class="choice">
+            <span class="label">Cleanup</span>
+            <select id="cleanup-model"><option value="off">Off</option></select>
+            <span class="quiet card" id="cleanup-card" hidden></span>
+          </label>
+          <div class="live cleanup-settings" id="cleanup-settings" aria-label="Cleanup settings" hidden></div>
+        </div>
         <div class="live" id="live-row">
           <label class="setting"><span class="label">Live words</span><select id="live-model"></select></label>
           <span class="columns" id="live-settings"></span>
@@ -49,6 +57,7 @@
         <div class="transcript">
           <h2 class="label"><span>Transcript</span><span class="quiet" id="take-models"></span></h2>
           <p class="said" id="transcript">The transcript appears here, and the voice reads it back.</p>
+          <p class="quiet cleanup-line" id="cleanup-line" hidden></p>
           <p class="quiet" id="live-line"></p>
           <details class="trail" id="trail" hidden><summary class="quiet" id="trail-summary"></summary><ol id="trail-list"></ol></details>
         </div>

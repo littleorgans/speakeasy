@@ -6,6 +6,7 @@ import { formatDuration, inputCard, liveLine, outputCard, outputLatency, readEve
 import { appliedLive, describe, finalNote, HISTORY_COLUMNS, historyTrail, liveDiffers, pressToFirstWords, releaseToVoice } from "/take-history.js";
 import { chosenSettings, fill, settingColumns } from "/setting-controls.js";
 import { TalkOverDetector } from "/talk-over.js";
+import { TextCleanup } from "/text-cleanup.js";
 import { VoiceCopy } from "/voice-copy.js";
 import { VoiceReadback } from "/voice-readback.js";
 import { settingsNote, VoiceSettings } from "/voice-settings.js";
@@ -19,7 +20,8 @@ import { settingsNote, VoiceSettings } from "/voice-settings.js";
  * place; a collapsed trail lists each revision. A setup with final settings
  * (Cohere's names bias) shows them under Speech in; each take sends them.
  * Final text arrives as one comparison row; the voice uses the speech output
- * channel.
+ * channel and reads that final. An optional cleanup model then tidies the
+ * text on screen only (public/text-cleanup.js).
  */
 
 const SAMPLE_RATE = 16_000;
@@ -49,6 +51,8 @@ export class RoadTestPage {
     this.liveSelects = new Map();
     this.finalSelects = new Map();
     this.historyRows = new WeakMap();
+    this.historyTrails = new WeakMap();
+    this.cleanup = new TextCleanup({ document, onChange: () => this.render(), onLanded: (run) => this.cleanupLanded(run) });
     this.catalogueRevision = null;
     this.context = null;
     this.mic = null;
@@ -73,7 +77,7 @@ export class RoadTestPage {
       return head;
     }));
     try {
-      const [setups, voices] = await Promise.all([json("/prompt-reader/setups"), json("/speech-output/models")]);
+      const [setups, voices] = await Promise.all([json("/prompt-reader/setups"), json("/speech-output/models"), this.cleanup.load()]);
       this.setups = setups.setups;
       this.voices = voices.models.filter((model) => model.provider.kind === "local");
       this.catalogueRevision = voices.revision;
@@ -203,7 +207,7 @@ export class RoadTestPage {
     // A press over the voice stops it like Esc; the new take shows that stop.
     const interrupt = this.stopVoice(at);
     this.phase = "recording";
-    this.run = { setup: this.setup(), liveChoice: this.liveChoice(), finalChoice: this.finalChoice(),
+    this.run = { setup: this.setup(), liveChoice: this.liveChoice(), finalChoice: this.finalChoice(), cleanupChoice: this.cleanup.choice(),
       selection: this.selection(), voiceLabel: this.voiceLabel(), reading: this.voiceSettings.request(),
       pressedAt: at, ...(interrupt ? { interrupt } : {}) };
     this.status(LISTENING);
@@ -277,7 +281,12 @@ export class RoadTestPage {
     this.phase = "transcribing";
     this.status(`Transcribing with ${run.setup.label}`);
     this.render();
-    const result = await this.transcribe(run, take.samples, run.releasedAt);
+    // The final shows, then cleanup starts beside the voice, which never waits for it.
+    const result = await this.transcribe(run, take.samples, run.releasedAt, (text, input) => {
+      run.input = input;
+      this.showTranscript(text);
+      this.cleanup.start(run, text, this.history);
+    });
     if (this.run !== run) return;
     // Model start counts a load the live words did while the owner spoke.
     if (run.live?.loadMs != null) result.loadMs = (result.loadMs ?? 0) + run.live.loadMs;
@@ -337,7 +346,7 @@ export class RoadTestPage {
           result.processingMs = row.timings.processingMs;
           // The final settings the host applied, for the take's record.
           result.settings = row.settings ?? null;
-          onText(result.text);
+          onText(result.text, result);
         } else if (["error", "cancelled", "skipped"].includes(row.status)) {
           result.error = `${run.setup.label} failed: ${row.error?.message ?? row.status}`;
         }
@@ -431,6 +440,7 @@ export class RoadTestPage {
     if (!last?.input?.text || this.phase !== "idle" || !this.readback) return;
     this.stopReplay();
     const run = this.run = { setup: last.setup, liveChoice: last.liveChoice, live: last.live, input: last.input, take: last.take,
+      cleanupChoice: last.cleanupChoice, cleanup: last.cleanup,
       selection: this.selection(), voiceLabel: this.voiceLabel(), reading: this.voiceSettings.request() };
     await this.speak(run);
     this.remember(run);
@@ -477,6 +487,17 @@ export class RoadTestPage {
     return model ? `${model.label}${model.voices.length > 1 && voice ? `, ${voice.label}` : ""}` : "";
   }
 
+  /**
+   * A cleanup reply landed: the latest take shows it in place, and earlier
+   * rows that share it are rebuilt.
+   */
+  cleanupLanded(run) {
+    if (!run.input) return;
+    if (this.run?.cleanup === run.cleanup) this.cleanup.show(this.run, this.elements.transcript);
+    for (const earlier of this.history) if (earlier.cleanup === run.cleanup) this.historyRows.delete(earlier);
+    this.render();
+  }
+
   showTranscript(text) {
     const element = this.elements.transcript;
     element.textContent = text;
@@ -508,6 +529,7 @@ export class RoadTestPage {
     // Names the models that produced the latest take, so changed selects never claim its figures.
     this.elements["take-models"].textContent = run ? [run.setup.label, finalNote(run), run.selection && run.voiceLabel]
       .filter(Boolean).join(" · ") : "";
+    this.cleanup.line(run);
     this.renderLive(run);
     this.elements["replay-take"].disabled = !run?.take;
     this.elements["replay-talk-over"].hidden = !run?.cutInTake;
@@ -542,6 +564,7 @@ export class RoadTestPage {
       ["Release to text", formatDuration(input?.finalMs), null, differs ? run.setup.label : null],
       ["Model time", formatDuration(input?.processingMs)],
       ...(input?.loadMs != null ? [["Model start", formatDuration(input.loadMs)]] : []),
+      ...this.cleanup.timings(run),
     ]);
     const output = run?.output;
     const latency = run?.outputLatency ?? outputLatency(this.context);
@@ -591,7 +614,13 @@ export class RoadTestPage {
           quiet.textContent = note;
           data.append(quiet);
         }
-        if (trail && run.live?.updates?.length) data.append(historyTrail(run));
+        if (trail && run.live?.updates?.length) {
+          // A row rebuilt for a late cleanup keeps its trail open.
+          const details = historyTrail(run);
+          details.open = Boolean(this.historyTrails.get(run)?.open);
+          this.historyTrails.set(run, details);
+          data.append(details);
+        }
         row.append(data);
       }
       this.historyRows.set(run, row);

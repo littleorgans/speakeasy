@@ -59,6 +59,44 @@ def runtime_versions():
     return actual
 
 
+def pinned_snapshot(path, revision, files, label):
+    """A local snapshot at the pinned revision with only the pinned weights; each pinned file's SHA256 checked and returned."""
+    if not path.is_absolute() or path.resolve().name != revision or not path.is_dir():
+        raise ValueError(f"{label} requires the pinned local snapshot directory")
+    if {file.name for file in path.glob("*.safetensors")} != {"model.safetensors"}:
+        raise ValueError(f"{label} snapshot must contain only the pinned model.safetensors weights")
+    hashes = {}
+    for name, expected in files.items():
+        if not (path / name).is_file():
+            raise ValueError(f"{label} model file missing: {name}")
+        with (path / name).open("rb") as source:
+            actual = hashlib.file_digest(source, "sha256").hexdigest()
+        if actual != expected:
+            raise ValueError(f"{label} model file hash mismatch: {name}")
+        hashes[name] = actual
+    return hashes
+
+
+def load_mlx(path):
+    """Native imports, then the snapshot's weights evaluated on the GPU stream and fenced.
+
+    Returns mx, the generation stream, model, tokenizer, a greedy sampler and stream_generate.
+    """
+    import mlx.core as mx
+    from mlx_lm import load, stream_generate
+    from mlx_lm.sample_utils import make_sampler
+
+    if not mx.metal.is_available():
+        raise RuntimeError("MLX Metal GPU is unavailable")
+    mx.set_default_device(mx.gpu)
+    stream = mx.default_stream(mx.gpu)
+    with mx.stream(stream):
+        model, tokenizer = load(str(path), trust_remote_code=False)
+        mx.eval(model.parameters())
+    mx.synchronize()
+    return mx, stream, model, tokenizer, make_sampler(temp=0), stream_generate
+
+
 class CleanupError(RuntimeError):
     """Keep the failed historical result and expose rawText to the transport."""
 
@@ -94,44 +132,22 @@ class Backend:
             return self.ready
         started = time.perf_counter()
         path = Path(self.options["modelPath"])
-        if not path.is_absolute() or path.resolve().name != REVISION or not path.is_dir():
-            raise ValueError("Cleanup requires the pinned local snapshot directory")
-        if {file.name for file in path.glob("*.safetensors")} != {"model.safetensors"}:
-            raise ValueError("Cleanup snapshot must contain only the pinned model.safetensors weights")
+        hashes = pinned_snapshot(path, REVISION, MODEL_FILES, "Cleanup")
         prompt = (ROOT / "cleanup-prompt.txt").read_bytes()
         if hashlib.sha256(prompt).hexdigest() != PROMPT_SHA256:
             raise ValueError("Cleanup prompt hash mismatch")
         versions = runtime_versions()
-        hashes = {}
-        for name, expected in MODEL_FILES.items():
-            with (path / name).open("rb") as source:
-                actual = hashlib.file_digest(source, "sha256").hexdigest()
-            if actual != expected:
-                raise ValueError("Cleanup model file hash mismatch: " + name)
-            hashes[name] = actual
         config = json.loads((path / "config.json").read_bytes())
         template = json.loads((path / "tokenizer_config.json").read_bytes())["chat_template"]
         if template_sha256(template) != TEMPLATE_SHA256:
             raise ValueError("Cleanup native chat template hash mismatch")
 
-        import mlx.core as mx
-        from mlx_lm import load, stream_generate
-        from mlx_lm.sample_utils import make_sampler
-
-        if not mx.metal.is_available():
-            raise RuntimeError("MLX Metal GPU is unavailable")
-        mx.set_default_device(mx.gpu)
-        stream = mx.default_stream(mx.gpu)
-        with mx.stream(stream):
-            model, tokenizer = load(str(path), trust_remote_code=False)
-            mx.eval(model.parameters())
-        mx.synchronize()
+        mx, stream, model, tokenizer, sampler, generate = load_mlx(path)
         if template_sha256(tokenizer.chat_template) != TEMPLATE_SHA256:
             raise ValueError("Cleanup loaded chat template hash mismatch")
-        sampler = make_sampler(temp=0)
         self.mx, self.stream = mx, stream
         self.model, self.tokenizer = model, tokenizer
-        self.sampler, self.generate = sampler, stream_generate
+        self.sampler, self.generate = sampler, generate
         self.system = prompt.decode("utf-8")
         self.ready = {
             "setupId": SETUP_ID, "model": MODEL, "revision": REVISION,

@@ -37,6 +37,8 @@ BACKENDS = {
     "qwen3-tts-1.7b-base": "qwen_clone",
     "kokoro-ane-heart": "native_voice",
     "kokoro-ane-folded-heart": "native_voice",
+    "superwhisper/s1-mini": "s1_mini",
+    "apple/foundation-models": "apple_cleanup",
 }
 # Speech out voices answer speak with PCM; they never transcribe.
 VOICES = {"kokoro-mlx-bf16", "pocket-18m", "piper-kristin-split", "kokoro-coreml", "phonon-31m", "phonon-40m",
@@ -48,6 +50,15 @@ SPEECH_IN_RATES = (16_000,)
 REFERENCE_RATES = range(16_000, 96_001)
 MAX_SETTINGS = 32
 MAX_SETTING_TEXT = 1_000
+# Text cleanup models (src/text-cleanup.ts) clean a final's own text. They
+# answer only load, cleanup and close, and never take PCM identity. A failure
+# a page may show is raised as "<code>: <fixed text>", never with take text.
+TEXT_CLEANUPS = {"superwhisper/s1-mini", "apple/foundation-models"}
+TEXT_CLEANUP_FIELDS = {"version", "generation", "id", "setupId", "operation", "pcmBytes",
+                       "text", "instruction", "names", "earlier"}
+MAX_INSTRUCTION = 2_000
+MAX_NAMES = 400
+MAX_EARLIER, MAX_EARLIER_BYTES = 3, 4_096
 
 
 class ProtocolError(ValueError):
@@ -164,6 +175,30 @@ def cleanup_text(header):
     return text
 
 
+def text_cleanup_request(header, backend):
+    """The text and, for a backend that takes it, its instruction, names and earlier takes."""
+    if set(header) - TEXT_CLEANUP_FIELDS:
+        raise ProtocolError("text cleanup takes text, instruction, names and earlier only")
+    text = header.get("text")
+    if not isinstance(text, str) or len(text.encode("utf-8")) > MAX_TEXT_BYTES:
+        raise ProtocolError("invalid cleanup text")
+    context = {name: header[name] for name in ("instruction", "names", "earlier") if name in header}
+    if context and not getattr(backend, "takes_context", False):
+        raise ProtocolError("this cleanup model takes text only")
+    instruction = context.get("instruction", "")
+    if not isinstance(instruction, str) or len(instruction) > MAX_INSTRUCTION:
+        raise ProtocolError("invalid cleanup instruction")
+    names = context.get("names", [])
+    if (not isinstance(names, list) or any(not isinstance(name, str) or not name.strip() for name in names)
+            or len(", ".join(names)) > MAX_NAMES):
+        raise ProtocolError("invalid cleanup names")
+    earlier = context.get("earlier", [])
+    if (not isinstance(earlier, list) or len(earlier) > MAX_EARLIER or any(not isinstance(take, str) for take in earlier)
+            or sum(len(take.encode("utf-8")) for take in earlier) > MAX_EARLIER_BYTES):
+        raise ProtocolError("invalid cleanup earlier takes")
+    return text, context
+
+
 def speak_request(header):
     text, voice, speed = header.get("text"), header.get("voice"), header.get("speed")
     if not isinstance(text, str) or not text.strip() or len(text.encode("utf-8")) > MAX_TEXT_BYTES:
@@ -261,6 +296,7 @@ def handle_request(header, body, backend, setup_id, factory):
     operation = header.get("operation")
     cleanup = setup_id == "mlx-cleanup/qwen-targeted"
     voice = setup_id in VOICES
+    text_only = setup_id in TEXT_CLEANUPS
     if operation not in ("transcribe", "feed", "speak") and body:
         raise ProtocolError("unexpected body")
     if operation == "load":
@@ -281,7 +317,7 @@ def handle_request(header, body, backend, setup_id, factory):
         extras = (settings, reference) if reference is not None else (settings,) if settings is not None else ()
         return backend, audio_reply(backend.speak(*speak_request(header), *extras))
     # Only backends whose engine truly streams answer feed; the rest give final text only.
-    if operation == "feed" and not cleanup and not voice and hasattr(backend, "feed"):
+    if operation == "feed" and not cleanup and not voice and not text_only and hasattr(backend, "feed"):
         if type(header.get("start")) is not bool:
             raise ProtocolError("feed requires start")
         settings = header.get("settings")
@@ -290,7 +326,7 @@ def handle_request(header, body, backend, setup_id, factory):
         result = backend.feed(pcm_samples(header, body), header["start"], settings)
         validate_partial(result)
         return backend, {"type": "partial", "partial": result}
-    if operation == "transcribe" and not cleanup and not voice:
+    if operation == "transcribe" and not cleanup and not voice and not text_only:
         # Final settings (src/final-settings.ts) go only to a backend that offers them.
         settings = header.get("settings")
         if settings is not None and not isinstance(settings, dict):
@@ -299,6 +335,9 @@ def handle_request(header, body, backend, setup_id, factory):
         result = backend.transcribe(samples) if settings is None else backend.transcribe(samples, settings)
     elif operation == "cleanup" and cleanup:
         result = backend.cleanup(cleanup_text(header))
+    elif operation == "cleanup" and text_only:
+        text, context = text_cleanup_request(header, backend)
+        result = backend.cleanup(text, **context)
     else:
         raise ProtocolError("operation does not match setup")
     validate_result(result)

@@ -84,9 +84,11 @@ function createControl(document, setting) {
       controlValue(setting, setting.default));
     return select;
   }
-  const input = document.createElement("input");
+  // A text setting with lines is a passage: a textarea that tall.
+  const input = document.createElement(setting.kind === "text" && setting.lines ? "textarea" : "input");
   if (setting.kind === "text") {
-    input.type = "text";
+    if (setting.lines) input.rows = setting.lines;
+    else input.type = "text";
     input.maxLength = setting.maxLength;
   } else {
     input.type = "number";
@@ -94,6 +96,13 @@ function createControl(document, setting) {
   }
   input.value = controlValue(setting, setting.default);
   return input;
+}
+
+/** Whether `value` is one `setting` offers, as the host's resolveSettings checks it (speech-io settings.ts). */
+export function accepts(setting, value) {
+  if (setting.kind === "choice") return setting.options.some((option) => option.value === value);
+  if (setting.kind === "text") return typeof value === "string" && value.length <= setting.maxLength;
+  return Number.isSafeInteger(value) && value >= setting.min && value <= setting.max;
 }
 
 function controlValue(setting, value) {
