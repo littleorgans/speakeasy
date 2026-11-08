@@ -96,13 +96,13 @@ export const selection = { schema: 1, provider: { kind: "local" }, model: "piper
  * a 41 ms stop; clearing the readback's hold lets later readings finish. Each mic take is one sample longer than the last, so replays
  * show which take they play. With transcript "partials" the setup streams: live records what reaches the live words channel.
  * Cleanup models come from `cleanups`; each cleanup request is recorded and answered by `cleanupReply`, and
- * `stored` seeds the page's localStorage. `comparisonEnd` holds the comparison stream open after its rows.
- * The names route answers `names` and each save with `saveNames`; `namesSaves` records each save's body.
+ * `stored` seeds the page's localStorage. `comparisonStart` holds the comparison stream before its rows; `comparisonEnd`
+ * holds it open after them. The names route answers `names` and each save with `saveNames`; `namesSaves` records each save's body.
  */
 export function pageHarness({ holdVoice = false, transcript = "final", models = [] as unknown[], cleanups = CLEANUP_MODELS as unknown[],
-  cleanupReply = echoCleanup, comparisonEnd = Promise.resolve(), stored = {} as Record<string, string>,
+  cleanupReply = echoCleanup, comparisonStart = Promise.resolve(), comparisonEnd = Promise.resolve(), stored = {} as Record<string, string>,
   names = namesReply(DEFAULT_NAMES_SNAPSHOT.names) as FetchReply, saveNames = canonicalNames }: { holdVoice?: boolean; transcript?: string; models?: unknown[];
-  comparisonEnd?: Promise<void>; names?: FetchReply; saveNames?: (body: any) => Promise<FetchReply>;
+  comparisonStart?: Promise<void>; comparisonEnd?: Promise<void>; names?: FetchReply; saveNames?: (body: any) => Promise<FetchReply>;
   cleanups?: unknown[]; cleanupReply?: (body: any) => Promise<FetchReply>; stored?: Record<string, string> } = {}, rows: unknown[] = [
   { type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status: "processing", text: null, timings: {} } },
   { type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status: "complete", text: "Clear the screen.", timings: { firstUse: false, processingMs: 90 } } },
@@ -193,6 +193,7 @@ export function pageHarness({ holdVoice = false, transcript = "final", models = 
     if (url === "/prompt-reader/setups") return { ok: true, json: async () => setups };
     if (url === "/speech-output/models") return { ok: true, json: async () => voices };
     const body = new ReadableStream({ async start(controller) {
+      await comparisonStart;
       controller.enqueue(new TextEncoder().encode(rows.map((row) => JSON.stringify(row)).join("\n") + "\n"));
       await comparisonEnd;
       controller.close();

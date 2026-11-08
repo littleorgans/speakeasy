@@ -629,6 +629,44 @@ test("interrupting Read again with a new take preserves the interrupted reading 
   await until(() => page.phase === "idle");
 });
 
+test("an older take's comparison keeps off a newer take's transcript, status and cleanup", async () => {
+  let deliver!: () => void;
+  const comparisonStart = new Promise<void>((resolve) => { deliver = resolve; });
+  const row = (status: string, extra = {}) => ({ type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status, text: null, timings: {}, ...extra } });
+  const { page, elements, posted } = pageHarness({ comparisonStart }, [row("loading"), row("processing"),
+    row("complete", { text: "Clear the screen.", timings: { firstUse: true, processingMs: 90 } })]);
+  await page.start();
+  const shown: string[] = [];
+  const show = page.showTranscript.bind(page);
+  page.showTranscript = (text: string) => { shown.push(text); show(text); };
+  const cleaned: string[] = [];
+  const clean = page.cleanup.start.bind(page.cleanup);
+  page.cleanup.start = (run: unknown, text: string, history: unknown) => { cleaned.push(text); clean(run, text, history); };
+  const transcriptions: Promise<unknown>[] = [];
+  const transcribe = page.transcribe.bind(page);
+  page.transcribe = (...args: unknown[]) => { const result = transcribe(...args); transcriptions.push(result); return result; };
+  page.press(100);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  page.release(500);
+  await until(() => posted.some((url) => url.startsWith("/prompt-reader/comparisons?")));
+  const older = page.run;
+  page.press(3_000);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.notEqual(page.run, older);
+  const status = elements.get("status").textContent;
+  deliver();
+  await transcriptions[0];
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(shown, [], "the older final never reaches the transcript");
+  assert.deepEqual(cleaned, [], "the older final starts no cleanup");
+  assert.equal(elements.get("status").textContent, status, "the older rows leave the newer take's status");
+  assert.equal(page.phase, "recording", "the newer take keeps recording");
+  page.release(3_400);
+  await until(() => page.phase === "idle");
+  assert.deepEqual(shown, ["Clear the screen."], "the newer take shows its own final");
+  assert.deepEqual(cleaned, ["Clear the screen."]);
+});
+
 test("a voice copy model shows the consent note; My recording needs a recording and its transcript before sending", async () => {
   const harness = pageHarness({ models: QWEN_MODELS });
   await harness.page.start();
