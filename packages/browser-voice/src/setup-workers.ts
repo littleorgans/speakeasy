@@ -378,8 +378,10 @@ export class PythonSetupWorker {
 
   #spawn(): Session {
     const generation = randomUUID();
+    // A separate lifetime pipe stays observable while Python is blocked in a backend call.
     const child = spawn(this.#options.pythonPath, ["-B", "-u", this.#options.workerPath ?? WORKER_PATH,
-      "--setup", this.#options.setupId, "--generation", generation], { stdio: ["pipe", "pipe", "pipe"],
+      "--setup", this.#options.setupId, "--generation", generation, "--parent-fd", "3"],
+      { stdio: ["pipe", "pipe", "pipe", "pipe"],
       // Its own process group: retirement reaches every runner it starts, busy ones included.
       detached: true });
     let finish!: () => void;

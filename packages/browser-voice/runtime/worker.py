@@ -7,8 +7,10 @@ import importlib
 import json
 import math
 import os
+import signal
 import struct
 import sys
+import threading
 from array import array
 
 from names import names_option
@@ -404,11 +406,27 @@ def serve(source, target, setup_id, generation, factory=backend_factory):
         close_backend()
 
 
+def exit_with_parent(parent_fd):
+    """Watch a separate pipe, including while the serving thread is in inference."""
+    try:
+        while os.read(parent_fd, 1):
+            pass
+    finally:
+        # The host is gone: no owner remains to escalate or reap busy runners.
+        os.killpg(os.getpid(), signal.SIGKILL)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--setup", choices=BACKENDS, required=True)
     parser.add_argument("--generation", required=True)
+    parser.add_argument("--parent-fd", type=int)
     args = parser.parse_args()
+    if args.parent_fd is not None:
+        if os.getpgrp() != os.getpid():
+            parser.error("parent lifetime pipe requires a worker process group")
+        os.set_inheritable(args.parent_fd, False)
+        threading.Thread(target=exit_with_parent, args=(args.parent_fd,), daemon=True).start()
     # Keep a private protocol descriptor. Native writes to fd 1 go to stderr too.
     sys.stdout.flush()
     protocol_fd = os.dup(sys.stdout.fileno())
