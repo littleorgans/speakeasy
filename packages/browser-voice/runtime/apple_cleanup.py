@@ -95,4 +95,3 @@ class Backend:
         self.metadata = None
         if process is not None:
             stop(process)
-
