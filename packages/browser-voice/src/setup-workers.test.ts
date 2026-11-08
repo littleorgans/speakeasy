@@ -3,9 +3,8 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { encodeWavFloat32 } from "../../speech-io/src/bench/wav.ts";
 import { pcmDigest, PythonSetupWorker, SetupWorkers, MAX_WORKER_PCM_BYTES, MAX_WORKER_TEXT_BYTES } from "./setup-workers.ts";
 import { readPinnedPick } from "./voice-references.ts";
@@ -13,9 +12,8 @@ import { createWorkerVoiceSynth } from "./voice-workers.ts";
 import { createCanonicalPcm, sha256, type SetupExecution, type SetupLoadResult } from "./setup-protocol.ts";
 import { CPU_PRESETS, type CpuReady } from "./transcriber.ts";
 import { DEFAULT_NAMES_SNAPSHOT, namesSnapshot } from "./names.ts";
+import { assertExited, markerPid, PYTHON, RUNTIME } from "./setup-worker-test-fixtures.ts";
 
-let PYTHON: string;
-const RUNTIME = fileURLToPath(new URL("../runtime/", import.meta.url));
 let directory: string;
 let fixture: string;
 
@@ -151,8 +149,6 @@ sys.exit(worker.main())
 `;
 
 before(async () => {
-  // Resolve the interpreter once so per request deadlines exclude a version manager shim.
-  PYTHON = execFileSync("python3", ["-c", "import sys; print(sys.executable)"], { encoding: "utf8" }).trim();
   directory = await mkdtemp(join(tmpdir(), "speakeasy-worker-transport-"));
   fixture = join(directory, "fake_worker.py");
   await writeFile(fixture, FAKE);
@@ -165,20 +161,6 @@ function makeWorker(options: Partial<ConstructorParameters<typeof PythonSetupWor
     loadTimeoutMs: 3000, operationTimeoutMs: 3000, ...options });
 }
 function digest(bytes: Uint8Array): string { return createHash("sha256").update(bytes).digest("hex"); }
-async function markerPid(path: string): Promise<number> {
-  const deadline = performance.now() + 3000;
-  while (performance.now() < deadline) {
-    try {
-      const pid = Number(await readFile(path, "utf8"));
-      if (Number.isInteger(pid) && pid > 0) return pid;
-    } catch { /* Wait for the fake operation to start. */ }
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  throw new Error("fake process did not start");
-}
-function assertExited(pid: number): void {
-  assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
-}
 
 test("real persistent process preserves offset PCM bytes, hash, signed zero and caller ownership", async (t) => {
   const worker = makeWorker({ backendOptions: { mode: "fragmented" } });

@@ -205,6 +205,44 @@ test("after a talk over both recordings replay, each under its own button", asyn
   assert.deepEqual(played, [8_000, 8_001], "the main take, then the talk over");
 });
 
+test("an older talk over completion preserves a newer take's phase and status", async () => {
+  const { page, elements, spoken } = pageHarness({ holdVoice: true });
+  await page.start();
+  await take(page, 100);
+  const older = page.run;
+  let deliver!: () => void;
+  const comparisonEnd = new Promise<void>((resolve) => { deliver = resolve; });
+  let transcribed = false;
+  const transcribe = page.transcribe.bind(page);
+  page.transcribe = async (...args: unknown[]) => {
+    const result = await transcribe(...args);
+    transcribed = true;
+    await comparisonEnd;
+    return result;
+  };
+  page.cutIn(older, page.context.currentTime);
+  const finishing = page.finishCutIn(older);
+  await until(() => transcribed);
+  assert.equal(page.phase, "cut-in-transcribing");
+  page.readback.hold = false;
+  page.press(3_000);
+  await until(() => page.mic.recording);
+  const newer = page.run;
+  assert.notEqual(newer, older);
+  const status = elements.get("status").textContent;
+  deliver();
+  await finishing;
+  assert.equal(older.interrupt.text, "Clear the screen.", "the older take keeps its talk over result");
+  assert.equal(page.run, newer);
+  assert.equal(page.phase, "recording", "the older completion cannot reset the newer take's phase");
+  assert.equal(elements.get("status").textContent, status, "the older completion cannot replace the newer take's status");
+  page.release(3_400);
+  await until(() => newer.output);
+  assert.equal(page.phase, "idle");
+  assert.equal(newer.input.text, "Clear the screen.");
+  assert.equal(spoken.length, 2, "the newer take completes its own transcription and readback");
+});
+
 test("earlier takes label every cell and name a cold row's model start", async () => {
   const row = (status: string, extra = {}) => ({ type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status, text: null, timings: {}, ...extra } });
   const { page, elements } = pageHarness({}, [row("loading"), row("processing"),
@@ -629,6 +667,44 @@ test("interrupting Read again with a new take preserves the interrupted reading 
   await until(() => page.phase === "idle");
 });
 
+test("an older take's comparison keeps off a newer take's transcript, status and cleanup", async () => {
+  let deliver!: () => void;
+  const comparisonStart = new Promise<void>((resolve) => { deliver = resolve; });
+  const row = (status: string, extra = {}) => ({ type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status, text: null, timings: {}, ...extra } });
+  const { page, elements, posted } = pageHarness({ comparisonStart }, [row("loading"), row("processing"),
+    row("complete", { text: "Clear the screen.", timings: { firstUse: true, processingMs: 90 } })]);
+  await page.start();
+  const shown: string[] = [];
+  const show = page.showTranscript.bind(page);
+  page.showTranscript = (text: string) => { shown.push(text); show(text); };
+  const cleaned: string[] = [];
+  const clean = page.cleanup.start.bind(page.cleanup);
+  page.cleanup.start = (run: unknown, text: string, history: unknown) => { cleaned.push(text); clean(run, text, history); };
+  const transcriptions: Promise<unknown>[] = [];
+  const transcribe = page.transcribe.bind(page);
+  page.transcribe = (...args: unknown[]) => { const result = transcribe(...args); transcriptions.push(result); return result; };
+  page.press(100);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  page.release(500);
+  await until(() => posted.some((url) => url.startsWith("/prompt-reader/comparisons?")));
+  const older = page.run;
+  page.press(3_000);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.notEqual(page.run, older);
+  const status = elements.get("status").textContent;
+  deliver();
+  await transcriptions[0];
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(shown, [], "the older final never reaches the transcript");
+  assert.deepEqual(cleaned, [], "the older final starts no cleanup");
+  assert.equal(elements.get("status").textContent, status, "the older rows leave the newer take's status");
+  assert.equal(page.phase, "recording", "the newer take keeps recording");
+  page.release(3_400);
+  await until(() => page.phase === "idle");
+  assert.deepEqual(shown, ["Clear the screen."], "the newer take shows its own final");
+  assert.deepEqual(cleaned, ["Clear the screen."]);
+});
+
 test("a voice copy model shows the consent note; My recording needs a recording and its transcript before sending", async () => {
   const harness = pageHarness({ models: QWEN_MODELS });
   await harness.page.start();
@@ -833,4 +909,60 @@ test("readings that overlap while the speech socket opens share one connection",
   assert.equal((await first).outcome, "stopped");
   assert.equal((await second).outcome, "error");
   assert.equal(sockets.length, 1, "a superseded preparation must not open a second socket");
+});
+
+test("a superseded socket's events never settle the reading that replaced it", async () => {
+  const { readback, sockets } = readbackHarness({ manualOpen: true });
+  const first = readback.speak({ selection, catalogueRevision: "rev", text: "First." });
+  await until(() => sockets.length === 1);
+  const second = readback.speak({ selection, catalogueRevision: "rev", text: "Second." });
+  await until(() => sockets.length === 2);
+  const [old, current] = sockets as [any, any];
+  let stopped: any;
+  void first.then((result) => { stopped = result; });
+  await until(() => stopped);
+  assert.equal(stopped.outcome, "stopped", "retirement must not wait for the old handshake");
+  old.open();
+  assert.equal(old.readyState, 3, "a retired connection must release its server socket and session");
+  old.event({ type: "sample-error", requestId: null, code: "SETTINGS_INVALID", message: "stale" });
+  assert.equal(readback.active, true, "the retired socket's message must not end the current reading");
+  old.close();
+  assert.equal(readback.active, true, "the retired socket's close must not end the current reading");
+  current.open();
+  await until(() => current.sent.length);
+  assert.equal(old.sent.length, 0);
+  const requestId = current.sent[0].requestId;
+  current.event({ type: "sample-complete", requestId, outcome: "produced" });
+  assert.equal((await second).outcome, "finished");
+});
+
+test("stopping a reading during its socket handshake settles before the socket opens", async () => {
+  const { readback, sockets } = readbackHarness({ manualOpen: true });
+  let result: any;
+  const done = readback.speak({ selection, catalogueRevision: "rev", text: "First." });
+  void done.then((output) => { result = output; });
+  await until(() => sockets.length === 1);
+  readback.stop();
+  await until(() => result);
+  assert.equal(result.outcome, "stopped");
+  sockets[0]!.open();
+  await Promise.resolve();
+  assert.equal(sockets[0]!.sent.length, 0, "opening later must not send the stopped reading");
+});
+
+test("a retired socket's handshake error cannot fail the replacement reading", async () => {
+  const { readback, sockets } = readbackHarness({ manualOpen: true });
+  const first = readback.speak({ selection, catalogueRevision: "rev", text: "First." });
+  await until(() => sockets.length === 1);
+  const second = readback.speak({ selection, catalogueRevision: "rev", text: "Second." });
+  await until(() => sockets.length === 2);
+  const [old, current] = sockets as [any, any];
+  old.fire("error", {});
+  old.close();
+  assert.equal((await first).outcome, "stopped");
+  current.open();
+  await until(() => current.sent.length);
+  assert.equal(readback.active, true);
+  current.event({ type: "sample-complete", requestId: current.sent[0].requestId, outcome: "produced" });
+  assert.equal((await second).outcome, "finished");
 });

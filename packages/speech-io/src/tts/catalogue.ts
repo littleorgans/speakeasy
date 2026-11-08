@@ -8,6 +8,10 @@ import { QWEN_COPY_SETTINGS, QWEN_COPY_VOICES, QWEN_CUSTOM_17B_SETTINGS, QWEN_CU
 const QWEN_COPY_LICENCE = "Apache 2.0 weights and qwen-tts code (Qwen); retain the licence and notices. " +
   "Copy only your own voice or the synthetic references.";
 
+/** A model declares this range only when its backend applies speed; every other voice speaks at 1. */
+export const LOCAL_OUTPUT_SPEED = { min: 0.5, max: 2 } as const;
+const FIXED_OUTPUT_SPEED = { min: 1, max: 1 } as const;
+
 /** Only owner approved browser choices. The legacy sweep registry stays separate. */
 export const LOCAL_OUTPUT_MODELS = [
   {
@@ -20,6 +24,7 @@ export const LOCAL_OUTPUT_MODELS = [
     streaming: "sentence",
     licence: "Voice released as public domain. Piper Plus MIT and CMU dictionary notices retained. International and talent rights unverified.",
     voices: [{ id: "kristin", label: "Kristin", languages: ["en-GB"], speakerId: 0 }],
+    speed: LOCAL_OUTPUT_SPEED,
   },
   {
     id: "kokoro-v1.0",
@@ -35,6 +40,7 @@ export const LOCAL_OUTPUT_MODELS = [
       { id: "af_bella", label: "Bella", languages: ["en-US"], speakerId: 2 },
       { id: "am_michael", label: "Michael", languages: ["en-US"], speakerId: 16 },
     ],
+    speed: LOCAL_OUTPUT_SPEED,
   },
   {
     id: "kokoro-mlx-bf16",
@@ -51,6 +57,7 @@ export const LOCAL_OUTPUT_MODELS = [
       { id: "af_heart", label: "Heart", languages: ["en-US"], speakerId: 0 },
       { id: "am_michael", label: "Michael", languages: ["en-US"], speakerId: 1 },
     ],
+    speed: LOCAL_OUTPUT_SPEED,
   },
   {
     id: "pocket-18m",
@@ -193,14 +200,12 @@ export type LocalOutputReadiness = {
   reason: string | null;
 };
 
-export const LOCAL_OUTPUT_SPEED = { min: 0.5, max: 2 } as const;
-
 /** Projection consumed by the one portable config parser. No second schema. */
 export const LOCAL_OUTPUT_REGISTRY: SpeechOutputRegistry = LOCAL_OUTPUT_MODELS.map((model) => ({
   kind: model.provider.kind,
   model: model.id,
   voices: model.voices.flatMap((voice) => [voice.id, voice.speakerId]),
-  speed: LOCAL_OUTPUT_SPEED,
+  speed: "speed" in model ? model.speed : FIXED_OUTPUT_SPEED,
 }));
 
 export const DEFAULT_LOCAL_OUTPUT: SpeechOutputConfig = Object.freeze({

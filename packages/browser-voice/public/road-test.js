@@ -335,14 +335,16 @@ export class RoadTestPage {
         if (event.type === "accepted") run.names ??= event.names ?? null;
         if (event.type !== "row" || event.row.setupId !== run.setup.id) return;
         const row = event.row;
+        // Rows fill their own take's result; only the current take shows them.
+        const current = this.run === run;
         // A cleanup row loads Ultra, then its own model: every load phase counts.
         if (row.status === "loading") {
           loadingAt = performance.now();
-          this.status(`Loading ${run.setup.label}`);
+          if (current) this.status(`Loading ${run.setup.label}`);
         } else if (row.status === "processing") {
           if (loadingAt != null) startMs += performance.now() - loadingAt;
           loadingAt = null;
-          this.status(`Transcribing with ${run.setup.label}`);
+          if (current) this.status(`Transcribing with ${run.setup.label}`);
         }
         if (row.status === "complete") {
           result.text = row.text ?? "";
@@ -353,7 +355,7 @@ export class RoadTestPage {
           result.processingMs = row.timings.processingMs;
           // The final settings the host applied, for the take's record.
           result.settings = row.settings ?? null;
-          onText(result.text, result);
+          if (current) onText(result.text, result);
         } else if (["error", "cancelled", "skipped"].includes(row.status)) {
           result.error = `${run.setup.label} failed: ${row.error?.message ?? row.status}`;
         }
@@ -436,6 +438,7 @@ export class RoadTestPage {
     run.cutInTake = take.samples;
     const result = await this.transcribe(run, take.samples, endedAt, () => {});
     run.interrupt.text = result.error || result.text || "Nothing heard";
+    if (this.run !== run) return;
     this.phase = "idle";
     this.status(DONE);
     this.render();

@@ -136,6 +136,11 @@ function positiveOption(value: number | undefined, fallback: number): number {
   if (!Number.isFinite(value) || value <= 0) throw new Error("worker deadlines must be positive");
   return value;
 }
+/** Signals the worker's process group, so native runners it started end with it. */
+function signalGroup(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): void {
+  if (child.pid === undefined) return void child.kill(signal);
+  try { process.kill(-child.pid, signal); } catch { /* The group already ended. */ }
+}
 
 /** One backend, one in flight operation. Failed generations settle only after process close. */
 export class PythonSetupWorker {
@@ -373,8 +378,12 @@ export class PythonSetupWorker {
 
   #spawn(): Session {
     const generation = randomUUID();
+    // A separate lifetime pipe stays observable while Python is blocked in a backend call.
     const child = spawn(this.#options.pythonPath, ["-B", "-u", this.#options.workerPath ?? WORKER_PATH,
-      "--setup", this.#options.setupId, "--generation", generation], { stdio: ["pipe", "pipe", "pipe"] });
+      "--setup", this.#options.setupId, "--generation", generation, "--parent-fd", "3"],
+      { stdio: ["pipe", "pipe", "pipe", "pipe"],
+      // Its own process group: retirement reaches every runner it starts, busy ones included.
+      detached: true });
     let finish!: () => void;
     const closed = new Promise<void>((resolve) => { finish = resolve; });
     const session: Session = { child, generation, buffer: Buffer.alloc(0), used: false,
@@ -466,8 +475,8 @@ export class PythonSetupWorker {
   #retire(session: Session, error: Error): void {
     session.failure ??= error;
     if (session.exited || session.killTimer) return;
-    session.child.kill("SIGTERM");
-    session.killTimer = setTimeout(() => { session.child.kill("SIGKILL"); }, 250);
+    signalGroup(session.child, "SIGTERM");
+    session.killTimer = setTimeout(() => signalGroup(session.child, "SIGKILL"), 250);
     session.killTimer.unref();
   }
 }
