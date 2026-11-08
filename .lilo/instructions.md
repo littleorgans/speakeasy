@@ -19,4 +19,4 @@ Docs: `.lilo/docs/`, start at `index.md`.
 - `operations/road-test-server.md`: start, check and stop the road test server on 4870.
 <!-- lilo-onboarding status=complete-quick date=2026-10-23 schema=1 -->
 <!-- lilo-digest sha256:226802096a649327 .lilo/docs/verification-gates.md -->
-<!-- lilo-digest sha256:05b856f02dc21a56 .lilo/docs/index.md -->
+<!-- lilo-digest sha256:cc3bd8ccc10d56e9 .lilo/docs/index.md -->
