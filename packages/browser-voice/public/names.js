@@ -23,6 +23,8 @@ export class NamesControl {
     root.replaceChildren(this.controls.column("names"));
     this.saved = null;
     this.serial = 0;
+    this.pending = 0;
+    this.saves = Promise.resolve();
     this.describe("Loading the names list");
   }
 
@@ -39,21 +41,26 @@ export class NamesControl {
   async commit() {
     if (!this.saved) return;
     const names = this.input.value.split(",").map((name) => name.trim()).filter(Boolean);
-    if (names.length === this.saved.names.length && names.every((name, index) => name === this.saved.names[index])) {
+    if (!this.pending && names.length === this.saved.names.length && names.every((name, index) => name === this.saved.names[index])) {
       this.show(this.saved);
       return;
     }
     const serial = ++this.serial;
+    this.pending++;
     this.describe("Saving");
     try {
-      const saved = await namesReply(await fetch(NAMES_ROUTE, { method: "PUT", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ names }) }));
+      // PUTs arrive in edit order, including a revert while an earlier save is pending.
+      const save = this.saves.catch(() => {}).then(async () => namesReply(await fetch(NAMES_ROUTE, {
+        method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ names }) })));
+      this.saves = save;
+      const saved = await save;
+      this.saved = saved;
       if (serial === this.serial) this.show(saved);
     } catch (error) {
       if (serial !== this.serial) return;
       const kept = this.saved.names.length ? this.saved.names.join(", ") : "no names";
       this.describe(`Not saved: ${error.message}. Takes still use the saved list: ${kept}`);
-    }
+    } finally { this.pending--; }
   }
 
   show(saved) {

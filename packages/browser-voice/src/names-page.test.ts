@@ -61,7 +61,7 @@ test("when the names route fails the field stays disabled and the note says why;
   assert.equal(harness.elements.get("status").textContent, "Ready");
 });
 
-test("a later save supersedes an earlier one still in flight", async () => {
+test("saves reach the host in edit order and only the latest edit replaces the field", async () => {
   const replies: Array<(reply: FetchReply) => void> = [];
   const harness = pageHarness({ saveNames: () => new Promise<FetchReply>((resolve) => replies.push(resolve)) });
   await harness.page.start();
@@ -70,10 +70,48 @@ test("a later save supersedes an earlier one still in flight", async () => {
   field.listeners.get("change")();
   field.value = "Qwen";
   field.listeners.get("change")();
-  await until(() => replies.length === 2);
-  replies[1]!(namesReply(["Qwen"]));
-  await until(() => field.value === "Qwen" && note.textContent.startsWith("Saved"));
+  await until(() => replies.length >= 1);
+  assert.equal(replies.length, 1, "the second PUT waits for the first to finish");
   replies[0]!(namesReply(["Grok"]));
-  await new Promise((resolve) => setTimeout(resolve, 10));
-  assert.equal(field.value, "Qwen", "the earlier reply lands late and is ignored");
+  await until(() => replies.length === 2);
+  assert.equal(field.value, "Qwen", "an earlier reply must not overwrite a newer edit");
+  replies[1]!(namesReply(["Qwen"]));
+  await until(() => note.textContent.startsWith("Saved"));
+  assert.equal(field.value, "Qwen");
+});
+
+test("reverting to the saved names while a PUT is pending still saves the revert", async () => {
+  const replies: Array<(reply: FetchReply) => void> = [];
+  const harness = pageHarness({ saveNames: () => new Promise<FetchReply>((resolve) => replies.push(resolve)) });
+  await harness.page.start();
+  const { field } = names(harness);
+  field.value = "Grok";
+  const first = harness.page.names.commit();
+  field.value = DEFAULT_NAMES.join(", ");
+  const second = harness.page.names.commit();
+  await until(() => replies.length >= 1);
+  replies[0]!(namesReply(["Grok"]));
+  await first;
+  assert.deepEqual(harness.namesSaves, [{ names: ["Grok"] }, { names: [...DEFAULT_NAMES] }]);
+  replies[1]!(namesReply([...DEFAULT_NAMES]));
+  await second;
+  assert.equal(field.value, DEFAULT_NAMES.join(", "));
+});
+
+test("a failed latest edit reports the preceding successful save as the list still in use", async () => {
+  let finish!: (reply: FetchReply) => void;
+  const harness = pageHarness({ saveNames: (body) => body.names[0] === "Grok"
+    ? new Promise<FetchReply>((resolve) => { finish = resolve; })
+    : Promise.resolve({ ok: false, status: 400, json: async () => ({ error: "refused edit" }) }) });
+  await harness.page.start();
+  const { field, note } = names(harness);
+  field.value = "Grok";
+  const first = harness.page.names.commit();
+  field.value = "Qwen";
+  const second = harness.page.names.commit();
+  await until(() => !!finish);
+  finish(namesReply(["Grok"]));
+  await Promise.all([first, second]);
+  assert.equal(note.textContent, "Not saved: refused edit. Takes still use the saved list: Grok");
+  assert.equal(field.value, "Qwen", "the refused edit stays available to fix");
 });
