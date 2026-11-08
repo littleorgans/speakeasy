@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import * as trail from "../public/live-trail.js";
-import { choose, cleanupReply, CLEANUP_MODELS, control, FM_INSTRUCTION, listed, nodes, pageHarness, take, until, type FetchReply }
+import { choose, cleanupReply, CLEANUP_MODELS, control, listed, nodes, pageHarness, take, until, type FetchReply }
   from "./road-test-page-harness.ts";
+import { DEFAULT_INSTRUCTION } from "./text-cleanup.ts";
 
 // The design's storage key (design section 5, D3).
 const CLEANUP_KEY = "speak-easy.road-test.cleanup";
@@ -63,7 +64,7 @@ test("Foundation Models sends the final, instruction and names; earlier takes on
   const [first] = harness.cleanups;
   assert.equal(first.modelId, "apple/foundation-models");
   assert.equal(first.text, "clear the screen");
-  assert.deepEqual(first.settings, { instruction: FM_INSTRUCTION, names: "Grok, Claude, Codex, GPT, TM, Hibiki", earlier: false });
+  assert.deepEqual(first.settings, { instruction: DEFAULT_INSTRUCTION, names: "Grok, Claude, Codex, GPT, TM, Hibiki", earlier: false });
   assert.equal("earlier" in first, false, "no earlier takes while the toggle is off");
   assert.match(first.requestId, /^[A-Za-z0-9_.:-]{1,128}$/);
 
@@ -230,7 +231,7 @@ test("settings persist per model; stored values the model no longer offers fall 
   const restore = nodes(settings).find((node) => node.tag === "button" && node.textContent === "Default");
   assert.equal(restore.disabled, false);
   restore.listeners.get("click")();
-  assert.equal(control(settings, "Instruction").value, FM_INSTRUCTION, "Default restores the instruction");
+  assert.equal(control(settings, "Instruction").value, DEFAULT_INSTRUCTION, "Default restores the instruction");
   assert.equal(restore.disabled, true);
   assert.deepEqual(JSON.parse(harness.storage.getItem(CLEANUP_KEY)!),
     { settings: { "apple/foundation-models": { names: "Siobhan, Grok" } } });
@@ -238,7 +239,7 @@ test("settings persist per model; stored values the model no longer offers fall 
   const broken = pageHarness({ stored: { [CLEANUP_KEY]: "{not json" } });
   await broken.page.start();
   pick(broken, FM);
-  assert.equal(control(broken.elements.get("cleanup-settings"), "Instruction").value, FM_INSTRUCTION, "bad JSON: defaults");
+  assert.equal(control(broken.elements.get("cleanup-settings"), "Instruction").value, DEFAULT_INSTRUCTION, "bad JSON: defaults");
 });
 
 test("strict word diffs count case and punctuation; the trail's default diff is unchanged", () => {

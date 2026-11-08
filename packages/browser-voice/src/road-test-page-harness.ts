@@ -8,7 +8,7 @@ import { finalSetup } from "./final-settings.ts";
 import { liveStream } from "./live-settings.ts";
 import { TalkOverDetector } from "../public/talk-over.js";
 import { VoiceReadback } from "../public/voice-readback.js";
-import { CLEANUP_MODELS as CLEANUP_REGISTRY, DEFAULT_INSTRUCTION } from "./text-cleanup.ts";
+import { CLEANUP_MODELS as CLEANUP_REGISTRY } from "./text-cleanup.ts";
 
 /** A page module's source, run in one vm script: its imports and export keywords stripped. */
 export const source = (name: string) => readFileSync(new URL(`../public/${name}`, import.meta.url), "utf8")
@@ -17,7 +17,6 @@ export const source = (name: string) => readFileSync(new URL(`../public/${name}`
 export type FetchReply = { ok: boolean; status?: number; body?: ReadableStream; json?(): Promise<unknown> };
 
 /** The cleanups route's catalogue, in the shape of the cleanup contract (design section 3). */
-export const FM_INSTRUCTION = DEFAULT_INSTRUCTION;
 export const CLEANUP_MODELS = CLEANUP_REGISTRY.map((model) => ({ ...model,
   readiness: { ready: true, ...(model.id === "superwhisper/s1-mini" ? { sizeBytes: 1_200_000_000 } : {}) } }));
 
