@@ -842,8 +842,12 @@ test("a superseded socket's events never settle the reading that replaced it", a
   const second = readback.speak({ selection, catalogueRevision: "rev", text: "Second." });
   await until(() => sockets.length === 2);
   const [old, current] = sockets as [any, any];
+  let stopped: any;
+  void first.then((result) => { stopped = result; });
+  await until(() => stopped);
+  assert.equal(stopped.outcome, "stopped", "retirement must not wait for the old handshake");
   old.open();
-  assert.equal((await first).outcome, "stopped");
+  assert.equal(old.readyState, 3, "a retired connection must release its server socket and session");
   old.event({ type: "sample-error", requestId: null, code: "SETTINGS_INVALID", message: "stale" });
   assert.equal(readback.active, true, "the retired socket's message must not end the current reading");
   old.close();
@@ -853,5 +857,36 @@ test("a superseded socket's events never settle the reading that replaced it", a
   assert.equal(old.sent.length, 0);
   const requestId = current.sent[0].requestId;
   current.event({ type: "sample-complete", requestId, outcome: "produced" });
+  assert.equal((await second).outcome, "finished");
+});
+
+test("stopping a reading during its socket handshake settles before the socket opens", async () => {
+  const { readback, sockets } = readbackHarness({ manualOpen: true });
+  let result: any;
+  const done = readback.speak({ selection, catalogueRevision: "rev", text: "First." });
+  void done.then((output) => { result = output; });
+  await until(() => sockets.length === 1);
+  readback.stop();
+  await until(() => result);
+  assert.equal(result.outcome, "stopped");
+  sockets[0]!.open();
+  await Promise.resolve();
+  assert.equal(sockets[0]!.sent.length, 0, "opening later must not send the stopped reading");
+});
+
+test("a retired socket's handshake error cannot fail the replacement reading", async () => {
+  const { readback, sockets } = readbackHarness({ manualOpen: true });
+  const first = readback.speak({ selection, catalogueRevision: "rev", text: "First." });
+  await until(() => sockets.length === 1);
+  const second = readback.speak({ selection, catalogueRevision: "rev", text: "Second." });
+  await until(() => sockets.length === 2);
+  const [old, current] = sockets as [any, any];
+  old.fire("error", {});
+  old.close();
+  assert.equal((await first).outcome, "stopped");
+  current.open();
+  await until(() => current.sent.length);
+  assert.equal(readback.active, true);
+  current.event({ type: "sample-complete", requestId: current.sent[0].requestId, outcome: "produced" });
   assert.equal((await second).outcome, "finished");
 });
