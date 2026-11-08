@@ -361,7 +361,8 @@
             "Claude",
             "Codex",
             "GPT",
-            "TM"
+            "TM",
+            "Hibiki"
           ],
           "method": "logit bias on every nonempty token prefix of each name, with and without the space marker",
           "source": "ct-pbias"
