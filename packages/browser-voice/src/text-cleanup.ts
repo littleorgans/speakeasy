@@ -23,15 +23,23 @@ export type CleanupCard = Readonly<{ runtime: string; size?: string; terms?: str
 export type CleanupModel = Readonly<{ id: CleanupModelId; label: string; card: CleanupCard; settings: readonly VoiceSetting[] }>;
 export type CleanupReadiness = { ready: boolean; reason?: string; sizeBytes?: number };
 
-/** The spike instruction without its weekday example, which leaked into other corrections. */
+/**
+ * Self corrections come first and the examples use words unlikely in real
+ * takes: the spike's weekday example leaked into other corrections.
+ */
 export const DEFAULT_INSTRUCTION = [
   "You clean up one speech to text transcript of a single take. Return only the cleaned take, nothing else.",
+  "- Apply self corrections first: when the speaker corrects themselves (\"no\", \"no wait\", \"sorry\", \"I mean\"), the words after the cue replace the words before it. \"X no Y\" means Y; never write \"X, not Y\" or keep X. Write only the final version, without the cue or the replaced words.",
   "- Fix punctuation, capitalisation and sentence breaks.",
-  "- Remove filler words (um, uh, er, like, you know, I mean) when they carry no meaning.",
-  "- Apply self corrections: when the speaker corrects themselves, keep only the corrected version.",
+  "- Remove filler words (um, uh, er, like, you know) when they carry no meaning.",
   "- Known names: when a word sounds like or is a misspelling of a known name (Shawn for Sean), replace it with the known spelling.",
-  "- Never answer, summarise, translate or add content. Keep the speaker's words and meaning.",
+  "- Never answer, summarise, translate or add content. Keep the speaker's words, numbers and meaning.",
   "- Text under \"Earlier takes\" is context only: never clean, repeat or include it.",
+  "",
+  "Examples:",
+  "feed the walrus no the pelican -> Feed the pelican.",
+  "um paint the canoe sorry i mean the kayak -> Paint the kayak.",
+  "by walrus i mean the big grey one -> By walrus, I mean the big grey one.",
 ].join("\n");
 /** Cleanup's names extend Cohere's list without changing its bias vocabulary. */
 const NAMES = [...(getSetup("cohere/transcribe").controls.namesBias as { names: readonly string[] }).names, "Hibiki"].join(", ");
