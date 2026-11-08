@@ -205,6 +205,44 @@ test("after a talk over both recordings replay, each under its own button", asyn
   assert.deepEqual(played, [8_000, 8_001], "the main take, then the talk over");
 });
 
+test("an older talk over completion preserves a newer take's phase and status", async () => {
+  const { page, elements, spoken } = pageHarness({ holdVoice: true });
+  await page.start();
+  await take(page, 100);
+  const older = page.run;
+  let deliver!: () => void;
+  const comparisonEnd = new Promise<void>((resolve) => { deliver = resolve; });
+  let transcribed = false;
+  const transcribe = page.transcribe.bind(page);
+  page.transcribe = async (...args: unknown[]) => {
+    const result = await transcribe(...args);
+    transcribed = true;
+    await comparisonEnd;
+    return result;
+  };
+  page.cutIn(older, page.context.currentTime);
+  const finishing = page.finishCutIn(older);
+  await until(() => transcribed);
+  assert.equal(page.phase, "cut-in-transcribing");
+  page.readback.hold = false;
+  page.press(3_000);
+  await until(() => page.mic.recording);
+  const newer = page.run;
+  assert.notEqual(newer, older);
+  const status = elements.get("status").textContent;
+  deliver();
+  await finishing;
+  assert.equal(older.interrupt.text, "Clear the screen.", "the older take keeps its talk over result");
+  assert.equal(page.run, newer);
+  assert.equal(page.phase, "recording", "the older completion cannot reset the newer take's phase");
+  assert.equal(elements.get("status").textContent, status, "the older completion cannot replace the newer take's status");
+  page.release(3_400);
+  await until(() => newer.output);
+  assert.equal(page.phase, "idle");
+  assert.equal(newer.input.text, "Clear the screen.");
+  assert.equal(spoken.length, 2, "the newer take completes its own transcription and readback");
+});
+
 test("earlier takes label every cell and name a cold row's model start", async () => {
   const row = (status: string, extra = {}) => ({ type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status, text: null, timings: {}, ...extra } });
   const { page, elements } = pageHarness({}, [row("loading"), row("processing"),
