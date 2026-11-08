@@ -6,17 +6,19 @@
 /**
  * Word level difference: runs of same, inserted, removed and replaced words.
  * Case and punctuation alone are no change ("two" then "two,"); same runs
- * show the newer form.
+ * show the newer form. Strict compares words exactly, so a case or
+ * punctuation fix is a change, and has no growth rule: both texts are whole.
  */
-export function diffWords(before, after) {
+export function diffWords(before, after, { strict = false } = {}) {
   // A word still being written ("eight, n" then "eight, nine") is growth: compare without its piece.
   const prior = String(before ?? "").trim();
   const next = String(after ?? "").trim();
-  if (prior && next.length > prior.length && next.startsWith(prior) && /[\p{L}\p{N}']/u.test(next[prior.length])) {
+  if (!strict && prior && next.length > prior.length && next.startsWith(prior) && /[\p{L}\p{N}']/u.test(next[prior.length])) {
     before = prior.slice(0, Math.max(0, prior.search(/\S+$/)));
   }
-  const a = words(before).map(key);
-  const b = words(after).map(key);
+  const compared = strict ? (word) => word : key;
+  const a = words(before).map(compared);
+  const b = words(after).map(compared);
   const shown = words(after);
   const was = words(before);
   // Longest common subsequence table, filled from the end.
@@ -85,14 +87,29 @@ export function trailItems(document, updates, final, formatDuration) {
     const when = document.createElement("span");
     when.className = "when";
     when.textContent = time;
-    const said = document.createElement("span");
-    for (const segment of segments) {
-      if (segment.was?.length) said.append(mark(document, "del", segment.was));
-      if (segment.words.length) said.append(segment.kind === "same" ? text(document, segment.words) : mark(document, "ins", segment.words));
-    }
-    item.append(when, said);
+    item.append(when, segmentMarks(document, segments));
     return item;
   });
+}
+
+/**
+ * One span of segments: removed words as del, inserted words as ins, a
+ * replacement both. `sides` shows one side only: the text before (del) or
+ * after (ins). An ins whose replaced words are not shown names them in its
+ * title; `className` goes on each ins.
+ */
+export function segmentMarks(document, segments, { sides = ["del", "ins"], className = "" } = {}) {
+  const said = document.createElement("span");
+  for (const segment of segments) {
+    if (segment.kind === "same") { said.append(text(document, segment.words)); continue; }
+    if (segment.was.length && sides.includes("del")) said.append(mark(document, "del", segment.was));
+    if (segment.words.length && sides.includes("ins")) {
+      const hidden = segment.was.length && !sides.includes("del");
+      said.append(mark(document, "ins", segment.words, { ...(className ? { className } : {}),
+        ...(hidden ? { title: segment.was.join(" ") } : {}) }));
+    }
+  }
+  return said;
 }
 
 function words(value) { return String(value ?? "").trim().split(/\s+/).filter(Boolean); }
@@ -106,8 +123,8 @@ function text(document, list) {
   return span;
 }
 
-function mark(document, tag, list) {
-  const element = document.createElement(tag);
+function mark(document, tag, list, properties = {}) {
+  const element = Object.assign(document.createElement(tag), properties);
   element.textContent = list.join(" ");
   const gap = document.createElement("span");
   gap.textContent = " ";
