@@ -43,8 +43,11 @@ export async function echoCleanup(body: { requestId: string; modelId: string; te
   return cleanupReply(body, `${body.text[0]!.toUpperCase()}${body.text.slice(1).replace(/\.?$/, ".")}`);
 }
 
-/** One fake page context: a socket, a playback worklet port and an output clock. */
-export function readbackHarness() {
+/**
+ * One fake page context: a socket, a playback worklet port and an output clock.
+ * Sockets open on the next microtask; with manualOpen they stay CONNECTING until `open()`.
+ */
+export function readbackHarness({ manualOpen = false } = {}) {
   const sockets: FakeSocket[] = [];
   const ports: Array<{ messages: any[]; onmessage?: (event: { data: any }) => void; postMessage(data: any): void }> = [];
   class FakeSocket {
@@ -52,7 +55,9 @@ export function readbackHarness() {
     readyState = 0;
     sent: any[] = [];
     listeners = new Map<string, Array<(event: any) => void>>();
-    constructor() { sockets.push(this); queueMicrotask(() => { this.readyState = 1; this.fire("open", {}); }); }
+    constructor() { sockets.push(this); if (!manualOpen) queueMicrotask(() => this.open()); }
+    open() { this.readyState = 1; this.fire("open", {}); }
+    close() { this.readyState = 3; this.fire("close", {}); }
     addEventListener(type: string, listener: (event: any) => void) { this.listeners.set(type, [...this.listeners.get(type) ?? [], listener]); }
     fire(type: string, event: any) { for (const listener of this.listeners.get(type) ?? []) listener(event); }
     send(raw: string) { this.sent.push(JSON.parse(raw)); }

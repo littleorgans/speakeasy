@@ -83,12 +83,15 @@ export class VoiceReadback {
       this.socket = socket;
       socket.addEventListener("open", () => resolve(), { once: true });
       socket.addEventListener("error", () => reject(new Error("Could not open the speech output channel.")), { once: true });
+      // A retired socket's events belong to no current reading.
       socket.addEventListener("message", (event) => {
+        if (this.socket !== socket) return;
         if (event.data instanceof ArrayBuffer) this.audio(event.data);
         else this.accept(JSON.parse(event.data));
       });
       socket.addEventListener("close", () => {
-        if (this.socket === socket) this.socket = null;
+        if (this.socket !== socket) return;
+        this.socket = null;
         if (this.job) this.finish(this.job, { outcome: "error", message: "Speech output channel closed." });
       });
     });

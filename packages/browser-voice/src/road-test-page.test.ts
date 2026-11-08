@@ -834,3 +834,24 @@ test("readings that overlap while the speech socket opens share one connection",
   assert.equal((await second).outcome, "error");
   assert.equal(sockets.length, 1, "a superseded preparation must not open a second socket");
 });
+
+test("a superseded socket's events never settle the reading that replaced it", async () => {
+  const { readback, sockets } = readbackHarness({ manualOpen: true });
+  const first = readback.speak({ selection, catalogueRevision: "rev", text: "First." });
+  await until(() => sockets.length === 1);
+  const second = readback.speak({ selection, catalogueRevision: "rev", text: "Second." });
+  await until(() => sockets.length === 2);
+  const [old, current] = sockets as [any, any];
+  old.open();
+  assert.equal((await first).outcome, "stopped");
+  old.event({ type: "sample-error", requestId: null, code: "SETTINGS_INVALID", message: "stale" });
+  assert.equal(readback.active, true, "the retired socket's message must not end the current reading");
+  old.close();
+  assert.equal(readback.active, true, "the retired socket's close must not end the current reading");
+  current.open();
+  await until(() => current.sent.length);
+  assert.equal(old.sent.length, 0);
+  const requestId = current.sent[0].requestId;
+  current.event({ type: "sample-complete", requestId, outcome: "produced" });
+  assert.equal((await second).outcome, "finished");
+});
