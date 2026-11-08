@@ -461,7 +461,7 @@
         "attributeOptions": [
           "audioTimeRange"
         ],
-        "contextualStrings": "general: the worker's names",
+        "names": "the road test Names list, one snapshot per take; general contextual strings, passed to the worker as --names-json",
         "feedSamples": 2560,
         "converter": "AnalyzerInputConverter",
         "priority": "userInitiated",

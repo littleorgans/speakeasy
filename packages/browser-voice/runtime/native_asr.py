@@ -3,17 +3,17 @@
 Both speak one stdin protocol (hex/worker.rs). Backend options contain an
 absolute runnerPath, an absolute modelPath unless the system manages the
 weights, an optional setupId from SETUPS (default hex/unified) and, for the
-whole take setups only, optional names: the road test Names list (names.py),
-empty when absent.
+setups that take names only, optional names: the road test Names list
+(names.py), empty when absent.
 Construction starts nothing; load verifies the model hash (pins.file_sha256), starts the worker
 in that setup's mode and waits for its ready line. For hex/unified each take
 goes through Hex's own stream pipeline inside the worker, and feed runs the
 same pipeline live, at the lookahead the page chose, answering with its
 committed and tentative words; Apple streams the same way. The whole take
 setups (Hex with the Names list as its vocabulary, Cohere) give final text
-only; their worker takes the list once, at start, and its ready line must
-echo the count and digest applied. Cohere's take may carry its one final
-setting, the names bias.
+only. Those two and Apple dictation take the list once, at worker start, and
+the ready line must echo the count and digest applied. Cohere's take may
+carry its one final setting, the names bias.
 """
 
 import copy
@@ -41,28 +41,29 @@ APPLE_LIVE = {setting: {"setting": setting, "default": 0, "values": {0: (0, 0), 
 # Cohere's one final setting (src/final-settings.ts): the logit bias toward the
 # Names list, sent as the worker's `B` take; Off sends today's `T` take.
 COHERE_FINAL = {"setting": "namesBias", "default": 0, "values": (0, 1.25, 2.5)}
-# Every setup a native worker runs: its model pin, worker mode and pipeline.
+# Every setup a native worker runs: its model pin, worker mode, pipeline and whether it takes names.
 SETUPS = {
     "hex/unified": {**HEX_MODEL, "mode": [], "live": HEX_LIVE,
                     "pipeline": "Hex stream: 2560 sample feeds, PauseCap, 6400 trailing zeros"},
-    "hex/vocabulary": {**HEX_MODEL, "mode": ["--whole=vocabulary"], "live": None,
+    "hex/vocabulary": {**HEX_MODEL, "mode": ["--whole=vocabulary"], "live": None, "names": True,
                        "pipeline": "whole take session.run, the Names list as vocabulary at boost 2.5, "
                                    "padded to 24000 then 6400 zeros"},
     # handy-computer/cohere-transcribe-03-2026-gguf at dfa4ade, Apache 2.0.
     "cohere/transcribe": {"file": "cohere-transcribe-03-2026-Q8_0.gguf",
                           "sha256": "931916663432fd895423a4291a8400221802b288967ca2d435fc5e3141c9e71e",
                           "variant": "cohere-transcribe-03-2026", "mode": ["--whole=cohere"], "live": None, "backend": "metal",
-                          "final": COHERE_FINAL,
+                          "final": COHERE_FINAL, "names": True,
                           "pipeline": "whole take session.run per window of at most 560000 samples, padded to 24000"},
     # SpeechAnalyzer and SpeechTranscriber, en-US; the system manages its weights.
     "apple/speech": {"file": None, "sha256": None, "variant": "speech-transcriber", "backend": "apple", "mode": [],
                      "live": APPLE_LIVE["fastResults"], "pipeline": "SpeechAnalyzer, SpeechTranscriber volatile results, "
                                                                      "2560 sample buffers, finalize through end of input"},
-    # The same worker with DictationTranscriber, told the worker's names as contextual strings.
+    # The same worker with DictationTranscriber, told the Names list as contextual strings.
     "apple/dictation": {"file": None, "sha256": None, "variant": "dictation-transcriber", "backend": "apple",
-                        "mode": ["--module=dictation"], "live": APPLE_LIVE["frequentFinalization"],
+                        "mode": ["--module=dictation"], "live": APPLE_LIVE["frequentFinalization"], "names": True,
                         "pipeline": "SpeechAnalyzer, DictationTranscriber punctuation, volatile results, "
-                                    "general contextual strings, 2560 sample buffers, finalize through end of input"},
+                                    "the Names list as general contextual strings, 2560 sample buffers, "
+                                    "finalize through end of input"},
 }
 RUNTIME_COMMIT = "7045d1c0fe7cee37747b2792977421d435e75fca"
 HEX_COMMIT = "826bdbc44c8806630a45c08ed8cef35a36817a17"
@@ -76,8 +77,8 @@ class Backend:
             raise ValueError("Native backend requires a native speech in setup")
         self.setup_id, self.spec = setup_id, SETUPS[setup_id]
         required = {"runnerPath"} | ({"modelPath"} if self.spec["file"] else set())
-        whole = any(mode.startswith("--whole=") for mode in self.spec["mode"])
-        optional = {"setupId"} | ({"names"} if whole else set())
+        takes_names = self.spec.get("names", False)
+        optional = {"setupId"} | ({"names"} if takes_names else set())
         if not required <= set(options) or set(options) - required - optional:
             raise ValueError(f"{setup_id} options require {', '.join(sorted(required))} and optional "
                              f"{', '.join(sorted(optional))}")
@@ -87,8 +88,8 @@ class Backend:
                 raise ValueError(f"Hex {name} must be an absolute path")
         self.runner_path = Path(options["runnerPath"])
         self.model_path = Path(options["modelPath"]) if self.spec["file"] else None
-        # Whole take workers always get the flag, so an empty list is explicit.
-        self.names = names_option(options.get("names", [])) if whole else None
+        # Workers that take names always get the flag, so an empty list is explicit.
+        self.names = names_option(options.get("names", [])) if takes_names else None
         self.process = None
         self.metadata = None
 

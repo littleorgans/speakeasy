@@ -1,6 +1,8 @@
 // Apple on device speech for the browser voice host: SpeechAnalyzer with
 // SpeechTranscriber, or with `--module=dictation` DictationTranscriber, for
-// en-US, on system managed weights. Ported from the
+// en-US, on system managed weights. Dictation alone takes the road test Names
+// list as `--names-json=<JSON array>`, validated as the hex worker does, and
+// tells each take's analyzer to expect them. Ported from the
 // stt-ux apple track (Main.swift makeModule and runTake, Audio.swift
 // feedAudio): volatile results, audio time ranges, 2,560 sample buffers
 // through AnalyzerInputConverter, finalizeAndFinishThroughEndOfInput.
@@ -13,6 +15,7 @@
 // frequent finalization), then 0. Any other request ends the live stream.
 // stdout: one JSON line at ready, then one per request.
 import AVFoundation
+import CryptoKit
 import Foundation
 import Speech
 
@@ -21,8 +24,7 @@ enum Failure: String, Error { case unavailable, assetsMissing, unsupportedFormat
 struct Request: Sendable { let op: UInt8; let live: Bool; let samples: [Float] }
 
 let maxSamples = 1_920_000
-/// Names each dictation take's analyzer is told to expect; Apple documents contextual strings for DictationTranscriber.
-let names = ["Grok", "Claude", "Codex", "GPT", "GPT-SOL", "TM", "Hibiki"]
+let maxNames = 64, maxNameBytes = 128
 let natural = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false)!
 
 func emit(_ record: [String: Any]) {
@@ -70,21 +72,54 @@ func requests() -> AsyncThrowingStream<Request, Error> {
 /// Each result as its text and whether it is final.
 typealias Results = any AsyncSequence<(text: String, isFinal: Bool), any Error> & Sendable
 
+/// The `--names-json` list as hex/worker.rs validates it: strings, trimmed, blanks dropped, no NUL,
+/// at most 64 of 128 UTF8 bytes, the first of each duplicate kept.
+func parseNames(_ json: String) throws -> [String] {
+    guard let array = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [Any] else { throw Failure.badRequest }
+    var names: [String] = []
+    for item in array {
+        guard let raw = item as? String else { throw Failure.badRequest }
+        let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.contains("\0"), name.utf8.count <= maxNameBytes else { throw Failure.badRequest }
+        if !name.isEmpty, !names.contains(name) { names.append(name) }
+    }
+    guard names.count <= maxNames else { throw Failure.badRequest }
+    return names
+}
+
+/// sha256 of the names as compact JSON, the bytes JSON.stringify and serde_json give.
+func namesDigest(_ names: [String]) -> String {
+    let data = try! JSONSerialization.data(withJSONObject: names, options: [.withoutEscapingSlashes])
+    return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+}
+
 /// The transcriber this worker runs, chosen once by argv.
 enum Module: Sendable {
-    case speech, dictation
+    case speech
+    /// The names each take's analyzer is told to expect; contextual strings did nothing on SpeechTranscriber.
+    case dictation(names: [String])
 
     init(arguments: [String]) throws {
-        switch arguments {
-        case []: self = .speech
-        case ["--module=dictation"]: self = .dictation
-        default: throw Failure.badRequest
+        let flag = "--names-json="
+        if arguments.isEmpty { self = .speech; return }
+        guard arguments.first == "--module=dictation", arguments.count <= 2 else { throw Failure.badRequest }
+        guard let names = arguments.dropFirst().first else { self = .dictation(names: []); return }
+        guard names.hasPrefix(flag) else { throw Failure.badRequest }
+        self = .dictation(names: try parseNames(String(names.dropFirst(flag.count))))
+    }
+
+    var variant: String {
+        switch self {
+        case .speech: return "speech-transcriber"
+        case .dictation: return "dictation-transcriber"
         }
     }
 
-    var variant: String { self == .speech ? "speech-transcriber" : "dictation-transcriber" }
-    /// The analyzer's general contextual strings; step 1 measured no effect on SpeechTranscriber.
-    var contextualStrings: [String]? { self == .dictation ? names : nil }
+    /// The ready line's applied list: dictation's count and digest, nothing for speech.
+    var ready: [String: Any] {
+        guard case .dictation(let names) = self else { return [:] }
+        return ["names": names.count, "namesDigest": namesDigest(names)]
+    }
 
     /// The SDK gives DictationTranscriber no isAvailable; its supported locale stands for it.
     func locale() async -> Locale? {
@@ -130,7 +165,7 @@ enum Module: Sendable {
         // The worker owns the model for its lifetime; the host's idle release ends the worker.
         analyzer = SpeechAnalyzer(modules: [module], options: .init(priority: .userInitiated,
             modelRetention: .processLifetime, ignoresResourceLimits: false))
-        if let strings = kind.contextualStrings {
+        if case .dictation(let strings) = kind, !strings.isEmpty {
             let context = AnalysisContext()
             context.contextualStrings[.general] = strings
             try await analyzer.setContext(context)
@@ -200,7 +235,7 @@ func elapsed(_ start: ContinuousClock.Instant) -> Double {
             }
             guard await AssetInventory.status(forModules: [module]) == .installed else { throw Failure.assetsMissing }
             emit(["kind": "ready", "backend": "apple", "variant": kind.variant, "locale": locale.identifier,
-                  "reservedHere": reservedHere, "loadMs": elapsed(started)])
+                  "reservedHere": reservedHere, "loadMs": elapsed(started)].merging(kind.ready) { $1 })
             var live: Take?
             for try await request in requests() {
                 let clock = ContinuousClock.now

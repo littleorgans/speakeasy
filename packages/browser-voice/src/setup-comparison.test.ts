@@ -88,7 +88,7 @@ test("registry pins every exact immutable identity and rejects arbitrary ids or 
   ]);
   assert.equal(getSetup(QWEN).controls.prompt, undefined, "Qwen's prompt is the Names list");
   assert.deepEqual(SETUP_IDS.filter(takesNames), [QWEN, "sweep/score-2", "tm/today", "hex/vocabulary", "cohere/transcribe",
-    CLEANUP_SETUP_ID], "every names consumer declares controls.names");
+    "apple/dictation", CLEANUP_SETUP_ID], "every names consumer declares controls.names");
   for (const forbidden of ["launch", "Grok", "Claude", "whoami", "Hibiki"]) {
     assert.equal(JSON.stringify(SETUP_MANIFEST).includes(forbidden), false, `${forbidden} spelled in the manifest`);
   }
@@ -612,4 +612,18 @@ test("one names snapshot per job reaches load and execute of names setups only, 
   loads.length = 0;
   await take([QWEN]).done;
   assert.deepEqual(loads, [[QWEN, current]], "the next admission takes the edit");
+});
+
+test("live words load a names setup with the current snapshot and others with none", async () => {
+  const current = namesSnapshot(["Grok", "Qwen"]);
+  const { executor, service } = harness({ names: () => current });
+  const loads: [SetupId, NamesSnapshot | undefined][] = [];
+  executor.onLoad = async (id, context) => { loads.push([id, context.names]); };
+  for (const setupId of ["apple/dictation", "apple/speech"] as const) {
+    const live = service.live(setupId, { onEvent() {}, acquire: () => () => {} });
+    live.push(new Float32Array(160));
+    await delay(5);
+    await live.stop();
+  }
+  assert.deepEqual(loads, [["apple/dictation", current], ["apple/speech", undefined]]);
 });

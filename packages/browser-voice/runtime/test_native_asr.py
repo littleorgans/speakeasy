@@ -1,6 +1,7 @@
 """Standard library bridge tests with a scripted worker. No model or Metal runtime is loaded."""
 
 import array
+import contextlib
 import hashlib
 import json
 import os
@@ -178,16 +179,19 @@ class HexUnifiedTest(unittest.TestCase):
             hex_backend.transcribe(samples, {"namesBias": 2.5})
         hex_backend.close()
 
-    def test_whole_take_workers_get_the_names_list_as_one_argv_flag_and_must_echo_it(self):
+    def test_names_workers_get_the_names_list_as_one_argv_flag_and_must_echo_it(self):
         listed = ["Grok", "Claude", "Codex", "GPT", "GPT-SOL", "TM", "Hibiki", "Qwen"]
-        for setup_id, variant, mode in (("hex/vocabulary", "unified-en-0.6b", "--whole=vocabulary"),
-                                        ("cohere/transcribe", "cohere-transcribe-03-2026", "--whole=cohere")):
+        for setup_id, variant, kind, mode in (("hex/vocabulary", "unified-en-0.6b", "metal", "--whole=vocabulary"),
+                                              ("cohere/transcribe", "cohere-transcribe-03-2026", "metal", "--whole=cohere"),
+                                              ("apple/dictation", "dictation-transcriber", "apple", "--module=dictation")):
             with self.subTest(setup_id=setup_id):
-                runner = self.runner(variant)
-                backend = self.backend(runner, setup_id, names=listed)
-                with self.pinned(setup_id):
+                runner = self.runner(variant, kind)
+                model = [str(self.model)] if hexu.SETUPS[setup_id]["file"] else []
+                backend = hexu.Backend({"setupId": setup_id, "runnerPath": str(runner), "names": listed,
+                                        **({"modelPath": model[0]} if model else {})})
+                with self.pinned(setup_id) if model else contextlib.nullcontext():
                     metadata = backend.load()
-                self.assertEqual(self.argv(runner), [str(self.model), mode,
+                self.assertEqual(self.argv(runner), [*model, mode,
                                                      '--names-json=["Grok","Claude","Codex","GPT","GPT-SOL","TM","Hibiki","Qwen"]'])
                 self.assertEqual((metadata["names"], metadata["namesDigest"]),
                                  (8, "59d6626926c652e50c7e90fea5f95afdea75f6c27e11aa07c2996b89d51fc068"))
@@ -220,9 +224,8 @@ class HexUnifiedTest(unittest.TestCase):
         runner = self.runner()
         with self.assertRaisesRegex(ValueError, "optional setupId"):
             self.backend(runner, "hex/unified", names=["Grok"])
-        for setup_id in ("apple/speech", "apple/dictation"):
-            with self.subTest(setup_id=setup_id), self.assertRaisesRegex(ValueError, "optional setupId"):
-                hexu.Backend({"setupId": setup_id, "runnerPath": str(runner), "names": []})
+        with self.assertRaisesRegex(ValueError, "optional setupId"):
+            hexu.Backend({"setupId": "apple/speech", "runnerPath": str(runner), "names": []})
         for bad in ("Grok", ["Grok", "Grok"], [" Grok"], ["Gr\x00ok"], ["a,b"], ["x" * 129], [str(n) for n in range(65)], [1]):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 self.backend(runner, "cohere/transcribe", names=bad)
@@ -244,8 +247,10 @@ class HexUnifiedTest(unittest.TestCase):
         self.assertEqual(worker.BACKENDS["apple/speech"], "native_asr")
 
     def test_apple_dictation_runs_the_same_worker_as_a_module_with_frequent_finalization_on_request(self):
-        backend = hexu.Backend({"setupId": "apple/dictation", "runnerPath": str(self.runner("dictation-transcriber", "apple"))})
-        self.assertEqual(backend.load()["modelSha256"], None)
+        runner = self.runner("dictation-transcriber", "apple")
+        backend = hexu.Backend({"setupId": "apple/dictation", "runnerPath": str(runner)})
+        self.assertEqual((backend.load()["modelSha256"], self.argv(runner)), (None, ["--module=dictation", "--names-json=[]"]),
+                         "an absent list is sent as an explicit empty one")
         samples = memoryview(array.array("f", [0.1] * 3).tobytes()).cast("f")
         self.assertEqual(backend.transcribe(samples)["text"], "heard 3 --module=dictation")
         self.assertEqual(backend.feed(samples, True)["tentative"], " at 0+0", "Off by default")
