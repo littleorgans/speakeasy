@@ -68,7 +68,7 @@ test("the registry declares S1-mini with no settings and Apple Foundation Models
     [FM, "Apple Foundation Models", ["instruction", "names", "earlier"]],
   ]);
   const fm = parseCleanup({ modelId: FM, text: "x" });
-  assert.deepEqual(fm.settings, { instruction: DEFAULT_INSTRUCTION, names: "Grok, Claude, Codex, GPT, TM", earlier: false });
+  assert.deepEqual(fm.settings, { instruction: DEFAULT_INSTRUCTION, names: "Grok, Claude, Codex, GPT, TM, Hibiki", earlier: false });
   assert.ok(DEFAULT_INSTRUCTION.length <= 2000);
 });
 

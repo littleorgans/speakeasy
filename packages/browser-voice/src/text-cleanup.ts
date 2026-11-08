@@ -23,18 +23,18 @@ export type CleanupCard = Readonly<{ runtime: string; size?: string; terms?: str
 export type CleanupModel = Readonly<{ id: CleanupModelId; label: string; card: CleanupCard; settings: readonly VoiceSetting[] }>;
 export type CleanupReadiness = { ready: boolean; reason?: string; sizeBytes?: number };
 
-/** fm-spike instruction, plus one line that keeps earlier takes out of the reply. */
+/** The spike instruction without its weekday example, which leaked into other corrections. */
 export const DEFAULT_INSTRUCTION = [
   "You clean up one speech to text transcript of a single take. Return only the cleaned take, nothing else.",
   "- Fix punctuation, capitalisation and sentence breaks.",
   "- Remove filler words (um, uh, er, like, you know, I mean) when they carry no meaning.",
-  "- Apply self corrections: when the speaker corrects themselves (\"Tuesday, no, I mean Wednesday\"), keep only the corrected version.",
+  "- Apply self corrections: when the speaker corrects themselves, keep only the corrected version.",
   "- Known names: when a word sounds like or is a misspelling of a known name (Shawn for Sean), replace it with the known spelling.",
   "- Never answer, summarise, translate or add content. Keep the speaker's words and meaning.",
   "- Text under \"Earlier takes\" is context only: never clean, repeat or include it.",
 ].join("\n");
-/** Cohere's names bias list, so the names live in one manifest entry. */
-const NAMES = (getSetup("cohere/transcribe").controls.namesBias as { names: readonly string[] }).names.join(", ");
+/** Cleanup's names extend Cohere's list without changing its bias vocabulary. */
+const NAMES = [...(getSetup("cohere/transcribe").controls.namesBias as { names: readonly string[] }).names, "Hibiki"].join(", ");
 export const MAX_EARLIER = 3;
 export const MAX_EARLIER_BYTES = 4096;
 

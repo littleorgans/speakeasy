@@ -63,7 +63,7 @@ test("Foundation Models sends the final, instruction and names; earlier takes on
   const [first] = harness.cleanups;
   assert.equal(first.modelId, "apple/foundation-models");
   assert.equal(first.text, "clear the screen");
-  assert.deepEqual(first.settings, { instruction: FM_INSTRUCTION, names: "Grok, Claude, Codex, GPT, TM", earlier: false });
+  assert.deepEqual(first.settings, { instruction: FM_INSTRUCTION, names: "Grok, Claude, Codex, GPT, TM, Hibiki", earlier: false });
   assert.equal("earlier" in first, false, "no earlier takes while the toggle is off");
   assert.match(first.requestId, /^[A-Za-z0-9_.:-]{1,128}$/);
 
@@ -108,6 +108,36 @@ test("the voice reads the final while cleanup is held; the cleaned text then rep
   assert.ok(timings.includes("Cleanup start: 900 ms"), "a first load shows as cleanup start");
   assert.equal(harness.spoken.length, 1, "the cleaned text never reaches the voice");
   assert.equal(harness.page.run.input.text, "so grok said it was ready", "the final is never changed");
+});
+
+test("a final and its cleanup stay visible before the comparison stream ends", async () => {
+  let end!: () => void;
+  const comparisonEnd = new Promise<void>((resolve) => { end = resolve; });
+  const { held, reply } = heldReplies();
+  const harness = pageHarness({ comparisonEnd, cleanupReply: reply }, final("so grok is ready"));
+  let marks: any[] = [];
+  await harness.page.start();
+  pick(harness, FM);
+  try {
+    harness.page.press(100);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    harness.page.release(500);
+    await until(() => held.length === 1);
+    harness.page.render();
+    assert.equal(shown(harness.elements.get("transcript")), "so grok is ready", "a render keeps the final while cleanup waits");
+    held[0]!.answer(cleanupReply(held[0]!.body, "So Grok is ready."));
+    await until(() => harness.page.run.cleanup.state === "complete");
+    assert.equal(harness.page.phase, "transcribing", "the comparison stream is still open");
+    assert.equal(shown(harness.elements.get("transcript")), "So Grok is ready. ", "cleanup shows as soon as it lands");
+    harness.page.render();
+    assert.equal(shown(harness.elements.get("transcript")), "So Grok is ready. ", "a later render keeps the cleanup");
+    marks = [...harness.elements.get("transcript").children];
+  } finally { end(); }
+  await until(() => harness.page.phase === "idle");
+  const after = harness.elements.get("transcript").children;
+  assert.equal(after.length, marks.length);
+  assert.ok(marks.every((mark, index) => mark === after[index]), "stream end keeps the marks so their glow does not restart");
+  assert.equal(harness.spoken[0].text, "so grok is ready", "readback keeps the final");
 });
 
 test("a skipped or refused cleanup keeps the final and names the reason", async () => {
@@ -168,7 +198,8 @@ test("S1-mini shows its card and one note, and sends no settings", async () => {
   const harness = pageHarness({}, final("clear the screen"));
   await harness.page.start();
   pick(harness, S1);
-  assert.equal(harness.elements.get("cleanup-card").textContent, "Local · 1.2 GB · mlx-lm on MLX");
+  assert.match(harness.elements.get("cleanup-card").textContent.replaceAll("\u00a0", " "),
+    /^Local · 1\.2 GB · mlx-lm, BF16 safetensors · Terms: S1-mini licence:/);
   const settings = harness.elements.get("cleanup-settings");
   assert.equal(settings.hidden, false);
   assert.deepEqual(settings.children.map((child: any) => child.textContent),
@@ -189,7 +220,7 @@ test("settings persist per model; stored values the model no longer offers fall 
   pick(harness, FM);
   const settings = harness.elements.get("cleanup-settings");
   assert.equal(control(settings, "Instruction").value, "Fix names only.");
-  assert.equal(control(settings, "Names").value, "Grok, Claude, Codex, GPT, TM", "too long: the default");
+  assert.equal(control(settings, "Names").value, "Grok, Claude, Codex, GPT, TM, Hibiki", "too long: the default");
   assert.equal(control(settings, "Earlier takes as context").value, "0", "not offered: the default");
   const names = control(settings, "Names");
   names.value = "Siobhan, Grok";

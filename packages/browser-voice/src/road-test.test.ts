@@ -117,7 +117,7 @@ test("cleanup models are listed and clean a final's text through the host, holdi
   assert.equal(reply.status, 200);
   assert.deepEqual(await reply.json(), { requestId: "clean-1", modelId: "apple/foundation-models", status: "complete",
     text: "Ship it.", processingMs: 4, workerWallMs: 35, loadMs: 30, firstUse: true,
-    settings: { instruction: listing.models[1].settings[0].default, names: "Grok, Claude, Codex, GPT, TM", earlier: false } });
+    settings: { instruction: listing.models[1].settings[0].default, names: "Grok, Claude, Codex, GPT, TM, Hibiki", earlier: false } });
   const skipped = await (await post({ modelId: "superwhisper/s1-mini", text: "um" })).json() as Record<string, unknown>;
   assert.deepEqual([skipped.status, skipped.code, skipped.reason], ["skipped", "unavailable", "runtime not configured"]);
   assert.equal((await post({ modelId: "superwhisper/s1-mini", text: "um", settings: {} })).status, 400);

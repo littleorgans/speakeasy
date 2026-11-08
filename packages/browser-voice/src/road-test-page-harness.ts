@@ -8,6 +8,7 @@ import { finalSetup } from "./final-settings.ts";
 import { liveStream } from "./live-settings.ts";
 import { TalkOverDetector } from "../public/talk-over.js";
 import { VoiceReadback } from "../public/voice-readback.js";
+import { CLEANUP_MODELS as CLEANUP_REGISTRY, DEFAULT_INSTRUCTION } from "./text-cleanup.ts";
 
 /** A page module's source, run in one vm script: its imports and export keywords stripped. */
 export const source = (name: string) => readFileSync(new URL(`../public/${name}`, import.meta.url), "utf8")
@@ -16,21 +17,9 @@ export const source = (name: string) => readFileSync(new URL(`../public/${name}`
 export type FetchReply = { ok: boolean; status?: number; body?: ReadableStream; json?(): Promise<unknown> };
 
 /** The cleanups route's catalogue, in the shape of the cleanup contract (design section 3). */
-export const FM_INSTRUCTION = "Clean up this dictated transcript. Keep the speaker's words.";
-export const CLEANUP_MODELS = [
-  { id: "superwhisper/s1-mini", label: "S1-mini by Superwhisper", card: { runtime: "mlx-lm on MLX" }, settings: [],
-    readiness: { ready: true, sizeBytes: 1_200_000_000 } },
-  { id: "apple/foundation-models", label: "Apple Foundation Models", card: { runtime: "FoundationModels", size: "system managed" },
-    settings: [
-      { id: "instruction", label: "Instruction", note: "What the model is told to do with each take", kind: "text",
-        default: FM_INSTRUCTION, maxLength: 2_000, lines: 6 },
-      { id: "names", label: "Names", note: "Comma separated, spelled as they should appear", kind: "text",
-        default: "Grok, Claude, Codex, GPT, TM", maxLength: 400 },
-      { id: "earlier", label: "Earlier takes as context", note: "Up to three earlier takes, oldest first", kind: "choice",
-        default: false, options: [{ value: false, label: "Off" }, { value: true, label: "On" }] },
-    ],
-    readiness: { ready: true } },
-];
+export const FM_INSTRUCTION = DEFAULT_INSTRUCTION;
+export const CLEANUP_MODELS = CLEANUP_REGISTRY.map((model) => ({ ...model,
+  readiness: { ready: true, ...(model.id === "superwhisper/s1-mini" ? { sizeBytes: 1_200_000_000 } : {}) } }));
 
 /** A warm cleanup reply in the contract's shape. */
 export function cleanupReply(body: { requestId: string; modelId: string }, text: string, extra = {}): FetchReply {
@@ -91,10 +80,11 @@ export const selection = { schema: 1, provider: { kind: "local" }, model: "piper
  * a 41 ms stop; clearing the readback's hold lets later readings finish. Each mic take is one sample longer than the last, so replays
  * show which take they play. With transcript "partials" the setup streams: live records what reaches the live words channel.
  * Cleanup models come from `cleanups`; each cleanup request is recorded and answered by `cleanupReply`, and
- * `stored` seeds the page's localStorage.
+ * `stored` seeds the page's localStorage. `comparisonEnd` holds the comparison stream open after its rows.
  */
 export function pageHarness({ holdVoice = false, transcript = "final", models = [] as unknown[], cleanups = CLEANUP_MODELS as unknown[],
-  cleanupReply = echoCleanup, stored = {} as Record<string, string> }: { holdVoice?: boolean; transcript?: string; models?: unknown[];
+  cleanupReply = echoCleanup, comparisonEnd = Promise.resolve(), stored = {} as Record<string, string> }: { holdVoice?: boolean; transcript?: string; models?: unknown[];
+  comparisonEnd?: Promise<void>;
   cleanups?: unknown[]; cleanupReply?: (body: any) => Promise<FetchReply>; stored?: Record<string, string> } = {}, rows: unknown[] = [
   { type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status: "processing", text: null, timings: {} } },
   { type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status: "complete", text: "Clear the screen.", timings: { firstUse: false, processingMs: 90 } } },
@@ -177,8 +167,9 @@ export function pageHarness({ holdVoice = false, transcript = "final", models = 
     if (url.startsWith("/speech-output/references")) return { ok: true, json: async () => (init?.method === "POST" ? { id: "d".repeat(64) } : {}) };
     if (url === "/prompt-reader/setups") return { ok: true, json: async () => setups };
     if (url === "/speech-output/models") return { ok: true, json: async () => voices };
-    const body = new ReadableStream({ start(controller) {
-      controller.enqueue(new TextEncoder().encode(rows.map((row) => JSON.stringify(row)).join("\n")));
+    const body = new ReadableStream({ async start(controller) {
+      controller.enqueue(new TextEncoder().encode(rows.map((row) => JSON.stringify(row)).join("\n") + "\n"));
+      await comparisonEnd;
       controller.close();
     } });
     return { ok: true, status: 200, body };

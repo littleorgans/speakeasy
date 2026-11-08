@@ -282,7 +282,8 @@ export class RoadTestPage {
     this.status(`Transcribing with ${run.setup.label}`);
     this.render();
     // The final shows, then cleanup starts beside the voice, which never waits for it.
-    const result = await this.transcribe(run, take.samples, run.releasedAt, (text) => {
+    const result = await this.transcribe(run, take.samples, run.releasedAt, (text, input) => {
+      run.input = input;
       this.showTranscript(text);
       this.cleanup.start(run, text, this.history);
     });
@@ -290,7 +291,6 @@ export class RoadTestPage {
     // Model start counts a load the live words did while the owner spoke.
     if (run.live?.loadMs != null) result.loadMs = (result.loadMs ?? 0) + run.live.loadMs;
     run.input = result;
-    if (run.cleanup && run.cleanup.state !== "pending") this.cleanupLanded(run);
     if (result.error) {
       this.phase = "idle";
       this.status(result.error);
@@ -346,7 +346,7 @@ export class RoadTestPage {
           result.processingMs = row.timings.processingMs;
           // The final settings the host applied, for the take's record.
           result.settings = row.settings ?? null;
-          onText(result.text);
+          onText(result.text, result);
         } else if (["error", "cancelled", "skipped"].includes(row.status)) {
           result.error = `${run.setup.label} failed: ${row.error?.message ?? row.status}`;
         }
@@ -489,8 +489,7 @@ export class RoadTestPage {
 
   /**
    * A cleanup reply landed: the latest take shows it in place, and earlier
-   * rows that share it are rebuilt. Until the take's final is recorded,
-   * finishTake shows it.
+   * rows that share it are rebuilt.
    */
   cleanupLanded(run) {
     if (!run.input) return;
