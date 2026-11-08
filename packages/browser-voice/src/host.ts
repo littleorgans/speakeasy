@@ -11,7 +11,6 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { createConversationRuntime } from "@speakeasy/convo-engine";
 import { WebSocket, WebSocketServer } from "ws";
-import { HOTWORDS_FILENAME } from "@speakeasy/speech-io";
 import {
   PROMPT_SAMPLE_RATE,
   PromptReader,
@@ -22,6 +21,7 @@ import { BrowserConversationSession, type BrowserRuntimeConfig, type RuntimeFact
 import { AudioWorkLease } from "./audio-lease.ts";
 import { HttpError, readTakeSamples, requireLoopback, sendHttpError, sendJson } from "./http-guards.ts";
 import { LiveWordsSession } from "./live-words.ts";
+import { NamesRoutes, NamesStore } from "./names.ts";
 import { SetupComparison } from "./setup-comparison.ts";
 import { SetupWorkers } from "./setup-workers.ts";
 import type { SetupExecutor } from "./setup-protocol.ts";
@@ -64,6 +64,7 @@ const STATIC_FILES = new Map([
   ["/voice-settings.js", "voice-settings.js"],
   ["/voice-copy.js", "voice-copy.js"],
   ["/text-cleanup.js", "text-cleanup.js"],
+  ["/names.js", "names.js"],
   ["/voice-settings.css", "voice-settings.css"],
 ]);
 const PROMPT_READER_API = "/prompt-reader/";
@@ -86,8 +87,8 @@ export type BrowserVoiceServerOptions = {
   createRuntime?: RuntimeFactory;
   /** Serve the prompt reader's API, saving takes to an outside folder. */
   promptReader?: PromptReaderConfig;
-  /** Per take hotword list; defaults to hotwords.txt in the working directory. */
-  hotwordsPath?: string;
+  /** The one names list every names consumer takes; defaults to an in memory store of the defaults. */
+  names?: NamesStore;
   /** Display only take transcription; defaults to the Parakeet Ultra child. */
   transcriber?: Transcriber;
   setupExecutor?: SetupExecutor;
@@ -104,15 +105,17 @@ export async function startBrowserVoiceServer(options: BrowserVoiceServerOptions
   const promptReader = options.promptReader
     ? await PromptReader.load(options.promptReader)
     : undefined;
-  const hotwordsPath = resolve(options.hotwordsPath ?? HOTWORDS_FILENAME);
+  const names = options.names ?? await NamesStore.open();
+  const current = () => names.current();
   const transcriber = promptReader
-    ? (options.transcriber ?? new ChildTranscriber({ hotwordsPath }))
+    ? (options.transcriber ?? new ChildTranscriber(names.file === undefined ? {} : { namesSource: names.file }))
     : undefined;
   const lease = new AudioWorkLease();
-  const comparison = new SetupComparison({ executor: options.setupExecutor ?? new SetupWorkers() });
+  const comparison = new SetupComparison({ executor: options.setupExecutor ?? new SetupWorkers(), names: current });
   const setupRoutes = new SetupRoutes({ reader: promptReader, comparison, lease,
     providers: options.providers, readiness: options.setupReadiness ?? (() => []) });
-  const cleanupRoutes = new CleanupRoutes(options.textCleanups ?? new TextCleanups());
+  const cleanupRoutes = new CleanupRoutes(options.textCleanups ?? new TextCleanups(), current);
+  const namesRoutes = new NamesRoutes(names);
   const sessions = new Set<BrowserConversationSession>();
   const references = new VoiceReferenceStore();
   const server = createServer((request, response) => {
@@ -141,13 +144,17 @@ export async function startBrowserVoiceServer(options: BrowserVoiceServerOptions
       cleanupRoutes.serve(request, response);
       return;
     }
+    if (namesRoutes.handles(pathname)) {
+      namesRoutes.serve(request, response);
+      return;
+    }
     if (request.url === "/health") {
       response.writeHead(200, { "content-type": "application/json" });
       response.end('{"ok":true}');
       return;
     }
     if (request.url?.startsWith(PROMPT_READER_API)) {
-      void servePromptReader(request, response, promptReader, transcriber, hotwordsPath, lease);
+      void servePromptReader(request, response, promptReader, transcriber, names, lease);
       return;
     }
     void serveStatic(request.url ?? "/", response, options.home === "road-test" ? "/road-test" : "/");
@@ -279,7 +286,7 @@ async function servePromptReader(
   response: ServerResponse,
   reader: PromptReader | undefined,
   transcriber: Transcriber | undefined,
-  hotwordsPath: string,
+  names: NamesStore,
   lease: AudioWorkLease,
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
@@ -291,11 +298,11 @@ async function servePromptReader(
       });
     } else if (url.pathname === "/prompt-reader/prompts" && request.method === "GET") {
       sendJson(response, 200, { ...(await reader.listing()),
-        transcription: { model: TRANSCRIBE_MODEL_ID, hotwordsPath } });
+        transcription: { model: TRANSCRIBE_MODEL_ID, hotwordsPath: names.file ?? "in memory" } });
     } else if (url.pathname === "/prompt-reader/recordings" && request.method === "POST") {
       await saveTake(request, response, reader, url.searchParams);
     } else if (url.pathname === "/prompt-reader/transcriptions" && request.method === "POST" && transcriber) {
-      await transcribeTake(request, response, transcriber, lease);
+      await transcribeTake(request, response, transcriber, names, lease);
     } else if (url.pathname.startsWith(PROMPT_READER_TAKES) && request.method === "GET") {
       await serveTake(request, response, reader, url.pathname.slice(PROMPT_READER_TAKES.length));
     } else {
@@ -336,20 +343,22 @@ async function saveTake(
 }
 
 /**
- * Transcription route: display only text for the posted take. Nothing is
- * written; a failed or slow transcription answers 503 and the host serves on.
+ * Transcription route: display only text for the posted take, with the
+ * current names. Nothing is written; a failed or slow transcription answers
+ * 503 and the host serves on.
  */
 async function transcribeTake(
   request: IncomingMessage,
   response: ServerResponse,
   transcriber: Transcriber,
+  names: NamesStore,
   lease: AudioWorkLease,
 ): Promise<void> {
   const samples = await readTakeSamples(request);
   const release = lease.tryAcquire("legacy-input");
   if (!release) throw new HttpError(409, "Other speech work is in progress", "AUDIO_BUSY");
   try {
-    sendJson(response, 200, await transcriber.transcribe(samples));
+    sendJson(response, 200, await transcriber.transcribe(samples, names.current().names));
   } catch (error) {
     sendJson(response, 503, {
       error: `transcription unavailable: ${error instanceof Error ? error.message : String(error)}`,

@@ -16,7 +16,7 @@ export type SetupManifest = Readonly<{
 }>;
 
 // Pins every model, runtime, control, dependency and portable artifact name.
-export const SETUP_MANIFEST_SHA256 = "0dbabf6ac2bf61ea94aa438573d5111599f3ff52fa703ee65129af03b00eb571";
+export const SETUP_MANIFEST_SHA256 = "e82c26f642b8168ea2b5be267f007361e08f1914ebe019fc3ef9bf150c74f811";
 
 export function assertSetupManifest(value: unknown): asserts value is SetupManifest {
   if (sha256(JSON.stringify(value) ?? "") !== SETUP_MANIFEST_SHA256) {
@@ -40,6 +40,11 @@ export const SETUPS = SETUP_MANIFEST.setups;
 export function getSetup(id: unknown): SetupDefinition {
   if (!isSetupId(id)) throw new Error("unknown local setup id");
   return SETUPS.find((setup) => setup.id === id)!;
+}
+
+/** Whether a setup takes the Names list: its manifest declares `controls.names`. */
+export function takesNames(id: SetupId): boolean {
+  return getSetup(id).controls.names !== undefined;
 }
 
 /** Accept only immutable ids, never client supplied model or decode overrides. */

@@ -54,7 +54,7 @@ export function settingControls(document, settings, onChange = () => {}) {
     note.className = "quiet";
     note.textContent = setting.note;
     column.append(label, control, note);
-    controls.set(setting.id, { setting, control, column });
+    controls.set(setting.id, { setting, control, column, note });
     return column;
   });
   return {
@@ -73,6 +73,15 @@ export function settingControls(document, settings, onChange = () => {}) {
     },
     column(id) {
       return controls.get(id)?.column;
+    },
+    /** The control itself, for a caller that listens for more than input. */
+    control(id) {
+      return controls.get(id)?.control;
+    },
+    /** Replaces a setting's note. */
+    note(id, text) {
+      const entry = controls.get(id);
+      if (entry) entry.note.textContent = text;
     },
   };
 }

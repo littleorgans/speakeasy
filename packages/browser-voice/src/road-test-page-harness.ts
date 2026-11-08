@@ -9,6 +9,7 @@ import { liveStream } from "./live-settings.ts";
 import { TalkOverDetector } from "../public/talk-over.js";
 import { VoiceReadback } from "../public/voice-readback.js";
 import { CLEANUP_MODELS as CLEANUP_REGISTRY } from "./text-cleanup.ts";
+import { DEFAULT_NAMES_SNAPSHOT, MAX_NAME_BYTES, MAX_NAMES, namesSnapshot, parseNames } from "./names.ts";
 
 /** A page module's source, run in one vm script: its imports and export keywords stripped. */
 export const source = (name: string) => readFileSync(new URL(`../public/${name}`, import.meta.url), "utf8")
@@ -24,6 +25,17 @@ export const CLEANUP_MODELS = CLEANUP_REGISTRY.map((model) => ({ ...model,
 export function cleanupReply(body: { requestId: string; modelId: string }, text: string, extra = {}): FetchReply {
   return { ok: true, status: 200, json: async () => ({ requestId: body.requestId, modelId: body.modelId, status: "complete", text,
     processingMs: 40, workerWallMs: 45, loadMs: null, firstUse: false, settings: {}, ...extra }) };
+}
+
+/** The names route's reply in its contract's shape. */
+export function namesReply(names: readonly string[]): FetchReply {
+  return { ok: true, status: 200, json: async () => ({ ...namesSnapshot(names), limits: { maxNames: MAX_NAMES, maxNameBytes: MAX_NAME_BYTES } }) };
+}
+
+/** Answers each names save as the host does: the canonical list, or 400 with the rule broken. */
+export async function canonicalNames(body: { names: unknown }): Promise<FetchReply> {
+  try { return namesReply(parseNames(body.names)); }
+  catch (error) { return { ok: false, status: 400, json: async () => ({ error: (error as Error).message }) }; }
 }
 
 /** Answers each cleanup with its text capitalised and ending in a full stop. */
@@ -80,10 +92,12 @@ export const selection = { schema: 1, provider: { kind: "local" }, model: "piper
  * show which take they play. With transcript "partials" the setup streams: live records what reaches the live words channel.
  * Cleanup models come from `cleanups`; each cleanup request is recorded and answered by `cleanupReply`, and
  * `stored` seeds the page's localStorage. `comparisonEnd` holds the comparison stream open after its rows.
+ * The names route answers `names` and each save with `saveNames`; `namesSaves` records each save's body.
  */
 export function pageHarness({ holdVoice = false, transcript = "final", models = [] as unknown[], cleanups = CLEANUP_MODELS as unknown[],
-  cleanupReply = echoCleanup, comparisonEnd = Promise.resolve(), stored = {} as Record<string, string> }: { holdVoice?: boolean; transcript?: string; models?: unknown[];
-  comparisonEnd?: Promise<void>;
+  cleanupReply = echoCleanup, comparisonEnd = Promise.resolve(), stored = {} as Record<string, string>,
+  names = namesReply(DEFAULT_NAMES_SNAPSHOT.names) as FetchReply, saveNames = canonicalNames }: { holdVoice?: boolean; transcript?: string; models?: unknown[];
+  comparisonEnd?: Promise<void>; names?: FetchReply; saveNames?: (body: any) => Promise<FetchReply>;
   cleanups?: unknown[]; cleanupReply?: (body: any) => Promise<FetchReply>; stored?: Record<string, string> } = {}, rows: unknown[] = [
   { type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status: "processing", text: null, timings: {} } },
   { type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status: "complete", text: "Clear the screen.", timings: { firstUse: false, processingMs: 90 } } },
@@ -153,6 +167,7 @@ export function pageHarness({ holdVoice = false, transcript = "final", models = 
   // Like the browser's fetch, a call with any receiver but the window throws.
   let realm: unknown;
   const cleanupRequests: any[] = [];
+  const namesSaves: any[] = [];
   async function fetch(this: unknown, url: string, init?: { method?: string; body?: string }) {
     if (this !== undefined && this !== realm) throw new TypeError("Illegal invocation");
     posted.push(url);
@@ -162,6 +177,12 @@ export function pageHarness({ holdVoice = false, transcript = "final", models = 
       return cleanupReply(body);
     }
     if (url === "/prompt-reader/cleanups") return { ok: true, json: async () => ({ schema: 1, models: cleanups }) };
+    if (url === "/road-test/names" && init?.method === "PUT") {
+      const body = JSON.parse(init.body!);
+      namesSaves.push(body);
+      return saveNames(body);
+    }
+    if (url === "/road-test/names") return names;
     if (url.startsWith("/speech-output/picks/")) return { ok: true, arrayBuffer: async () => new ArrayBuffer(8) };
     if (url.startsWith("/speech-output/references")) return { ok: true, json: async () => (init?.method === "POST" ? { id: "d".repeat(64) } : {}) };
     if (url === "/prompt-reader/setups") return { ok: true, json: async () => setups };
@@ -184,9 +205,9 @@ export function pageHarness({ holdVoice = false, transcript = "final", models = 
       createBufferSource() { const source = { buffer: { length: 0 }, connect() {}, stop() {}, start() { played.push(source.buffer.length); } }; return source; } },
     window: { setTimeout, clearTimeout }, localStorage: storage });
   realm = vm.runInContext("globalThis", context);
-  vm.runInContext(["setting-controls.js", "voice-settings.js", "voice-copy.js", "text-cleanup.js", "take-history.js", "road-test.js"].map(source).join("\n")
+  vm.runInContext(["setting-controls.js", "names.js", "voice-settings.js", "voice-copy.js", "text-cleanup.js", "take-history.js", "road-test.js"].map(source).join("\n")
     + "\nglobalThis.Page = RoadTestPage;", context);
-  return { page: new context.Page(), elements, spoken, posted, played, live, document, microphones, cleanups: cleanupRequests, storage };
+  return { page: new context.Page(), elements, spoken, posted, played, live, document, microphones, cleanups: cleanupRequests, storage, namesSaves };
 }
 
 export const until = async (done: () => unknown) => {

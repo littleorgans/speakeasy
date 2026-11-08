@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { resolveFinalSettings, type FinalSettings } from "./final-settings.ts";
 import { LiveTake, type LiveTakeEvent } from "./live-take.ts";
-import { getSetup, parseSetupSelection } from "./setup-registry.ts";
+import { DEFAULT_NAMES_SNAPSHOT, type NamesSnapshot } from "./names.ts";
+import { getSetup, parseSetupSelection, takesNames } from "./setup-registry.ts";
 import {
   assertBoundedText, assertSetupExecutionResult, assertSetupLoadResult, CLEANUP_SETUP_ID,
   createCanonicalPcm, IDLE_RELEASE_MS, MAX_TEXT_BYTES, pcmIdentity, SETUP_IDS, sha256, ULTRA_SETUP_ID,
@@ -22,6 +23,8 @@ export type ComparisonRequest = {
 };
 type Job = {
   id: string; pcm: CanonicalPcm; ids: readonly SetupId[]; settings: FinalSettings; admitted: number;
+  /** The Names list as admitted: every setup that takes names loads and runs with this one snapshot. */
+  names: NamesSnapshot;
   controller: AbortController; rows: Map<SetupId, SetupRow>; onEvent?: ComparisonRequest["onEvent"];
   /** Live takes this comparison stopped; it runs after their last calls settle. */
   live: Promise<unknown>;
@@ -54,6 +57,7 @@ function failure(error: unknown, code: SetupFailureCode): SetupFailure {
 /** Owns admission, one canonical take, serial model work and a per comparison dependency memo. */
 export class SetupComparison {
   readonly #executor: SetupExecutor;
+  readonly #names: () => NamesSnapshot;
   readonly #now: () => number;
   readonly #idleReleaseMs: number;
   readonly #resident = new Map<SetupId, number>();
@@ -65,8 +69,9 @@ export class SetupComparison {
   #closed = false;
   #closing: Promise<void> | undefined;
 
-  constructor(options: { executor: SetupExecutor; now?(): number; idleReleaseMs?: number }) {
+  constructor(options: { executor: SetupExecutor; now?(): number; idleReleaseMs?: number; names?(): NamesSnapshot }) {
     this.#executor = options.executor;
+    this.#names = options.names ?? (() => DEFAULT_NAMES_SNAPSHOT);
     this.#now = options.now ?? (() => performance.now());
     this.#idleReleaseMs = options.idleReleaseMs ?? IDLE_RELEASE_MS;
     if (!Number.isFinite(this.#idleReleaseMs) || this.#idleReleaseMs <= 0) throw new Error("invalid idle release duration");
@@ -81,11 +86,12 @@ export class SetupComparison {
     if (typeof id !== "string" || !/^[a-zA-Z0-9_.:-]{1,128}$/.test(id)) throw new Error("invalid comparison id");
     if (this.#active?.id === id || this.#queued?.id === id) throw new Error("comparison id already admitted");
     const pcm = createCanonicalPcm(request.samples);
+    const names = this.#names();
     // The final pass supersedes live words: a held take stops feeding once its comparison arrives.
     const live = Promise.all([...this.#takes].map((take) => take.stop()));
     let resolve!: Job["resolve"];
     const done = new Promise<ComparisonResult>((r) => { resolve = r; });
-    const job: Job = { id, pcm, ids, settings, admitted: this.#now(), controller: new AbortController(),
+    const job: Job = { id, pcm, ids, settings, names, admitted: this.#now(), controller: new AbortController(),
       rows: new Map(), onEvent: request.onEvent, live, resolve, done: false, detach() {} };
     const queued = this.#active !== undefined;
     if (queued) this.#queued = job;
@@ -98,8 +104,9 @@ export class SetupComparison {
       setupId, status: "queued", text: null, pcm: pcmIdentity(pcm), timings: blankTimings(),
       ...(setupId === CLEANUP_SETUP_ID ? { dependency: ULTRA_SETUP_ID } : {}),
       ...(settings[setupId] ? { settings: settings[setupId] } : {}),
+      ...(takesNames(setupId) ? { namesDigest: names.digest } : {}),
     });
-    this.#emit(job, { type: "accepted", comparisonId: id, queued, setupIds: ids, pcm: pcmIdentity(pcm) });
+    this.#emit(job, { type: "accepted", comparisonId: id, queued, setupIds: ids, pcm: pcmIdentity(pcm), names });
     for (const row of job.rows.values()) this.#publish(job, row);
     if (request.signal?.aborted || job.controller.signal.aborted) cancel();
     this.#schedule();
@@ -230,6 +237,7 @@ export class SetupComparison {
     }
     const started = this.#now();
     const signal = job.controller.signal;
+    const names = takesNames(setupId) ? { names: job.names } : {};
     let code: SetupFailureCode = "load";
     try {
       let request: SetupExecution;
@@ -238,13 +246,14 @@ export class SetupComparison {
         code = "protocol";
         assertBoundedText(base.result.text, "Ultra text");
         request = { operation: "cleanup", requestId: job.id, setupId, base: pcmIdentity(job.pcm),
-          baseTextSha256: sha256(base.result.text), A: base.result.text, B: null };
+          baseTextSha256: sha256(base.result.text), A: base.result.text, B: null, ...names };
       } else request = { operation: "transcribe", requestId: job.id, setupId, pcm: job.pcm,
-        ...(job.settings[setupId] ? { settings: job.settings[setupId] } : {}) };
+        ...(job.settings[setupId] ? { settings: job.settings[setupId] } : {}), ...names };
       code = "load";
       this.#phase(job, setupId, "loading", timings);
       if (signal.aborted) throw new Error("comparison cancelled");
-      const loaded = await this.#executor.load(setupId, { signal });
+      // A changed list reloads here, so the reload counts as load time.
+      const loaded = await this.#executor.load(setupId, { signal, ...names });
       code = "protocol";
       assertSetupLoadResult(loaded);
       Object.assign(timings, loaded);

@@ -481,7 +481,7 @@ test("Cohere shows its Names setting under Speech in; each take sends it, and th
   assert.equal(others.length, 0, "one setting");
   const [label, select, note] = names.children;
   assert.equal(label.textContent, "Names");
-  assert.equal(note.textContent, "Biases Cohere toward Grok, Claude, Codex, GPT, TM, Hibiki; can turn similar words into these names");
+  assert.equal(note.textContent, "Biases Cohere toward the Names list; can turn similar words into these names");
   assert.deepEqual(select.options.map((option: any) => option.label), ["Off", "Gentle", "Strong"]);
   assert.equal(select.value, "0", "Off by default");
   select.value = "1.25";

@@ -4,6 +4,7 @@ import { CaptureSession } from "/capture-session.js";
 import { trailItems, trailSummary } from "/live-trail.js";
 import { formatDuration, inputCard, liveLine, outputCard, outputLatency, readEvents } from "/road-test-text.js";
 import { appliedLive, describe, finalNote, HISTORY_COLUMNS, historyTrail, liveDiffers, pressToFirstWords, releaseToVoice } from "/take-history.js";
+import { NamesControl } from "/names.js";
 import { chosenSettings, fill, settingColumns } from "/setting-controls.js";
 import { TalkOverDetector } from "/talk-over.js";
 import { TextCleanup } from "/text-cleanup.js";
@@ -21,7 +22,9 @@ import { settingsNote, VoiceSettings } from "/voice-settings.js";
  * (Cohere's names bias) shows them under Speech in; each take sends them.
  * Final text arrives as one comparison row; the voice uses the speech output
  * channel and reads that final. An optional cleanup model then tidies the
- * text on screen only (public/text-cleanup.js).
+ * text on screen only (public/text-cleanup.js). One Names list under Speech
+ * in (public/names.js) feeds every model that takes names; each take keeps
+ * the list the host used for it.
  */
 
 const SAMPLE_RATE = 16_000;
@@ -53,6 +56,7 @@ export class RoadTestPage {
     this.historyRows = new WeakMap();
     this.historyTrails = new WeakMap();
     this.cleanup = new TextCleanup({ document, onChange: () => this.render(), onLanded: (run) => this.cleanupLanded(run) });
+    this.names = new NamesControl({ document, root: document.getElementById("names") });
     this.catalogueRevision = null;
     this.context = null;
     this.mic = null;
@@ -77,7 +81,8 @@ export class RoadTestPage {
       return head;
     }));
     try {
-      const [setups, voices] = await Promise.all([json("/prompt-reader/setups"), json("/speech-output/models"), this.cleanup.load()]);
+      const [setups, voices] = await Promise.all([json("/prompt-reader/setups"), json("/speech-output/models"), this.cleanup.load(),
+        this.names.load()]);
       this.setups = setups.setups;
       this.voices = voices.models.filter((model) => model.provider.kind === "local");
       this.catalogueRevision = voices.revision;
@@ -326,6 +331,8 @@ export class RoadTestPage {
       let loadingAt = null;
       let startMs = 0;
       await readEvents(response, (event) => {
+        // The take's own list; what was said over the voice keeps it.
+        if (event.type === "accepted") run.names ??= event.names ?? null;
         if (event.type !== "row" || event.row.setupId !== run.setup.id) return;
         const row = event.row;
         // A cleanup row loads Ultra, then its own model: every load phase counts.

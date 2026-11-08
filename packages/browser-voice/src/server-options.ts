@@ -4,6 +4,7 @@ import { constants } from "node:fs";
 import { access, readdir, readFile, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { exactFields, isRecord } from "./http-guards.ts";
+import { NAMES_FILE } from "./names.ts";
 import { getSetup, SETUPS } from "./setup-registry.ts";
 import { isSetupId, type SetupId } from "./setup-protocol.ts";
 import { PythonSetupWorker, SetupWorkers, type PythonSetupId, type SetupWorkersOptions } from "./setup-workers.ts";
@@ -48,7 +49,7 @@ export type SetupRuntimeLocations = {
 export function readBrowserVoiceOptions(
   argv: string[],
   env: NodeJS.ProcessEnv,
-): { port: number; runtimeConfig: RuntimeConfig; promptReader?: PromptReaderConfig; hotwordsPath?: string;
+): { port: number; runtimeConfig: RuntimeConfig; promptReader?: PromptReaderConfig; namesFile: string;
   setupRuntimeFile: string; setupRuntimeDefault: boolean; outputRoot: string; home: "room" | "road-test" } {
   const portFlag = readFlag(argv, "--port");
   const port = portFlag === undefined ? 4317 : Number(portFlag);
@@ -57,7 +58,7 @@ export function readBrowserVoiceOptions(
   }
   const promptsPath = readFlag(argv, "--prompts");
   const outputDir = readFlag(argv, "--out");
-  const hotwordsPath = readFlag(argv, "--hotwords");
+  const namesFile = readFlag(argv, "--names");
   const setupRuntimeFile = readFlag(argv, "--setup-runtime") ?? env.SPEAKEASY_SETUP_RUNTIME;
   const outputRoot = readFlag(argv, "--output-root") ?? env.SPEAKEASY_OUTPUT_ROOT;
   // Defaults resolve from the repo root, where every command runs.
@@ -70,7 +71,7 @@ export function readBrowserVoiceOptions(
     setupRuntimeFile: setupRuntimeFile ?? resolve(DEFAULT_SETUP_RUNTIME),
     setupRuntimeDefault: setupRuntimeFile === undefined,
     outputRoot: outputRoot === undefined ? resolve(DEFAULT_OUTPUT_ROOT) : absoluteLocation(outputRoot),
-    ...(hotwordsPath !== undefined ? { hotwordsPath } : {}),
+    namesFile: resolve(namesFile ?? NAMES_FILE),
     ...(promptsPath !== undefined && outputDir !== undefined
       ? { promptReader: { promptsPath, outputDir } }
       : {}),

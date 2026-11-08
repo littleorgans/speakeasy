@@ -8,6 +8,7 @@ import { createSetupRuntime, DEFAULT_OUTPUT_ROOT, DEFAULT_SETUP_RUNTIME, parseSe
 import { SETUPS } from "./setup-registry.ts";
 import { CPU_SETUP_IDS, isCpuSetupId } from "./transcriber.ts";
 import { CLEANUP_MODEL_IDS } from "./text-cleanup.ts";
+import { NAMES_FILE } from "./names.ts";
 import { isWorkerOutput, LOCAL_OUTPUT_MODELS } from "../../speech-io/src/tts/catalogue.ts";
 
 test("server options keep the model and use the cascade TTS voice", () => {
@@ -25,6 +26,7 @@ test("server options keep the model and use the cascade TTS voice", () => {
       setupRuntimeFile: resolve(DEFAULT_SETUP_RUNTIME),
       setupRuntimeDefault: true,
       outputRoot: resolve(DEFAULT_OUTPUT_ROOT),
+      namesFile: resolve(NAMES_FILE),
       runtimeConfig: {
         llmModel: "operator-model",
         ttsEngine: "sherpa",
@@ -57,13 +59,13 @@ test("road test flag serves the road test page at the root", () => {
   assert.equal(readBrowserVoiceOptions(["--port", "4870"], {}).home, "room");
 });
 
-test("hotwords flag selects an external list and requires its path", () => {
-  assert.equal(readBrowserVoiceOptions(["--hotwords", "../speech/words.txt"], {}).hotwordsPath,
-    "../speech/words.txt");
-  assert.equal(readBrowserVoiceOptions([], {}).hotwordsPath, undefined);
-  for (const argv of [["--hotwords"], ["--hotwords", "--port", "0"]]) {
-    assert.throws(() => readBrowserVoiceOptions(argv, {}), /--hotwords needs a value/);
+test("names flag selects the names file, absolute, and requires its path", () => {
+  assert.equal(readBrowserVoiceOptions(["--names", "../speech/names.json"], {}).namesFile, resolve("../speech/names.json"));
+  assert.equal(readBrowserVoiceOptions([], {}).namesFile, resolve("models/road-test-names.json"));
+  for (const argv of [["--names"], ["--names", "--port", "0"]]) {
+    assert.throws(() => readBrowserVoiceOptions(argv, {}), /--names needs a value/);
   }
+  assert.equal("hotwordsPath" in readBrowserVoiceOptions(["--names", "n.json"], {}), false, "--hotwords no longer applies");
 });
 
 test("runtime locations are explicit server configuration with portable absent defaults", () => {

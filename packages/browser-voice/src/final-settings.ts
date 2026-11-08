@@ -8,12 +8,12 @@ import { resolveLiveSettings, type LiveSetting } from "./live-settings.ts";
  */
 export type FinalSetup = Readonly<{ setupId: SetupId; settings: readonly LiveSetting[] }>;
 
-// Research ct-pbias: prefix sequence bias +1.25 and +2.5 toward five names, now
-// six with Hibiki (runtime/hex/cohere-sequence-bias.patch). Both recovered
-// missed names and both damaged other words, so Off stays the default.
+// Research ct-pbias: prefix sequence bias +1.25 and +2.5 toward the names
+// (runtime/hex/cohere-sequence-bias.patch), now the road test Names list.
+// Both recovered missed names and both damaged other words, so Off stays the default.
 const COHERE: readonly LiveSetting[] = [
   { id: "namesBias", label: "Names", default: 0,
-    note: "Biases Cohere toward Grok, Claude, Codex, GPT, TM, Hibiki; can turn similar words into these names",
+    note: "Biases Cohere toward the Names list; can turn similar words into these names",
     options: [{ value: 0, label: "Off", phrase: "no names bias" },
       { value: 1.25, label: "Gentle", phrase: "names bias 1.25" },
       { value: 2.5, label: "Strong", phrase: "names bias 2.5" }] },

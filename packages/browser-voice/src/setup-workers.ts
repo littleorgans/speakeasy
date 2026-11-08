@@ -2,11 +2,12 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { endianness } from "node:os";
 import { fileURLToPath } from "node:url";
+import type { NamesSnapshot } from "./names.ts";
 import {
   assertLivePartial, MAX_HEADER_BYTES as MAX_WORKER_HEADER_BYTES, MAX_PCM_BYTES as MAX_WORKER_PCM_BYTES,
   MAX_TEXT_BYTES as MAX_WORKER_TEXT_BYTES, SETUP_PROTOCOL_VERSION, sha256 as hash,
   type LivePartial, type LiveSettings, type PcmIdentity, type SetupId, type SetupExecution, type SetupExecutionContext,
-  type SetupExecutionResult, type SetupExecutor, type SetupLoadResult,
+  type SetupExecutionResult, type SetupExecutor, type SetupLoadContext, type SetupLoadResult,
 } from "./setup-protocol.ts";
 import { isCpuSetupId, type ChildTranscriber, type CpuReady, type CpuSetupId } from "./transcriber.ts";
 import { isWorkerOutput, LOCAL_OUTPUT_MODELS, type LocalOutputModelId } from "../../speech-io/src/tts/catalogue.ts";
@@ -67,6 +68,8 @@ type Session = {
   child: ChildProcessWithoutNullStreams; generation: string; buffer: Buffer;
   pending?: Pending; failure?: Error; metadata?: Record<string, unknown>; used: boolean;
   closed: Promise<void>; finish(): void; exited: boolean; killTimer?: NodeJS.Timeout;
+  /** The names snapshot this generation loaded with; none for a setup that takes no names. */
+  names?: NamesSnapshot;
 };
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -208,8 +211,9 @@ export class PythonSetupWorker {
     } catch (error) { return Promise.reject(error); }
   }
 
-  load(signal?: AbortSignal): Promise<SetupLoadResult> {
-    return this.#run("load", {}, Buffer.alloc(0), signal);
+  /** A setup that takes names loads with them as a backend option; another list retires this generation first. */
+  load(signal?: AbortSignal, names?: NamesSnapshot): Promise<SetupLoadResult> {
+    return this.#run("load", names ? { names } : {}, Buffer.alloc(0), signal);
   }
 
   /** Live words after an explicit load; start opens a fresh stream in the worker, with its settings. */
@@ -227,6 +231,9 @@ export class PythonSetupWorker {
       if (request.setupId !== this.#options.setupId || typeof request.requestId !== "string"
         || request.requestId.length === 0 || Buffer.byteLength(request.requestId) > 128) {
         throw new SetupWorkerError("execution identity mismatch");
+      }
+      if (this.#session && this.#session.names?.digest !== request.names?.digest) {
+        throw new SetupWorkerError("names changed since load; explicit load required");
       }
       if (request.operation === "transcribe") {
         const { body, identity } = canonicalPcm(request.pcm.samples);
@@ -266,7 +273,7 @@ export class PythonSetupWorker {
     }
   }
 
-  #run(operation: "load", fields: Header, body: Buffer, signal?: AbortSignal): Promise<SetupLoadResult>;
+  #run(operation: "load", fields: { names?: NamesSnapshot }, body: Buffer, signal?: AbortSignal): Promise<SetupLoadResult>;
   #run(operation: "transcribe" | "cleanup", fields: Header, body: Buffer, signal?: AbortSignal,
     requireReady?: boolean): Promise<PythonWorkerResult>;
   #run(operation: "speak", fields: Header, body: Buffer, signal?: AbortSignal): Promise<PythonVoiceResult>;
@@ -288,13 +295,21 @@ export class PythonSetupWorker {
         throw new SetupWorkerError("worker is not ready; explicit load required");
       }
       if (this.#session?.failure) await this.#session.closed;
+      const names = operation === "load" ? fields.names as NamesSnapshot | undefined : this.#session?.names;
+      if (this.#session && this.#session.names?.digest !== names?.digest) {
+        // The list changed: this generation exits before the next one loads.
+        const stale = this.#session;
+        this.#retire(stale, new SetupWorkerError("names changed"));
+        await stale.closed;
+      }
       if (this.#closed) throw new SetupWorkerError("worker closed");
       if (signal?.aborted) throw new SetupWorkerError("worker cancelled");
       session = this.#session ?? this.#spawn();
       let startupMs = 0;
       if (!session.metadata) {
+        session.names = names;
         const ready = await this.#request(session, "load", "ready", {
-          options: this.#options.backendOptions ?? {},
+          options: { ...this.#options.backendOptions, ...(names ? { names: names.names } : {}) },
         }, Buffer.alloc(0), this.#loadTimeoutMs);
         if (!record(ready.metadata) || !matches(ready.metadata, this.#options.expectedIdentity ?? {})) {
           throw new SetupWorkerError("worker ready identity mismatch");
@@ -480,9 +495,9 @@ export class SetupWorkers implements SetupExecutor {
     }
   }
 
-  async load(setupId: SetupId, { signal }: SetupExecutionContext): Promise<SetupLoadResult> {
+  async load(setupId: SetupId, { signal, names }: SetupLoadContext): Promise<SetupLoadResult> {
     this.#assertOpen();
-    return isCpuSetupId(setupId) ? this.#cpuSetup(setupId).load(signal) : this.#worker(setupId).load(signal);
+    return isCpuSetupId(setupId) ? this.#cpuSetup(setupId).load(signal, names) : this.#worker(setupId).load(signal, names);
   }
 
   async execute(request: SetupExecution, context: SetupExecutionContext): Promise<SetupExecutionResult> {
@@ -529,11 +544,12 @@ export class SetupWorkers implements SetupExecutor {
   }
 }
 
-/** One fixed list CPU setup: its child, readiness and the one operation it runs at a time. */
+/** One CPU setup: its child, readiness, the names it prepared and the one operation it runs at a time. */
 class CpuSetup {
   readonly #cpu: CpuTranscriber;
   readonly #assertOpen: () => void;
   #ready: CpuReady | undefined;
+  #names: NamesSnapshot | undefined;
   #used = false;
   #busy = false;
   #finished: Promise<void> | undefined;
@@ -543,12 +559,14 @@ class CpuSetup {
     this.#assertOpen = assertOpen;
   }
 
-  load(signal: AbortSignal): Promise<SetupLoadResult> {
+  /** A names change rebuilds the recognizer inside prepare, so it counts as a cold load. */
+  load(signal: AbortSignal, names?: NamesSnapshot): Promise<SetupLoadResult> {
     return this.#with(signal, async () => {
-      const ready = await this.#cpu.prepare();
-      const cold = this.#ready !== ready;
+      const ready = await this.#cpu.prepare(names?.names ?? []);
+      const cold = this.#ready !== ready || this.#names?.digest !== names?.digest;
       if (cold) this.#used = false;
       this.#ready = ready;
+      this.#names = names;
       return { startupMs: cold ? null : 0, loadMs: cold ? ready.load.loadMs : 0, firstUse: !this.#used };
     });
   }
@@ -556,12 +574,16 @@ class CpuSetup {
   execute(request: SetupExecution, signal: AbortSignal): Promise<SetupExecutionResult> {
     return this.#with(signal, async () => {
       if (!this.#ready || request.operation !== "transcribe") throw new Error("CPU requires explicit load");
-      const result = await this.#cpu.transcribe(request.pcm.samples);
+      if (this.#names?.digest !== request.names?.digest) throw new Error("names changed since load; explicit load required");
+      const result = await this.#cpu.transcribe(request.pcm.samples, request.names?.names ?? []);
       if (!result.comparison) throw new Error("CPU executor requires fixed ChildTranscriber mode");
       this.#used = true;
       return { text: result.text, decodeMs: result.decodeMs, processingMs: result.comparison.processingMs,
         workerWallMs: result.comparison.workerWallMs,
-        diagnostics: { modelConstructionMs: result.comparison.modelConstructionMs } };
+        // The names count and list revision the child applied, and the decoding it constructed.
+        diagnostics: { modelConstructionMs: result.comparison.modelConstructionMs,
+          ...(result.hotwords ? { names: result.hotwords.count, namesRevision: result.hotwords.revision } : {}),
+          ...(result.comparison.decodingMethod ? { decodingMethod: result.comparison.decodingMethod } : {}) } };
     });
   }
 

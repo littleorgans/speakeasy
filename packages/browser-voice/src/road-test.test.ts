@@ -3,21 +3,27 @@ import { test, type TestContext } from "node:test";
 import { WebSocket } from "ws";
 import { startBrowserVoiceServer, type BrowserVoiceServerOptions } from "./host.ts";
 import { SETUPS } from "./setup-registry.ts";
-import type { SetupExecution, SetupExecutor, SetupId } from "./setup-protocol.ts";
+import type { SetupExecution, SetupExecutor, SetupId, SetupLoadContext } from "./setup-protocol.ts";
 import { buildSpeechOutputCatalogue } from "./speech-output-catalog.ts";
 import { LOCAL_OUTPUT_MODELS, LOCAL_OUTPUT_REGISTRY } from "../../speech-io/src/tts/catalogue.ts";
 import { TextCleanups, type CleanupWorker } from "./text-cleanup.ts";
+import type { TextCleanupInput } from "./setup-workers.ts";
+import { DEFAULT_NAMES, NamesStore } from "./names.ts";
 
 class FakeExecutor implements SetupExecutor {
   calls: SetupExecution[] = [];
   fed: [SetupId, number, boolean][] = [];
   settings: unknown[] = [];
+  loads: [SetupId, SetupLoadContext["names"]][] = [];
   async feed(setupId: SetupId, samples: Float32Array, start: boolean, _context?: unknown, settings?: unknown) {
     this.fed.push([setupId, samples.length, start]);
     this.settings.push(settings);
     return { stable: " Clear the", tentative: " scream", processingMs: 3 };
   }
-  async load() { return { startupMs: 0, loadMs: 0, firstUse: true }; }
+  async load(setupId: SetupId, { names }: SetupLoadContext) {
+    this.loads.push([setupId, names]);
+    return { startupMs: 0, loadMs: 0, firstUse: true };
+  }
   async execute(request: SetupExecution) {
     this.calls.push(request);
     return { text: "Clear the screen.", processingMs: 1, workerWallMs: 2 };
@@ -85,9 +91,11 @@ test("a live take transcribes without a prompt reader; saved takes still need on
 test("cleanup models are listed and clean a final's text through the host, holding no audio lease", async (t) => {
   let open!: () => void;
   const held = new Promise<void>((resolve) => { open = resolve; });
+  const inputs: TextCleanupInput[] = [];
   const worker: CleanupWorker = {
     load: async () => ({ startupMs: null, loadMs: 30, firstUse: true }),
-    cleanText: async () => {
+    cleanText: async (input) => {
+      inputs.push(input);
       await held;
       return { text: "Ship it.", processingMs: 4, metadata: {}, firstUse: true, startupLoadWallMs: 30, workerWallMs: 35 };
     },
@@ -117,12 +125,56 @@ test("cleanup models are listed and clean a final's text through the host, holdi
   assert.equal(reply.status, 200);
   assert.deepEqual(await reply.json(), { requestId: "clean-1", modelId: "apple/foundation-models", status: "complete",
     text: "Ship it.", processingMs: 4, workerWallMs: 35, loadMs: 30, firstUse: true,
-    settings: { instruction: listing.models[1].settings[0].default, names: "Grok, Claude, Codex, GPT, TM, Hibiki", earlier: false } });
+    settings: { instruction: listing.models[1].settings[0].default, earlier: false } });
+  assert.deepEqual(inputs[0]!.names, DEFAULT_NAMES, "a request without names gets the current list");
+  await (await post({ modelId: "apple/foundation-models", text: "um", names: [" Qwen ", "Qwen", "", "TM"] })).text();
+  assert.deepEqual(inputs[1]!.names, ["Qwen", "TM"], "the take's names, canonical");
+  const refusedNames = await post({ modelId: "apple/foundation-models", text: "um", names: ["Grok, Claude"] });
+  assert.equal(refusedNames.status, 400);
+  assert.match((await refusedNames.json() as { error: string }).error, /"Grok, Claude" contains a comma/);
+  assert.equal((await post({ modelId: "superwhisper/s1-mini", text: "um", names: ["Grok"] })).status, 400, "S1-mini takes no names");
+  assert.equal((await post({ modelId: "apple/foundation-models", text: "um", names: Array.from({ length: 64 }, (_, index) => `${index}`.padEnd(128, "n")) })).status, 200, "the route's JSON bound fits names at their bounds");
   const skipped = await (await post({ modelId: "superwhisper/s1-mini", text: "um" })).json() as Record<string, unknown>;
   assert.deepEqual([skipped.status, skipped.code, skipped.reason], ["skipped", "unavailable", "runtime not configured"]);
   assert.equal((await post({ modelId: "superwhisper/s1-mini", text: "um", settings: {} })).status, 400);
   assert.equal((await post({ modelId: "apple/foundation-models", text: "x".repeat(16_384) })).status, 413);
   assert.equal((await post({ modelId: "apple/foundation-models", text: "x" }, "http://evil.example")).status, 403);
+});
+
+test("the names route answers the list, saves a valid edit and refuses an invalid one unchanged", async (t) => {
+  const { server, executor } = await host(t, { home: "road-test", names: await NamesStore.open() });
+  const route = `${server.url}/road-test/names`;
+  const put = (body: unknown, origin = server.url) => fetch(route, { method: "PUT",
+    headers: { origin, "content-type": "application/json" }, body: JSON.stringify(body) });
+  const fresh = await (await fetch(route)).json() as { names: string[]; digest: string; limits: unknown };
+  assert.deepEqual(fresh, { names: [...DEFAULT_NAMES],
+    digest: "59d6626926c652e50c7e90fea5f95afdea75f6c27e11aa07c2996b89d51fc068", limits: { maxNames: 64, maxNameBytes: 128 } });
+  const saved = await put({ names: [" Qwen", "GPT-SOL ", "", "Qwen"] });
+  assert.equal(saved.status, 200);
+  assert.deepEqual((await saved.json() as { names: string[] }).names, ["Qwen", "GPT-SOL"], "trimmed, blanks and repeats removed");
+  for (const names of ["Grok", ["Grok", 3], Array.from({ length: 65 }, (_, index) => `n${index}`), ["é".repeat(65)],
+    ["Gr\u0000ok"], ["Gr\u0085ok"], ["Grok, Claude"]]) {
+    const refused = await put({ names });
+    assert.equal(refused.status, 400, JSON.stringify(names));
+    assert.ok((await refused.json() as { error: string }).error);
+  }
+  assert.equal((await put({ names: [], extra: 1 })).status, 400, "unsupported fields");
+  assert.equal((await put({ names: [] }, "http://evil.example")).status, 403);
+  assert.equal((await fetch(route, { method: "PUT", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ names: [] }) })).status, 403, "a write needs the page's origin");
+  assert.equal((await fetch(route, { headers: { origin: "http://evil.example" } })).status, 403);
+  const { limits: _limits, ...kept } = await (await fetch(route)).json() as { names: string[]; digest: string; limits: unknown };
+  assert.deepEqual(kept.names, ["Qwen", "GPT-SOL"], "a refused edit changes nothing");
+  // The next take uses the saved list: accepted echoes it, and only names setups load and run with it.
+  const query = new URLSearchParams({ requestId: "names-1", setupIds: JSON.stringify(["mlx-parakeet/v3-greedy", "cohere/transcribe"]) });
+  const events = (await (await fetch(`${server.url}/prompt-reader/comparisons?${query}`, { method: "POST",
+    headers: { origin: server.url, "content-type": "application/octet-stream" }, body: new Blob([new Float32Array(1_600).buffer]) }))
+    .text()).trim().split("\n").map((line) => JSON.parse(line));
+  assert.deepEqual(events[0].names, kept);
+  assert.deepEqual(executor.loads, [["mlx-parakeet/v3-greedy", undefined], ["cohere/transcribe", kept]]);
+  assert.deepEqual(executor.calls.map((call) => call.names), [undefined, kept]);
+  const rows = events.filter((event) => event.type === "row" && event.row.status === "complete").map((event) => event.row);
+  assert.deepEqual(rows.map((row) => [row.setupId, row.namesDigest]), [["mlx-parakeet/v3-greedy", undefined], ["cohere/transcribe", kept.digest]]);
 });
 
 test("a Cohere take carries its names setting to the executor and its row; values not offered are refused", async (t) => {

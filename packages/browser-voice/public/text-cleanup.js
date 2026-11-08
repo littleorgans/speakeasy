@@ -7,7 +7,8 @@ import { accepts, fill, settingControls } from "/setting-controls.js";
  * final once it shows. The voice never waits for it and reads the final. The
  * cleaned text replaces the final on screen, changed words glow once, and a
  * quiet line keeps the final. Each model's settings persist in this browser;
- * the choice starts Off on every load.
+ * the choice starts Off on every load. A model that takes names gets the
+ * take's Names list (public/names.js), as the host captured it.
  */
 
 export const CLEANUP_KEY = "speak-easy.road-test.cleanup";
@@ -130,7 +131,7 @@ export class TextCleanup {
     if (!choice || !text.trim()) return;
     const cleanup = run.cleanup = { modelId: choice.model.id, label: choice.model.label, final: text, state: "pending" };
     const startedAt = performance.now();
-    void this.request(choice, text, choice.settings?.earlier ? earlierTakes(history, run) : []).then((reply) => {
+    void this.request(choice, text, choice.settings?.earlier ? earlierTakes(history, run) : [], run.names?.names).then((reply) => {
       if (reply.status === "complete") {
         Object.assign(cleanup, { state: "complete", text: reply.text ?? "", ms: performance.now() - startedAt,
           loadMs: reply.firstUse ? reply.loadMs ?? null : null, processingMs: reply.processingMs ?? null });
@@ -139,10 +140,14 @@ export class TextCleanup {
     });
   }
 
-  /** One cleanup request; every answer but complete, a refusal included, comes back skipped with its reason. */
-  async request(choice, text, earlier) {
+  /**
+   * One cleanup request, with the take's names for a model that takes them;
+   * every answer but complete, a refusal included, comes back skipped with its reason.
+   */
+  async request(choice, text, earlier, names) {
     const body = { requestId: `cleanup-${Date.now()}-${++this.serial}`, modelId: choice.model.id, text,
-      ...(choice.settings ? { settings: choice.settings } : {}), ...(earlier.length ? { earlier } : {}) };
+      ...(choice.settings ? { settings: choice.settings } : {}), ...(earlier.length ? { earlier } : {}),
+      ...(choice.model.takesNames && names ? { names } : {}) };
     try {
       const response = await fetch("/prompt-reader/cleanups", { method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify(body) });
