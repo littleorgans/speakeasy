@@ -17,7 +17,9 @@
 //! client, no files written.
 //!
 //! With `--whole=vocabulary` or `--whole=cohere` after the model, each `T`
-//! take runs whole instead (whole.rs) and live streams are refused.
+//! take runs whole instead (whole.rs) and live streams are refused. A whole
+//! mode may then take `--names-json=` and a JSON array of names (names.rs);
+//! without it the list is empty. Ready reports the count and digest applied.
 use std::{error::Error, io::{self, Read, Write}, time::Instant};
 use serde_json::json;
 use transcribe_cpp::{Backend, Model, ModelOptions, ParakeetBufferedStreamOptions, RunOptions, SessionOptions,
@@ -28,6 +30,8 @@ mod transcription {
 }
 mod hex_pause;
 use hex_pause::{PauseCap, StreamFeed};
+mod names;
+use names::Names;
 mod whole;
 use whole::Whole;
 
@@ -109,11 +113,17 @@ fn live(model: &Model, options: &RunOptions, session_options: &SessionOptions, (
 fn main() -> Result<(), Box<dyn Error>> {
     transcribe_cpp::disable_logging();
     let args: Vec<String> = std::env::args().collect();
-    let whole = match args.len() {
-        2 => None,
-        3 => Some(Whole::parse(&args[2]).ok_or("unknown mode")?),
-        _ => return Err("usage: hex-unified-worker MODEL [--whole=vocabulary|--whole=cohere]".into()),
+    let usage = "usage: hex-unified-worker MODEL [--whole=vocabulary|--whole=cohere [--names-json=JSON]]";
+    if args.get(2).is_some_and(|flag| flag.starts_with("--names-json=")) {
+        return Err("--names-json is valid only after --whole".into());
+    }
+    let whole = match args.get(2) { Some(flag) => Some(Whole::parse(flag).ok_or(usage)?), None => None };
+    let names = match &args[..] {
+        [_, _] | [_, _, _] => None,
+        [_, _, _, flag] => Some(flag.strip_prefix("--names-json=").ok_or(usage)?),
+        _ => return Err(usage.into()),
     };
+    let mut names = Names::parse(names)?;
     let started = Instant::now();
     let model = Model::load_with(&args[1], &ModelOptions { backend: Backend::Metal, ..Default::default() })?;
     let device = model.device()?;
@@ -124,13 +134,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     let caps = model.capabilities()?;
     if whole.is_none() && !caps.supports_streaming { return Err("stream unsupported".into()); }
     let limit = match whole { Some(mode) => mode.limit(&model)?, None => 0 };
+    if whole == Some(Whole::Cohere) { names.encode_cohere(&model)?; }
     let options = RunOptions { language: Some("en".into()), timestamps: TimestampKind::Segment, ..Default::default() };
     let session_options = SessionOptions { n_threads: 1, ..Default::default() };
     let stdout = io::stdout();
     let mut out = stdout.lock();
     emit(&mut out, json!({"kind":"ready", "backend":device.kind, "device":device.name, "arch":model.arch(),
         "variant":model.variant(), "supportsStreaming":caps.supports_streaming,
-        "loadMs":started.elapsed().as_secs_f64() * 1000.0}))?;
+        "names":names.list.len(), "namesDigest":names.digest, "loadMs":started.elapsed().as_secs_f64() * 1000.0}))?;
     let mut input = io::stdin().lock();
     if let Some(mode) = whole {
         while let Some(next) = read_request(&mut input)? {
@@ -138,7 +149,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 return Err("whole take mode has no live stream".into());
             };
             let started = Instant::now();
-            let mut reply = match mode.run(&model, limit, &samples, names_bias) {
+            let mut reply = match mode.run(&model, limit, &samples, &names, names_bias) {
                 Ok(result) => result,
                 Err(error) => { emit(&mut out, json!({"kind":"error", "error":error}))?; continue; }
             };

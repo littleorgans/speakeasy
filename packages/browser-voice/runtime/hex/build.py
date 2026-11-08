@@ -3,13 +3,17 @@
 
 Fetches Hex and transcribe.cpp at fixed commits into a fresh directory under
 /private/tmp, applies cohere-sequence-bias.patch to transcribe.cpp (Cohere's
-names bias, research ct-pbias), extracts Hex's own pause pipeline unchanged,
+names bias, research ct-pbias, and the raw SentencePiece encode that turns
+runtime names into its sequences), extracts Hex's own pause pipeline unchanged,
 builds worker.rs against the Metal runtime with the locked dependencies, and
 copies the binary to --out. Reads no audio. Child diagnostics go to log files
-in the build directory, which is removed after a successful build.
+in the build directory, which is removed after a successful build. With --test
+the worker's own tests run first; SPEAKEASY_COHERE_GGUF, the pinned Cohere GGUF,
+adds the names encoding test.
 """
 import argparse
 import hashlib
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -38,7 +42,7 @@ def fetch(root, name, url, revision, env):
     return dest
 
 
-def build(root, out):
+def build(root, out, test):
     env = {"PATH": "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin", "HOME": str(root / "home"),
            "CARGO_HOME": str(root / "cargo"), "CARGO_TARGET_DIR": str(root / "target"), "CARGO_BUILD_JOBS": "4"}
     (root / "home").mkdir()
@@ -49,6 +53,7 @@ def build(root, out):
     (worker / "src/transcription").mkdir(parents=True)
     shutil.copyfile(HERE / "worker.rs", worker / "src/main.rs")
     shutil.copyfile(HERE / "whole.rs", worker / "src/whole.rs")
+    shutil.copyfile(HERE / "names.rs", worker / "src/names.rs")
     # Hex's pause logic, copied verbatim rather than reimplemented.
     streaming = (hex_source / "src/transcription/engine/streaming.rs").read_text()
     trait = streaming[streaming.index("pub(super) trait StreamFeed"):streaming.index("/// Silence a dictation stream")]
@@ -57,12 +62,18 @@ def build(root, out):
     pause = (hex_source / "src/transcription/pause_segmenter.rs").read_text().split("#[cfg(test)]")[0]
     (worker / "src/transcription/pause_segmenter.rs").write_text(pause)
     wrapper = runtime / "bindings/rust/transcribe-cpp"
-    # The package name keeps the research lock file valid unchanged.
+    # The package name keeps the research lock file's root package.
     (worker / "Cargo.toml").write_text(
         '[package]\nname = "hex-grok-repro"\nversion = "0.1.0"\nedition = "2021"\n'
-        '[dependencies]\nhound = "3.5"\nserde_json = "1"\n'
+        '[dependencies]\nhound = "3.5"\nserde_json = "1"\nsha2 = "0.10"\n'
         f'transcribe-cpp = {{ path = "{wrapper}", features = ["metal"] }}\n')
     shutil.copyfile(HERE / "Cargo.lock", worker / "Cargo.lock")
+    if test:
+        model = os.environ.get("SPEAKEASY_COHERE_GGUF")
+        test_env = {**env, "SPEAKEASY_COHERE_GGUF": model} if model else env
+        run(["cargo", "test", "--release", "--locked", "--manifest-path", str(worker / "Cargo.toml"), "--",
+             "--nocapture", *(["--include-ignored"] if model else [])], root, "test", test_env)
+        print((root / "test.log").read_text().split("\n     Running ")[-1].strip())
     run(["cargo", "build", "--release", "--locked", "--manifest-path", str(worker / "Cargo.toml")], root, "build", env)
     out.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(root / "target/release/hex-grok-repro", out)
@@ -74,9 +85,10 @@ def build(root, out):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, required=True, help="absolute path for the worker binary")
+    parser.add_argument("--test", action="store_true", help="run the worker's tests before building")
     args = parser.parse_args()
     if not args.out.is_absolute():
         raise SystemExit("--out must be absolute")
     root = Path(tempfile.mkdtemp(prefix="hex-unified-build-", dir="/private/tmp"))
-    build(root, args.out)
+    build(root, args.out, args.test)
     shutil.rmtree(root)

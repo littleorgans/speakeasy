@@ -420,3 +420,76 @@ index e7f9e05..3b712ac 100644
  };
  
  }  // namespace transcribe::cohere
+diff --git a/src/transcribe-tokenizer.cpp b/src/transcribe-tokenizer.cpp
+index df44330..d8397e2 100644
+--- a/src/transcribe-tokenizer.cpp
++++ b/src/transcribe-tokenizer.cpp
+@@ -492,7 +492,8 @@ transcribe_status Tokenizer::encode_sentencepiece_bpe(const std::string &    tex
+                                                       std::vector<int32_t> & out_ids,
+                                                       int                    lo,
+                                                       int                    hi,
+-                                                      bool                   remove_extra_whitespaces) const {
++                                                      bool                   remove_extra_whitespaces,
++                                                      bool                   add_dummy_prefix) const {
+     out_ids.clear();
+     const int n_vocab = static_cast<int>(tokens_.size());
+     if (model_ != "unigram" && model_ != "bpe") {
+@@ -553,7 +554,10 @@ transcribe_status Tokenizer::encode_sentencepiece_bpe(const std::string &    tex
+     if (ws.empty()) {
+         return TRANSCRIBE_OK;
+     }
+-    std::vector<std::string> symbols{ k_space };
++    std::vector<std::string> symbols;
++    if (add_dummy_prefix) {
++        symbols.push_back(k_space);
++    }
+     for (size_t i = 0; i < ws.size();) {
+         size_t j = i + 1;
+         while (j < ws.size() && (static_cast<unsigned char>(ws[j]) & 0xC0) == 0x80) {
+@@ -630,6 +634,19 @@ transcribe_status Tokenizer::encode(const std::string & text, std::vector<int32_
+         return encode_tiktoken_raw_bytes(text, pre_, piece_to_id_, out_ids);
+     }
+ 
++    if (model_ == "unigram" || model_ == "bpe") {
++        if (const transcribe_status st = encode_sentencepiece_bpe(text, out_ids, 0, -1, false, false);
++            st != TRANSCRIBE_OK) {
++            return st;
++        }
++        for (const int32_t id : out_ids) {
++            if (is_strippable_special(id)) {
++                out_ids.clear();
++                return TRANSCRIBE_ERR_INVALID_ARG;
++            }
++        }
++        return TRANSCRIBE_OK;
++    }
+     if (model_ != "gpt2") {
+         return TRANSCRIBE_ERR_NOT_IMPLEMENTED;
+     }
+diff --git a/src/transcribe-tokenizer.h b/src/transcribe-tokenizer.h
+index d3ac914..1c7d9af 100644
+--- a/src/transcribe-tokenizer.h
++++ b/src/transcribe-tokenizer.h
+@@ -199,8 +199,10 @@ class Tokenizer {
+     // the plain-text fragments between them.
+     //
+     // model == "unigram" / "bpe":
+-    //   Currently returns TRANSCRIBE_ERR_NOT_IMPLEMENTED; no live
+-    //   consumer needs it.
++    //   Raw SentencePiece BPE (encode_sentencepiece_bpe with no dummy
++    //   prefix and whitespace kept): a leading space is a U+2581
++    //   piece. Text that needs an unknown piece is refused with
++    //   TRANSCRIBE_ERR_INVALID_ARG. has_encoder() stays false.
+     //
+     // Returns:
+     //   TRANSCRIBE_OK                  on success, out_ids populated.
+@@ -220,7 +222,8 @@ class Tokenizer {
+                                                std::vector<int32_t> & out_ids,
+                                                int                    lo,
+                                                int                    hi,
+-                                               bool                   remove_extra_whitespaces) const;
++                                               bool                   remove_extra_whitespaces,
++                                               bool                   add_dummy_prefix = true) const;
+ 
+     // Identification + special token ids. -1 if the corresponding key
+     // was absent from the GGUF.
