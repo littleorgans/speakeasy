@@ -3,8 +3,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { resolveSettings, type Settings, type VoiceSetting } from "../../speech-io/src/settings.ts";
 import { exactFields, HttpError, readJson, requestId, requestLifetime, requireLoopback, sendHttpError,
   sendJson } from "./http-guards.ts";
+import { DEFAULT_NAMES_SNAPSHOT, NamesError, parseNames, type NamesSnapshot } from "./names.ts";
 import { IDLE_RELEASE_MS, MAX_TEXT_BYTES, type SetupLoadResult } from "./setup-protocol.ts";
-import { getSetup } from "./setup-registry.ts";
 import type { PythonWorkerResult, TextCleanupInput } from "./setup-workers.ts";
 
 /**
@@ -20,7 +20,9 @@ export function isCleanupModelId(value: unknown): value is CleanupModelId {
 }
 
 export type CleanupCard = Readonly<{ runtime: string; size?: string; terms?: string }>;
-export type CleanupModel = Readonly<{ id: CleanupModelId; label: string; card: CleanupCard; settings: readonly VoiceSetting[] }>;
+/** takesNames: the model gets the take's Names list; a model without it takes none. */
+export type CleanupModel = Readonly<{ id: CleanupModelId; label: string; card: CleanupCard; settings: readonly VoiceSetting[];
+  takesNames?: true }>;
 export type CleanupReadiness = { ready: boolean; reason?: string; sizeBytes?: number };
 
 /**
@@ -41,10 +43,10 @@ export const DEFAULT_INSTRUCTION = [
   "um paint the canoe sorry i mean the kayak -> Paint the kayak.",
   "by walrus i mean the big grey one -> By walrus, I mean the big grey one.",
 ].join("\n");
-/** Cleanup's names default to Cohere's names bias list. */
-const NAMES = (getSetup("cohere/transcribe").controls.namesBias as { names: readonly string[] }).names.join(", ");
 export const MAX_EARLIER = 3;
 export const MAX_EARLIER_BYTES = 4096;
+/** Text, names, earlier takes and the instruction at their bounds, with JSON room to spare. */
+export const MAX_CLEANUP_JSON_BYTES = 32_768;
 
 export const CLEANUP_MODELS: readonly CleanupModel[] = Object.freeze([
   // The licence requires this exact name: "S1-mini" by "Superwhisper".
@@ -54,11 +56,10 @@ export const CLEANUP_MODELS: readonly CleanupModel[] = Object.freeze([
   { id: "apple/foundation-models", label: "Apple Foundation Models",
     card: { runtime: "Foundation Models, macOS 27", size: "system managed",
       terms: "Apple macOS licence; system managed weights" },
+    takesNames: true,
     settings: [
       { id: "instruction", label: "Instruction", note: "What the model is told to do with each take",
         kind: "text", default: DEFAULT_INSTRUCTION, maxLength: 2000, lines: 6 },
-      { id: "names", label: "Names", note: "Comma separated; words that sound alike become these spellings",
-        kind: "text", default: NAMES, maxLength: 400 },
       { id: "earlier", label: "Earlier takes as context", note: `Sends up to ${MAX_EARLIER} recent takes, oldest first`,
         kind: "choice", default: false, options: [{ value: false, label: "Off" }, { value: true, label: "On" }] },
     ] },
@@ -74,7 +75,9 @@ export type CleanupWorker = {
   release(): Promise<void>;
   close(): Promise<void>;
 };
-export type CleanupRequest = { modelId: CleanupModelId; text: string; settings: Settings; earlier: readonly string[] };
+/** names: the take's list for a model that takes names; absent for one that takes none. */
+export type CleanupRequest = { modelId: CleanupModelId; text: string; settings: Settings; earlier: readonly string[];
+  names?: readonly string[] };
 export type CleanupSkipCode = "unavailable" | "load" | "execution" | "limit" | "cancelled";
 export type CleanupReply =
   | { status: "complete"; text: string; processingMs: number; workerWallMs: number; loadMs: number | null; firstUse: boolean }
@@ -166,11 +169,10 @@ export class TextCleanups {
 }
 
 /** The worker header: text alone for a model without settings, else its instruction, names and earlier takes. */
-function workerInput({ text, settings, earlier }: CleanupRequest): TextCleanupInput {
+function workerInput({ text, settings, earlier, names }: CleanupRequest): TextCleanupInput {
   return { text,
     ...(typeof settings.instruction === "string" ? { instruction: settings.instruction } : {}),
-    ...(typeof settings.names === "string"
-      ? { names: settings.names.split(",").map((name) => name.trim()).filter(Boolean) } : {}),
+    ...(names ? { names } : {}),
     ...(earlier.length ? { earlier } : {}) };
 }
 
@@ -191,16 +193,22 @@ const ROUTE = "/prompt-reader/cleanups";
 /** GET lists the cleanup models; POST cleans one final's text and answers complete or skipped. */
 export class CleanupRoutes {
   readonly #cleanups: TextCleanups;
+  readonly #names: () => NamesSnapshot;
   readonly #pending = new Set<Promise<void>>();
   #closed = false;
 
-  constructor(cleanups: TextCleanups) { this.#cleanups = cleanups; }
+  /** names: the current list, for a request that sends none. */
+  constructor(cleanups: TextCleanups, names: () => NamesSnapshot = () => DEFAULT_NAMES_SNAPSHOT) {
+    this.#cleanups = cleanups;
+    this.#names = names;
+  }
 
   handles(path: string): boolean { return path === ROUTE; }
 
   metadata() {
     return { schema: 1, models: CLEANUP_MODELS.map((model) => ({ id: model.id, label: model.label, card: model.card,
-      settings: model.settings, readiness: this.#cleanups.readiness(model.id) })) };
+      settings: model.settings, ...(model.takesNames ? { takesNames: true } : {}),
+      readiness: this.#cleanups.readiness(model.id) })) };
   }
 
   serve(request: IncomingMessage, response: ServerResponse): void {
@@ -227,10 +235,10 @@ export class CleanupRoutes {
       return;
     }
     if (request.method !== "POST") throw new HttpError(404, "Not found");
-    const value = await readJson(request);
-    exactFields(value, ["requestId", "modelId", "text", "settings", "earlier"]);
+    const value = await readJson(request, MAX_CLEANUP_JSON_BYTES);
+    exactFields(value, ["requestId", "modelId", "text", "settings", "earlier", "names"]);
     const id = requestId(value.requestId, randomUUID);
-    const cleanup = parseCleanup(value);
+    const cleanup = parseCleanup(value, this.#names().names);
     const lifetime = requestLifetime(request, response);
     try {
       const reply = await this.#cleanups.clean(cleanup, lifetime.signal);
@@ -240,14 +248,24 @@ export class CleanupRoutes {
   }
 }
 
-/** The request's model, bounded text, its settings resolved against the model's declarations and earlier takes. */
-export function parseCleanup(value: Record<string, unknown>): CleanupRequest {
+/**
+ * The request's model, bounded text, its settings resolved against the
+ * model's declarations, earlier takes and, for a model that takes names, the
+ * take's list or else `current`.
+ */
+export function parseCleanup(value: Record<string, unknown>, current: readonly string[] = DEFAULT_NAMES_SNAPSHOT.names): CleanupRequest {
   if (!isCleanupModelId(value.modelId)) throw new HttpError(400, "unknown cleanup model");
   const model = getCleanupModel(value.modelId);
   if (typeof value.text !== "string" || !value.text.trim()) throw new HttpError(400, "cleanup text must be nonblank");
   if (Buffer.byteLength(value.text, "utf8") > MAX_TEXT_BYTES) throw new HttpError(413, "cleanup text exceeds limit");
   if (!model.settings.length && (value.settings !== undefined || value.earlier !== undefined)) {
     throw new HttpError(400, `${model.label} takes text only`);
+  }
+  if (!model.takesNames && value.names !== undefined) throw new HttpError(400, `${model.label} takes no names`);
+  let names: readonly string[] | undefined;
+  if (model.takesNames) {
+    try { names = value.names === undefined ? current : parseNames(value.names); }
+    catch (error) { throw error instanceof NamesError ? new HttpError(400, error.message) : error; }
   }
   let settings: Settings;
   try { settings = resolveSettings(model.settings, value.settings ?? {}); }
@@ -264,5 +282,5 @@ export function parseCleanup(value: Record<string, unknown>): CleanupRequest {
       throw new HttpError(413, "earlier takes exceed limit");
     }
   }
-  return { modelId: model.id, text: value.text, settings, earlier };
+  return { modelId: model.id, text: value.text, settings, earlier, ...(names ? { names } : {}) };
 }

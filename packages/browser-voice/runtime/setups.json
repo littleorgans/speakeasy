@@ -104,7 +104,7 @@
       "quantization": "Q8_0 GGUF",
       "controls": {
         "language": "auto",
-        "prompt": "launch, claude, grok",
+        "names": "the road test Names list, one snapshot per take; the context prompt is the names joined with \", \"",
         "nativeAutomaticWarmup": false,
         "otherDecodeSettings": "pinned speech.cpp defaults; no unrecorded temperature or token override",
         "gate": "off",
@@ -165,10 +165,7 @@
         "maxActivePaths": 4,
         "hotwordsScore": 2,
         "lengthReward": 0,
-        "list": {
-          "content": "launch\nclaude\ngrok\n",
-          "sha256": "0f5d821e73171e540a688d50c481007f58662609e1e7892b20829ba7092ea79b"
-        },
+        "names": "the road test Names list, one snapshot per take; hotwords, one name per line",
         "bpeVocabularySha256": "41130ff456706304a1adec782ccc9e003c4d417e8e324353d281be958cac4e17",
         "gate": "off",
         "rewrite": "off",
@@ -181,7 +178,7 @@
       "id": "tm/today",
       "label": "TM today",
       "card": {
-        "runtime": "sherpa-onnx 2.0.1, CPU, TM's word list Grok, Claude, Codex",
+        "runtime": "sherpa-onnx 2.0.1, CPU, known words",
         "transcript": "final"
       },
       "model": "en-parakeet-ultra-int8",
@@ -227,11 +224,7 @@
         "maxActivePaths": 4,
         "hotwordsScore": 2,
         "lengthReward": 0,
-        "list": {
-          "content": "Grok\nClaude\nCodex\n",
-          "sha256": "0f6cb23db8c767504f966d2cab903db4e0e7ef984c91a3e6c9061ad131323ee9",
-          "source": "transport-matters PR #1364 INITIAL_WORDS, the shipped default"
-        },
+        "names": "the road test Names list, one snapshot per take; hotwords, one name per line",
         "bpeVocabularySha256": "41130ff456706304a1adec782ccc9e003c4d417e8e324353d281be958cac4e17",
         "gate": "off",
         "rewrite": "off",
@@ -279,7 +272,7 @@
       "id": "hex/vocabulary",
       "label": "Hex Unified with word list",
       "card": {
-        "runtime": "transcribe.cpp 7045d1c, Metal GPU, word list Claude, GPT, Grok, Codex, TM, whoami",
+        "runtime": "transcribe.cpp 7045d1c, Metal GPU, word list from Names",
         "transcript": "final",
         "terms": "NVIDIA Open Model License"
       },
@@ -303,14 +296,7 @@
         "minimumSamples": 24000,
         "trailingSamples": 6400,
         "window": "whole take",
-        "vocabulary": [
-          "Claude",
-          "GPT",
-          "Grok",
-          "Codex",
-          "TM",
-          "whoami"
-        ],
+        "names": "the road test Names list, one snapshot per take; the vocabulary, passed to the worker as --names-json",
         "vocabularyBoost": 2.5,
         "soundsLike": [],
         "repetition": "keep the partial text, as Hex does",
@@ -349,20 +335,13 @@
         "minimumSamples": 24000,
         "trailingSamples": 0,
         "vocabulary": [],
+        "names": "the road test Names list, one snapshot per take; names bias targets, passed to the worker as --names-json",
         "namesBias": {
           "default": 0,
           "values": [
             0,
             1.25,
             2.5
-          ],
-          "names": [
-            "Grok",
-            "Claude",
-            "Codex",
-            "GPT",
-            "TM",
-            "Hibiki"
           ],
           "method": "logit bias on every nonempty token prefix of each name, with and without the space marker",
           "source": "ct-pbias"
@@ -532,10 +511,11 @@
         "userEncoding": "UTF8 JSON, ensure_ascii=False, compact separators, A then B",
         "chatTemplate": "native tokenizer, system then user, add_generation_prompt=True",
         "chatTemplateTokenize": true,
-        "trustRemoteCode": false
+        "trustRemoteCode": false,
+        "names": "the road test Names list, one snapshot per take; rendered into the system prompt for {names}"
       },
       "baseSetup": "mlx-parakeet/ultra-greedy",
-      "promptSha256": "6feb2afb47f1bfcb5ea926ba72588f8776a12eed77e06e4fc9fdf0bc555502fd",
+      "promptSha256": "6e0b907eee9ea7b9f2eb464c1e1a2dc684b6ece0215bbcef1001c1855d172f57",
       "chatTemplateSha256": "71672240b1a3b068067b6a332bc38d3fc05aaade9d41b4b27d7510ff4335504b",
       "input": {
         "A": "exact raw output of Ultra MLX for this same take; compute once",

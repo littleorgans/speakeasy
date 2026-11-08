@@ -76,7 +76,7 @@ export class SetupResults {
       name.textContent = setup.label;
       const tags = document.createElement("span");
       tags.className = "preset-tags";
-      tags.textContent = [setup.id === this.catalog.defaultSetupId ? "Recommended" : "", setup.operation === "transcribe" && (setup.controls?.prompt || setup.controls?.list?.content) ? "Uses fixed vocabulary" : ""].filter(Boolean).join(" · ");
+      tags.textContent = [setup.id === this.catalog.defaultSetupId ? "Recommended" : "", setup.controls?.names ? "Uses the Names list" : ""].filter(Boolean).join(" · ");
       title.append(name, tags);
       const fact = document.createElement("small");
       fact.className = "preset-fact";

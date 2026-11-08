@@ -2,6 +2,7 @@ import { loadEnvFile } from "node:process";
 import { createConversationRuntime } from "@speakeasy/convo-engine";
 import { WebSocket } from "ws";
 import { startBrowserVoiceServer } from "./host.ts";
+import { NamesStore } from "./names.ts";
 import { createSetupRuntime, readBrowserVoiceOptions } from "./server-options.ts";
 import { createProviderCredentials } from "./provider-availability.ts";
 import { createProviderRuntime } from "./provider-runtime.ts";
@@ -11,6 +12,7 @@ import { getLocalOutputCatalogue } from "../../speech-io/src/tts/catalogue.ts";
 loadLocalEnv();
 const options = readBrowserVoiceOptions(process.argv.slice(2), process.env);
 const setup = await createSetupRuntime(options.setupRuntimeFile, { optional: options.setupRuntimeDefault });
+const names = await NamesStore.open(options.namesFile);
 const credentials = createProviderCredentials();
 const localOutput = new LocalSpeechOutputFactory({ root: options.outputRoot,
   createWorkerSynth: (model) => setup.voices.createSynth(model, options.outputRoot) });
@@ -22,7 +24,7 @@ const host = await startBrowserVoiceServer({ ...options,
   createRuntime: (config, context) => createConversationRuntime(config, process.env, undefined,
     { speechOutputFactory: output, speechOutputContext: context?.speechOutputContext }),
   setupExecutor: setup.executor, setupReadiness: setup.readiness, textCleanups: setup.cleanups, providers,
-  speechOutput,
+  speechOutput, names,
 });
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => { void host.close().catch(() => { process.exitCode = 1; }); });

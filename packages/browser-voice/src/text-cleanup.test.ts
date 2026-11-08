@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { HttpError } from "./http-guards.ts";
+import { DEFAULT_NAMES } from "./names.ts";
 import type { SetupLoadResult } from "./setup-protocol.ts";
 import type { PythonWorkerResult, TextCleanupInput } from "./setup-workers.ts";
 import { CLEANUP_MODELS, CleanupBusyError, DEFAULT_INSTRUCTION, parseCleanup, TextCleanups, type CleanupModelId,
@@ -62,13 +63,17 @@ function refused(value: Record<string, unknown>, status: number) {
     JSON.stringify(value).slice(0, 120));
 }
 
-test("the registry declares S1-mini with no settings and Apple Foundation Models with its three, defaults offered", () => {
-  assert.deepEqual(CLEANUP_MODELS.map((model) => [model.id, model.label, model.settings.map((setting) => setting.id)]), [
-    [S1, "S1-mini by Superwhisper", []],
-    [FM, "Apple Foundation Models", ["instruction", "names", "earlier"]],
+test("the registry declares S1-mini with no settings and Apple Foundation Models with its two, defaults offered", () => {
+  assert.deepEqual(CLEANUP_MODELS.map((model) => [model.id, model.label, model.settings.map((setting) => setting.id),
+    model.takesNames ?? false]), [
+    [S1, "S1-mini by Superwhisper", [], false],
+    [FM, "Apple Foundation Models", ["instruction", "earlier"], true],
   ]);
   const fm = parseCleanup({ modelId: FM, text: "x" });
-  assert.deepEqual(fm.settings, { instruction: DEFAULT_INSTRUCTION, names: "Grok, Claude, Codex, GPT, TM, Hibiki", earlier: false });
+  assert.deepEqual(fm.settings, { instruction: DEFAULT_INSTRUCTION, earlier: false });
+  assert.deepEqual(fm.names, DEFAULT_NAMES, "without names, the current list");
+  assert.deepEqual(parseCleanup({ modelId: FM, text: "x" }, ["Qwen"]).names, ["Qwen"]);
+  assert.equal(parseCleanup({ modelId: S1, text: "x" }).names, undefined, "S1-mini takes no names");
   assert.ok(DEFAULT_INSTRUCTION.length <= 2000);
 });
 
@@ -81,7 +86,11 @@ test("requests are bounded: S1-mini takes text only, unknown models and values a
   refused({ modelId: FM, text: "é".repeat(4097) }, 413);
   refused({ modelId: FM, text: "x", settings: { tone: "calm" } }, 400);
   refused({ modelId: FM, text: "x", settings: { instruction: "x".repeat(2001) } }, 400);
-  refused({ modelId: FM, text: "x", settings: { names: "x".repeat(401) } }, 400);
+  refused({ modelId: FM, text: "x", settings: { names: "Grok" } }, 400);
+  refused({ modelId: FM, text: "x", names: "Grok, Claude" }, 400);
+  refused({ modelId: FM, text: "x", names: ["Grok, Claude"] }, 400);
+  refused({ modelId: FM, text: "x", names: ["x".repeat(129)] }, 400);
+  refused({ modelId: S1, text: "x", names: [] }, 400);
   refused({ modelId: FM, text: "x", earlier: ["a"] }, 400);
   refused({ modelId: FM, text: "x", settings: { earlier: true }, earlier: ["a", "b", "c", "d"] }, 400);
   refused({ modelId: FM, text: "x", settings: { earlier: true }, earlier: [1] }, 400);
@@ -89,7 +98,7 @@ test("requests are bounded: S1-mini takes text only, unknown models and values a
   assert.deepEqual(parseCleanup({ modelId: FM, text: "x", settings: { earlier: true }, earlier: ["a", "b"] }).earlier, ["a", "b"]);
 });
 
-test("a complete reply carries its timings, and Apple gets its instruction, split names and earlier takes", async () => {
+test("a complete reply carries its timings, and Apple gets its instruction, the take's names and earlier takes", async () => {
   const s1 = new FakeWorker();
   const fm = new FakeWorker();
   const cleanups = service({ [S1]: s1, [FM]: fm });
@@ -99,7 +108,7 @@ test("a complete reply carries its timings, and Apple gets its instruction, spli
   const warm = await cleanups.clean(request(S1));
   assert.equal(warm.status === "complete" && warm.loadMs, null, "a warm model reports no load");
   assert.equal(warm.status === "complete" && warm.firstUse, false);
-  await cleanups.clean(request(FM, "um tell shawn", { settings: { names: " Sean, ,Michaela ", earlier: true },
+  await cleanups.clean(request(FM, "um tell shawn", { settings: { earlier: true }, names: [" Sean", "", "Michaela "],
     earlier: ["Earlier."] } as Partial<CleanupRequest>));
   assert.deepEqual(fm.inputs, [{ text: "um tell shawn", instruction: DEFAULT_INSTRUCTION, names: ["Sean", "Michaela"],
     earlier: ["Earlier."] }]);

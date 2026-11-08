@@ -281,6 +281,12 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual([r["type"] for r in replies], ["ready", "result", "result", "closed"])
         self.assertEqual(replies[1]["result"]["text"], "UM HI")
         self.assertEqual(backend.calls, [("um hi", context), ("", {})])
+        widest = {"names": [f"{n:02d}" + "é" * 63 for n in range(64)]}
+        code, replies, backend, _, _ = self.run_worker(
+            frame("load", setup_id=fm, options={}) + frame("cleanup", 2, setup_id=fm, text="x", **widest),
+            setup_id=fm, backend=Context())
+        self.assertEqual((code, replies[-1]["type"]), (0, "result"), "the contract bound, 64 names of 128 bytes, fits")
+        self.assertEqual(backend.calls, [("x", widest)])
         code, replies, backend, _, _ = self.run_worker(
             frame("load", setup_id=s1, options={}) + frame("cleanup", 2, setup_id=s1, text="um hi"), setup_id=s1)
         self.assertEqual(code, 0)
@@ -296,7 +302,10 @@ class WorkerTests(unittest.TestCase):
             "instruction bound": (fm, frame("cleanup", 2, setup_id=fm, text="x", instruction="x" * 2001)),
             "names type": (fm, frame("cleanup", 2, setup_id=fm, text="x", names="Sean")),
             "blank name": (fm, frame("cleanup", 2, setup_id=fm, text="x", names=[" "])),
-            "names bound": (fm, frame("cleanup", 2, setup_id=fm, text="x", names=["x" * 401])),
+            "name bound": (fm, frame("cleanup", 2, setup_id=fm, text="x", names=["x" * 129])),
+            "names count": (fm, frame("cleanup", 2, setup_id=fm, text="x", names=[str(n) for n in range(65)])),
+            "repeated name": (fm, frame("cleanup", 2, setup_id=fm, text="x", names=["Sean", "Sean"])),
+            "comma in a name": (fm, frame("cleanup", 2, setup_id=fm, text="x", names=["Sean, Grok"])),
             "earlier count": (fm, frame("cleanup", 2, setup_id=fm, text="x", earlier=["a", "b", "c", "d"])),
             "earlier bound": (fm, frame("cleanup", 2, setup_id=fm, text="x", earlier=["x" * 4097])),
             "transcribe": (fm, frame("transcribe", 2, body, setup_id=fm, **pcm)),

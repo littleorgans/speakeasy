@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from names import names_digest
 import qwen_asr as qwen
 
 
@@ -41,8 +42,9 @@ EXPECTED_SIGNATURES = {
     "speech_result_text": (C.c_char_p, [P]),
     "speech_result_stop": (C.c_int, [P]),
 }
+NAMES = ["Grok", "Claude", "GPT-SOL", "Qwen"]
 OPTIONS = {"libraryPath": "/fake/qwen/libspeech.4.dylib",
-           "modelPath": "/fake/qwen/Qwen3-ASR-0.6B-Q8_0.gguf"}
+           "modelPath": "/fake/qwen/Qwen3-ASR-0.6B-Q8_0.gguf", "names": NAMES}
 
 
 class FakeFunction:
@@ -146,7 +148,8 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(info["modelInfo"], {"device": "MTL0"})
         self.assertEqual(info["deviceRequested"], "gpu")
         self.assertEqual((info["threads"], info["warmup"], info["language"], info["prompt"]),
-                         (2, False, "auto", "launch, claude, grok"))
+                         (2, False, "auto", "Grok, Claude, GPT-SOL, Qwen"))
+        self.assertEqual((info["names"], info["namesDigest"]), (4, names_digest(NAMES)))
         for name, expected in (("device", b"gpu"), ("threads", 2), ("warmup", 0)):
             self.assertEqual(self.fake.arguments("speech_load_params_set_" + name)[0][1], expected)
         self.assertEqual(self.fake.arguments("speech_model_load")[0][0], OPTIONS["modelPath"].encode())
@@ -181,7 +184,7 @@ class BackendTests(unittest.TestCase):
         self.assertAlmostEqual(result["decodeMs"], 5)
         self.assertEqual(result["stop"], 3)
         self.assertEqual([(args[1], args[2]) for args in self.fake.arguments("speech_request_set_string")],
-                         [(71, b"auto"), (19, b"launch, claude, grok")])
+                         [(71, b"auto"), (19, b"Grok, Claude, GPT-SOL, Qwen")])
         self.assertEqual(list(self.fake.live.values()), ["model"])
 
     def test_readonly_buffers_empty_text_and_fresh_requests(self):
@@ -201,10 +204,22 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(len(self.fake.arguments("speech_model_load")), 1)
         self.assertEqual(len(self.fake.arguments("speech_transcribe")), 2)
 
+    def test_an_empty_names_list_sets_no_prompt(self):
+        backend = qwen.Backend({**OPTIONS, "names": []})
+        self.addCleanup(backend.close)
+        info = backend.load()
+        self.assertEqual((info["prompt"], info["names"], info["namesDigest"]), (None, 0, names_digest([])))
+        backend.transcribe(array.array("f", [0.25]))
+        self.assertEqual([(args[1], args[2]) for args in self.fake.arguments("speech_request_set_string")],
+                         [(71, b"auto")], "only the language reaches the request")
+        absent = qwen.Backend({key: value for key, value in OPTIONS.items() if key != "names"})
+        self.assertEqual(absent.prompt, None, "absent names mean an empty list")
+
     def test_options_and_unloaded_calls_fail_before_native_load(self):
         for options in ({}, {**OPTIONS, "threads": 3}, {**OPTIONS, "modelPath": "relative"},
                         {**OPTIONS, "libraryPath": "/bad\0path"}, {**OPTIONS, "modelPath": None},
-                        {**OPTIONS, "setupId": "mlx-parakeet/v3-greedy"}):
+                        {**OPTIONS, "setupId": "mlx-parakeet/v3-greedy"}, {**OPTIONS, "names": "Grok, Qwen"},
+                        {**OPTIONS, "names": ["Grok", "Grok"]}, {**OPTIONS, "names": ["a,b"]}):
             with self.subTest(options=tuple(options)):
                 with self.assertRaises(ValueError):
                     qwen.Backend(options)
@@ -237,7 +252,7 @@ class BackendTests(unittest.TestCase):
         with patch.object(qwen.platform, "python_version", return_value="3.13.3"):
             with self.assertRaisesRegex(RuntimeError, "Python 3.13.2"):
                 self.backend.load()
-        for bad_path in OPTIONS.values():
+        for bad_path in (OPTIONS["libraryPath"], OPTIONS["modelPath"]):
             with self.subTest(path=Path(bad_path).name):
                 self.digests.side_effect = lambda path: "0" * 64 if str(path) == bad_path else {
                     OPTIONS["libraryPath"]: qwen.LIBRARY_SHA256,

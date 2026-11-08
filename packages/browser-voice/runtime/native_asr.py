@@ -2,22 +2,28 @@
 
 Both speak one stdin protocol (hex/worker.rs). Backend options contain an
 absolute runnerPath, an absolute modelPath unless the system manages the
-weights, and an optional setupId from SETUPS (default hex/unified).
+weights, an optional setupId from SETUPS (default hex/unified) and, for the
+whole take setups only, optional names: the road test Names list (names.py),
+empty when absent.
 Construction starts nothing; load verifies the model hash (pins.file_sha256), starts the worker
 in that setup's mode and waits for its ready line. For hex/unified each take
 goes through Hex's own stream pipeline inside the worker, and feed runs the
 same pipeline live, at the lookahead the page chose, answering with its
 committed and tentative words; Apple streams the same way. The whole take
-setups (Hex with its word list, Cohere) give final text only; Cohere's take
-may carry its one final setting, the names bias.
+setups (Hex with the Names list as its vocabulary, Cohere) give final text
+only; their worker takes the list once, at start, and its ready line must
+echo the count and digest applied. Cohere's take may carry its one final
+setting, the names bias.
 """
 
 import copy
+import json
 from pathlib import Path
 import struct
 import sys
 import time
 
+from names import names_digest, names_option
 from native_runner import read_reply, start, stop
 from pins import file_sha256
 
@@ -32,15 +38,15 @@ HEX_LIVE = {"setting": "lookaheadMs", "default": 2080, "values": {2080: (1040, 1
 # Apple: one Off/On reporting option, sent as 1 then 0; speech's fast results, dictation's frequent finalization.
 APPLE_LIVE = {setting: {"setting": setting, "default": 0, "values": {0: (0, 0), 1: (1, 0)}}
               for setting in ("fastResults", "frequentFinalization")}
-# Cohere's one final setting (src/final-settings.ts): the logit bias toward its
-# six names, sent as the worker's `B` take; Off sends today's `T` take.
+# Cohere's one final setting (src/final-settings.ts): the logit bias toward the
+# Names list, sent as the worker's `B` take; Off sends today's `T` take.
 COHERE_FINAL = {"setting": "namesBias", "default": 0, "values": (0, 1.25, 2.5)}
 # Every setup a native worker runs: its model pin, worker mode and pipeline.
 SETUPS = {
     "hex/unified": {**HEX_MODEL, "mode": [], "live": HEX_LIVE,
                     "pipeline": "Hex stream: 2560 sample feeds, PauseCap, 6400 trailing zeros"},
     "hex/vocabulary": {**HEX_MODEL, "mode": ["--whole=vocabulary"], "live": None,
-                       "pipeline": "whole take session.run, word list Claude GPT Grok Codex TM whoami at boost 2.5, "
+                       "pipeline": "whole take session.run, the Names list as vocabulary at boost 2.5, "
                                    "padded to 24000 then 6400 zeros"},
     # handy-computer/cohere-transcribe-03-2026-gguf at dfa4ade, Apache 2.0.
     "cohere/transcribe": {"file": "cohere-transcribe-03-2026-Q8_0.gguf",
@@ -70,14 +76,19 @@ class Backend:
             raise ValueError("Native backend requires a native speech in setup")
         self.setup_id, self.spec = setup_id, SETUPS[setup_id]
         required = {"runnerPath"} | ({"modelPath"} if self.spec["file"] else set())
-        if set(options) - {"setupId"} != required:
-            raise ValueError(f"{setup_id} options require {', '.join(sorted(required))} and optional setupId")
+        whole = any(mode.startswith("--whole=") for mode in self.spec["mode"])
+        optional = {"setupId"} | ({"names"} if whole else set())
+        if not required <= set(options) or set(options) - required - optional:
+            raise ValueError(f"{setup_id} options require {', '.join(sorted(required))} and optional "
+                             f"{', '.join(sorted(optional))}")
         for name in sorted(required):
             value = options[name]
             if not isinstance(value, str) or "\0" in value or not Path(value).is_absolute():
                 raise ValueError(f"Hex {name} must be an absolute path")
         self.runner_path = Path(options["runnerPath"])
         self.model_path = Path(options["modelPath"]) if self.spec["file"] else None
+        # Whole take workers always get the flag, so an empty list is explicit.
+        self.names = names_option(options.get("names", [])) if whole else None
         self.process = None
         self.metadata = None
 
@@ -96,11 +107,20 @@ class Backend:
         try:
             started = time.perf_counter()
             model = [self.model_path] if self.model_path else []
-            self.process = start([self.runner_path, *model, *self.spec["mode"]])
+            names = [] if self.names is None else [
+                "--names-json=" + json.dumps(self.names, ensure_ascii=False, separators=(",", ":"))]
+            self.process = start([self.runner_path, *model, *self.spec["mode"], *names])
             ready = self._reply()
             if (ready.get("kind") != "ready" or ready.get("backend") != self.spec["backend"]
                     or ready.get("variant") != self.spec["variant"]):
                 raise RuntimeError("Hex worker identity mismatch")
+            applied = {}
+            if self.names is not None:
+                applied = {"names": len(self.names), "namesDigest": names_digest(self.names)}
+                if type(ready.get("names")) is not int or not isinstance(ready.get("namesDigest"), str):
+                    raise RuntimeError("Hex runner predates names: its ready line reports no names list")
+                if ready["names"] != applied["names"] or ready["namesDigest"] != applied["namesDigest"]:
+                    raise RuntimeError("Hex worker applied a different names list")
             apple = self.spec["backend"] == "apple"
             self.metadata = {
                 "setupId": self.setup_id, "loadMs": (time.perf_counter() - started) * 1000,
@@ -110,7 +130,7 @@ class Backend:
                    else {"runtimeCommit": RUNTIME_COMMIT, "hexCommit": HEX_COMMIT}),
                 "runnerSha256": file_sha256(self.runner_path),
                 "device": ready.get("device"), "workerLoadMs": ready.get("loadMs"),
-                "pipeline": self.spec["pipeline"],
+                "pipeline": self.spec["pipeline"], **applied,
                 "loadTiming": "worker start to ready line", "processingTiming": PROCESSING_TIMING,
             }
             return copy.deepcopy(self.metadata)

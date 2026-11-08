@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
 import { setImmediate as settle, setTimeout as delay } from "node:timers/promises";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { SetupComparison, ComparisonBusyError } from "./setup-comparison.ts";
 import {
   assertSetupExecutionResult, assertSetupLoadResult, CLEANUP_SETUP_ID, createCanonicalPcm,
   DEFAULT_SETUP_ID, MAX_PCM_BYTES, MAX_TEXT_BYTES, pcmIdentity, SETUP_IDS, sha256, ULTRA_SETUP_ID,
   type ComparisonEvent, type SetupExecution, type SetupExecutionContext, type SetupExecutionResult,
-  type SetupExecutor, type SetupId, type SetupLoadResult,
+  type SetupExecutor, type SetupId, type SetupLoadContext, type SetupLoadResult,
 } from "./setup-protocol.ts";
-import { assertSetupManifest, getSetup, parseSetupSelection, SETUPS, SETUP_MANIFEST } from "./setup-registry.ts";
+import { assertSetupManifest, getSetup, parseSetupSelection, SETUPS, SETUP_MANIFEST, takesNames } from "./setup-registry.ts";
+import { DEFAULT_NAMES_SNAPSHOT, namesSnapshot, type NamesSnapshot } from "./names.ts";
 
 const V3 = DEFAULT_SETUP_ID;
 const QWEN: SetupId = "qwen/context";
@@ -27,7 +29,7 @@ class FakeExecutor implements SetupExecutor {
   active = 0;
   maxActive = 0;
   closed = false;
-  onLoad?: (id: SetupId, context: SetupExecutionContext) => Promise<void>;
+  onLoad?: (id: SetupId, context: SetupLoadContext) => Promise<void>;
   onExecute?: (request: SetupExecution, context: SetupExecutionContext) => Promise<SetupExecutionResult>;
   onRelease?: (id: SetupId) => Promise<void>;
   onFeed?: (id: SetupId, samples: Float32Array, start: boolean) => Promise<void>;
@@ -37,7 +39,7 @@ class FakeExecutor implements SetupExecutor {
     this.maxActive = Math.max(this.maxActive, ++this.active);
     try { return await run(); } finally { this.active -= 1; }
   }
-  load(id: SetupId, context: SetupExecutionContext): Promise<SetupLoadResult> {
+  load(id: SetupId, context: SetupLoadContext): Promise<SetupLoadResult> {
     return this.guard(`load:${id}`, async () => {
       await this.onLoad?.(id, context);
       return { startupMs: this.used.has(id) ? 0 : 2, loadMs: this.used.has(id) ? 0 : 5,
@@ -63,7 +65,7 @@ class FakeExecutor implements SetupExecutor {
   async close(): Promise<void> { this.calls.push("close"); this.closed = true; }
 }
 
-function harness(options: { now?(): number; idleReleaseMs?: number } = {}) {
+function harness(options: { now?(): number; idleReleaseMs?: number; names?(): NamesSnapshot } = {}) {
   const executor = new FakeExecutor();
   const service = new SetupComparison({ executor, ...options });
   const take = (setupIds: readonly SetupId[] = [V3], extra = {}) => service.compare({
@@ -84,7 +86,12 @@ test("registry pins every exact immutable identity and rejects arbitrary ids or 
     "ebe59e5a817142986528bbbee5dba8db7b38ed50", "system managed", "system managed",
     "8b403126fc14f14cfc99bb4cfa72ecbc129ea677",
   ]);
-  assert.equal(getSetup(QWEN).controls.prompt, "launch, claude, grok");
+  assert.equal(getSetup(QWEN).controls.prompt, undefined, "Qwen's prompt is the Names list");
+  assert.deepEqual(SETUP_IDS.filter(takesNames), [QWEN, "sweep/score-2", "tm/today", "hex/vocabulary", "cohere/transcribe",
+    CLEANUP_SETUP_ID], "every names consumer declares controls.names");
+  for (const forbidden of ["launch", "Grok", "Claude", "whoami", "Hibiki"]) {
+    assert.equal(JSON.stringify(SETUP_MANIFEST).includes(forbidden), false, `${forbidden} spelled in the manifest`);
+  }
   assert.equal(getSetup(CPU).controls.hotwordsScore, 2);
   assert.equal(getSetup(CLEANUP_SETUP_ID).baseSetup, ULTRA_SETUP_ID);
   assert.equal(getSetup(CPU).maxSamples, 960000);
@@ -566,4 +573,43 @@ test("a failed feed reports once and ends live words; close cancels them", async
   setTimeout(() => { aborted = true; gate.resolve(); }, 5);
   await closing;
   assert.ok(aborted && executor.closed, "close waits for the cancelled feed, then closes the executor");
+});
+
+test("the cleanup setup pins the sha256 of the template the Python cleanup renders", () => {
+  const template = readFileSync(new URL("../runtime/cleanup-prompt.txt", import.meta.url));
+  assert.equal(getSetup(CLEANUP_SETUP_ID).promptSha256, sha256(template));
+});
+
+test("one names snapshot per job reaches load and execute of names setups only, and accepted echoes it", async () => {
+  let current = DEFAULT_NAMES_SNAPSHOT;
+  const { executor, take } = harness({ names: () => current });
+  const loads: [SetupId, NamesSnapshot | undefined][] = [];
+  const gate = barrier();
+  executor.onLoad = async (id, context) => {
+    loads.push([id, context.names]);
+    if (id === V3) await gate.promise;
+  };
+  const events: ComparisonEvent[] = [];
+  const first = take([V3, QWEN, "cohere/transcribe", CLEANUP_SETUP_ID], { onEvent: (event: ComparisonEvent) => events.push(event) });
+  const queued = take([QWEN]);
+  // An edit while the first job runs belongs to later admissions only.
+  current = namesSnapshot(["Qwen"]);
+  const later = (() => { try { take([QWEN]); } catch (error) { return error; } })();
+  gate.resolve();
+  const result = await first.done;
+  await queued.done;
+  assert.ok(later instanceof ComparisonBusyError, "one active and one queued");
+  const accepted = events.find((event) => event.type === "accepted")!;
+  assert.deepEqual(accepted.type === "accepted" && accepted.names, DEFAULT_NAMES_SNAPSHOT);
+  assert.deepEqual(loads.map(([id, names]) => [id, names?.digest]), [
+    [V3, undefined], [ULTRA_SETUP_ID, undefined], [QWEN, DEFAULT_NAMES_SNAPSHOT.digest],
+    ["cohere/transcribe", DEFAULT_NAMES_SNAPSHOT.digest], [CLEANUP_SETUP_ID, DEFAULT_NAMES_SNAPSHOT.digest],
+    [QWEN, DEFAULT_NAMES_SNAPSHOT.digest],
+  ], "the queued job was admitted before the edit");
+  assert.deepEqual(executor.requests.map((request) => [request.setupId, request.names?.digest]), loads.map(([id, names]) => [id, names?.digest]));
+  assert.deepEqual(result.rows.map((row) => [row.setupId, row.namesDigest]), [[V3, undefined], [QWEN, DEFAULT_NAMES_SNAPSHOT.digest],
+    ["cohere/transcribe", DEFAULT_NAMES_SNAPSHOT.digest], [CLEANUP_SETUP_ID, DEFAULT_NAMES_SNAPSHOT.digest]]);
+  loads.length = 0;
+  await take([QWEN]).done;
+  assert.deepEqual(loads, [[QWEN, current]], "the next admission takes the edit");
 });

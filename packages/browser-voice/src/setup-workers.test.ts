@@ -12,6 +12,7 @@ import { readPinnedPick } from "./voice-references.ts";
 import { createWorkerVoiceSynth } from "./voice-workers.ts";
 import { createCanonicalPcm, sha256, type SetupExecution, type SetupLoadResult } from "./setup-protocol.ts";
 import { CPU_PRESETS, type CpuReady } from "./transcriber.ts";
+import { DEFAULT_NAMES_SNAPSHOT, namesSnapshot } from "./names.ts";
 
 let PYTHON: string;
 const RUNTIME = fileURLToPath(new URL("../runtime/", import.meta.url));
@@ -69,7 +70,8 @@ class Fake:
         raw = samples.tobytes()
         return {"text": hashlib.sha256(raw).hexdigest(), "processingMs": 3, "decodeMs": 1,
                 "diagnostics": {"hex": raw.hex(), "count": len(samples), "pid": os.getpid(), "calls": self.calls,
-                                **({"settings": settings} if settings is not None else {})}}
+                                **({"settings": settings} if settings is not None else {}),
+                                **({"names": self.options["names"]} if "names" in self.options else {})}}
     def cleanup(self, text, **context):
         if context:
             return {"text": json.dumps({"text": text, **context}, sort_keys=True), "processingMs": 1}
@@ -459,6 +461,60 @@ test("scheduler executor loads explicitly, verifies canonical identity, and pres
   await assert.rejects(executor.load("qwen/context", context), /not configured/);
   await executor.close();
   await assert.rejects(executor.load(request.setupId, context), /closed/);
+});
+
+test("a names setup reuses its generation for the same list, reloads at load for another, and refuses a stale execute", async (t) => {
+  const executor = new SetupWorkers({ python: { "cohere/transcribe": { pythonPath: PYTHON, workerPath: fixture,
+    expectedIdentity: { revision: "pinned" } } } });
+  t.after(() => executor.close());
+  const signal = new AbortController().signal;
+  const eight = DEFAULT_NAMES_SNAPSHOT;
+  const two = namesSnapshot(["Qwen", "TM"]);
+  const request: SetupExecution = { operation: "transcribe", setupId: "cohere/transcribe", requestId: "names-1",
+    pcm: createCanonicalPcm(new Float32Array([0.5])), names: eight };
+  assert.equal((await executor.load(request.setupId, { signal, names: eight })).startupMs, null);
+  const first = await executor.execute(request, { signal });
+  assert.deepEqual(first.diagnostics!.names, eight.names, "the load option carries the list");
+  assert.deepEqual(await executor.load(request.setupId, { signal, names: eight }), { firstUse: false, startupMs: 0, loadMs: 0 },
+    "the same digest keeps the generation");
+  await assert.rejects(executor.execute({ ...request, names: two }, { signal }), /names changed since load/);
+  const reloaded = await executor.load(request.setupId, { signal, names: two });
+  assert.deepEqual([reloaded.startupMs, reloaded.firstUse], [null, true], "the reload counts as load time");
+  assertExited(first.diagnostics!.pid as number);
+  const second = await executor.execute({ ...request, names: two }, { signal });
+  assert.deepEqual(second.diagnostics!.names, ["Qwen", "TM"]);
+  await assert.rejects(executor.execute({ ...request, names: eight }, { signal }), /names changed since load/);
+  await assert.rejects(executor.execute({ ...request, names: undefined }, { signal }), /names changed since load/);
+});
+
+test("a CPU setup prepares the take's names, counts a list change as a cold load and refuses a stale execute", async () => {
+  const prepared: (readonly string[])[] = [];
+  const sent: (readonly string[])[] = [];
+  const ready = { type: "ready", version: 1, load: { loadMs: 10, modelConstructionMs: 8 }, assets: {} } as unknown as CpuReady;
+  const executor = new SetupWorkers({ cpu: { "tm/today": {
+    async prepare(names: readonly string[]) { prepared.push(names); return ready; },
+    async transcribe(_samples: Float32Array, names: readonly string[]) {
+      sent.push(names);
+      return { text: "", decodeMs: 1, model: "cpu", hotwords: { path: "names", count: names.length, revision: "r" },
+        comparison: { loadMs: 10, modelConstructionMs: 8, processingMs: 1, workerWallMs: 1, firstUse: true,
+          decodingMethod: "modified_beam_search" } };
+    },
+    async closeAndWait() {},
+  } } });
+  const context = { signal: new AbortController().signal };
+  const two = namesSnapshot(["Qwen", "TM"]);
+  const request: SetupExecution = { operation: "transcribe", setupId: "tm/today", requestId: "cpu-names",
+    pcm: createCanonicalPcm(new Float32Array([0.5])), names: DEFAULT_NAMES_SNAPSHOT };
+  await executor.load("tm/today", { ...context, names: DEFAULT_NAMES_SNAPSHOT });
+  assert.deepEqual((await executor.execute(request, context)).diagnostics, { modelConstructionMs: 8, names: 8, namesRevision: "r",
+    decodingMethod: "modified_beam_search" }, "the row reports the count applied and the decoding used");
+  assert.deepEqual((await executor.load("tm/today", { ...context, names: DEFAULT_NAMES_SNAPSHOT })).startupMs, 0, "warm");
+  await assert.rejects(executor.execute({ ...request, names: two }, context), /names changed since load/);
+  assert.deepEqual(await executor.load("tm/today", { ...context, names: two }), { startupMs: null, loadMs: 10, firstUse: true });
+  await executor.execute({ ...request, names: two }, context);
+  assert.deepEqual(prepared, [DEFAULT_NAMES_SNAPSHOT.names, DEFAULT_NAMES_SNAPSHOT.names, two.names]);
+  assert.deepEqual(sent, [DEFAULT_NAMES_SNAPSHOT.names, two.names]);
+  await executor.close();
 });
 
 test("scheduler delegates CPU prepare, timing, cancellation and release to the supplied fixed child", async () => {

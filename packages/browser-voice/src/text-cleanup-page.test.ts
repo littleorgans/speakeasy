@@ -10,9 +10,11 @@ const CLEANUP_KEY = "speak-easy.road-test.cleanup";
 const FM = "Apple Foundation Models";
 const S1 = "S1-mini by Superwhisper";
 
-/** One complete final row with this text. */
-const final = (text: string) => [{ type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status: "complete", text,
-  timings: { firstUse: false, processingMs: 90 } } }];
+/** The names list the host captured for each take. */
+const TAKE_NAMES = { names: ["Siobhan", "Grok"], digest: "d".repeat(64) };
+/** One accepted take, then its complete final row with this text. */
+const final = (text: string) => [{ type: "accepted", names: TAKE_NAMES },
+  { type: "row", row: { setupId: "mlx-parakeet/v3-greedy", status: "complete", text, timings: { firstUse: false, processingMs: 90 } } }];
 
 /** Cleanup replies the test answers by hand, in request order. */
 function heldReplies() {
@@ -51,20 +53,21 @@ test("a model that is not ready is disabled, and the card says why while cleanup
   assert.equal(harness.elements.get("cleanup-card").hidden, false);
 });
 
-test("Foundation Models sends the final, instruction and names; earlier takes only with the toggle on", async () => {
+test("Foundation Models sends the final, instruction and the take's names; earlier takes only with the toggle on", async () => {
   const harness = pageHarness({}, final("clear the screen"));
   await harness.page.start();
   pick(harness, FM);
   const settings = harness.elements.get("cleanup-settings");
   assert.equal(control(settings, "Instruction").tag, "textarea", "a text setting with lines is a textarea");
   assert.equal(control(settings, "Instruction").rows, 6);
-  assert.equal(control(settings, "Names").type, "text");
+  assert.equal(control(settings, "Names"), undefined, "names come from the one Names list");
   await take(harness.page, 100);
   await until(() => harness.page.run.cleanup?.state === "complete" && harness.page.phase === "idle");
   const [first] = harness.cleanups;
   assert.equal(first.modelId, "apple/foundation-models");
   assert.equal(first.text, "clear the screen");
-  assert.deepEqual(first.settings, { instruction: DEFAULT_INSTRUCTION, names: "Grok, Claude, Codex, GPT, TM, Hibiki", earlier: false });
+  assert.deepEqual(first.settings, { instruction: DEFAULT_INSTRUCTION, earlier: false });
+  assert.deepEqual(first.names, TAKE_NAMES.names, "the list the host used for this take");
   assert.equal("earlier" in first, false, "no earlier takes while the toggle is off");
   assert.match(first.requestId, /^[A-Za-z0-9_.:-]{1,128}$/);
 
@@ -214,27 +217,25 @@ test("S1-mini shows its card and one note, and sends no settings", async () => {
 
 test("settings persist per model; stored values the model no longer offers fall back to defaults", async () => {
   const stored = { [CLEANUP_KEY]: JSON.stringify({ settings: { "apple/foundation-models": {
-    instruction: "Fix names only.", names: "x".repeat(401), earlier: "yes" } } }) };
+    instruction: "Fix names only.", names: "Siobhan, Grok", earlier: "yes" } } }) };
   const harness = pageHarness({ stored });
   await harness.page.start();
   assert.equal(harness.elements.get("cleanup-model").value, "off", "the choice is never remembered (D3)");
   pick(harness, FM);
   const settings = harness.elements.get("cleanup-settings");
   assert.equal(control(settings, "Instruction").value, "Fix names only.");
-  assert.equal(control(settings, "Names").value, "Grok, Claude, Codex, GPT, TM, Hibiki", "too long: the default");
+  assert.equal(control(settings, "Names"), undefined, "a stored names value is ignored: no per model names");
   assert.equal(control(settings, "Earlier takes as context").value, "0", "not offered: the default");
-  const names = control(settings, "Names");
-  names.value = "Siobhan, Grok";
-  names.listeners.get("input")();
+  choose(control(settings, "Earlier takes as context"), "On");
   assert.deepEqual(JSON.parse(harness.storage.getItem(CLEANUP_KEY)!),
-    { settings: { "apple/foundation-models": { instruction: "Fix names only.", names: "Siobhan, Grok" } } });
+    { settings: { "apple/foundation-models": { instruction: "Fix names only.", earlier: true } } }, "the stale names drop out");
   const restore = nodes(settings).find((node) => node.tag === "button" && node.textContent === "Default");
   assert.equal(restore.disabled, false);
   restore.listeners.get("click")();
   assert.equal(control(settings, "Instruction").value, DEFAULT_INSTRUCTION, "Default restores the instruction");
   assert.equal(restore.disabled, true);
   assert.deepEqual(JSON.parse(harness.storage.getItem(CLEANUP_KEY)!),
-    { settings: { "apple/foundation-models": { names: "Siobhan, Grok" } } });
+    { settings: { "apple/foundation-models": { earlier: true } } });
 
   const broken = pageHarness({ stored: { [CLEANUP_KEY]: "{not json" } });
   await broken.page.start();

@@ -2,6 +2,7 @@
 
 import array
 import hashlib
+import json
 import os
 from pathlib import Path
 import shutil
@@ -10,6 +11,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import names
 import native_asr as hexu
 import pins
 import worker
@@ -25,9 +27,16 @@ def setUpModule():
 
 
 FAKE_WORKER = """#!{python}
-import json, struct, sys
-mode = [arg for arg in sys.argv[1:] if arg.startswith("--")]
-print(json.dumps({{"kind": "ready", "backend": "{backend}", "device": "MTL0", "variant": "{variant}", "loadMs": 5}}), flush=True)
+import hashlib, json, struct, sys
+with open(sys.argv[0] + ".argv", "w") as log: json.dump(sys.argv[1:], log)
+mode = [arg for arg in sys.argv[1:] if arg.startswith("--") and not arg.startswith("--names-json=")]
+names = [json.loads(arg[len("--names-json="):]) for arg in sys.argv[1:] if arg.startswith("--names-json=")]
+ready = {{"kind": "ready", "backend": "{backend}", "device": "MTL0", "variant": "{variant}", "loadMs": 5}}
+if names and {names_fields}:
+    applied = names[0][{applied}]
+    ready.update(names=len(applied), namesDigest=hashlib.sha256(
+        json.dumps(applied, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest())
+print(json.dumps(ready), flush=True)
 fed = 0
 while True:
     head = sys.stdin.buffer.read(5)
@@ -53,14 +62,18 @@ class HexUnifiedTest(unittest.TestCase):
         self.model.write_bytes(b"fake gguf")
         self.addCleanup(shutil.rmtree, self.root)
 
-    def runner(self, variant="unified-en-0.6b", backend="metal"):
+    def runner(self, variant="unified-en-0.6b", backend="metal", names_fields=True, applied=":"):
         path = self.root / "worker"
-        path.write_text(FAKE_WORKER.format(python=sys.executable, variant=variant, backend=backend))
+        path.write_text(FAKE_WORKER.format(python=sys.executable, variant=variant, backend=backend,
+                                           names_fields=names_fields, applied=applied))
         os.chmod(path, 0o755)
         return path
 
-    def backend(self, runner, setup_id="hex/unified"):
-        return hexu.Backend({"runnerPath": str(runner), "modelPath": str(self.model), "setupId": setup_id})
+    def argv(self, runner):
+        return json.loads(Path(str(runner) + ".argv").read_text())
+
+    def backend(self, runner, setup_id="hex/unified", **options):
+        return hexu.Backend({"runnerPath": str(runner), "modelPath": str(self.model), "setupId": setup_id, **options})
 
     def pinned(self, setup_id="hex/unified"):
         return patch.dict(hexu.SETUPS[setup_id], {"sha256": hashlib.sha256(b"fake gguf").hexdigest()})
@@ -126,7 +139,8 @@ class HexUnifiedTest(unittest.TestCase):
         with self.pinned("hex/vocabulary"):
             metadata = backend.load()
         self.assertEqual(metadata["setupId"], "hex/vocabulary")
-        self.assertIn("Claude GPT Grok Codex TM whoami", metadata["pipeline"])
+        self.assertIn("the Names list as vocabulary at boost 2.5", metadata["pipeline"])
+        self.assertEqual((metadata["names"], metadata["namesDigest"]), (0, names.names_digest([])))
         samples = memoryview(array.array("f", [0.1, -0.2]).tobytes()).cast("f")
         self.assertEqual(backend.transcribe(samples)["text"], "heard 2 --whole=vocabulary")
         with self.assertRaisesRegex(ValueError, "final text only"):
@@ -163,6 +177,55 @@ class HexUnifiedTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "no final settings"):
             hex_backend.transcribe(samples, {"namesBias": 2.5})
         hex_backend.close()
+
+    def test_whole_take_workers_get_the_names_list_as_one_argv_flag_and_must_echo_it(self):
+        listed = ["Grok", "Claude", "Codex", "GPT", "GPT-SOL", "TM", "Hibiki", "Qwen"]
+        for setup_id, variant, mode in (("hex/vocabulary", "unified-en-0.6b", "--whole=vocabulary"),
+                                        ("cohere/transcribe", "cohere-transcribe-03-2026", "--whole=cohere")):
+            with self.subTest(setup_id=setup_id):
+                runner = self.runner(variant)
+                backend = self.backend(runner, setup_id, names=listed)
+                with self.pinned(setup_id):
+                    metadata = backend.load()
+                self.assertEqual(self.argv(runner), [str(self.model), mode,
+                                                     '--names-json=["Grok","Claude","Codex","GPT","GPT-SOL","TM","Hibiki","Qwen"]'])
+                self.assertEqual((metadata["names"], metadata["namesDigest"]),
+                                 (8, "59d6626926c652e50c7e90fea5f95afdea75f6c27e11aa07c2996b89d51fc068"))
+                backend.close()
+        unicode = self.runner("cohere-transcribe-03-2026")
+        siobhan = self.backend(unicode, "cohere/transcribe", names=["Siobhán"])
+        with self.pinned("cohere/transcribe"):
+            siobhan.load()
+        siobhan.close()
+        self.assertEqual(self.argv(unicode)[-1], '--names-json=["Siobhán"]', "non ASCII stays unescaped, as the digest")
+        empty = self.runner("cohere-transcribe-03-2026")
+        cohere = self.backend(empty, "cohere/transcribe")
+        with self.pinned("cohere/transcribe"):
+            self.assertEqual(cohere.load()["names"], 0)
+        self.assertEqual(self.argv(empty)[-1], "--names-json=[]", "an absent list is sent as an explicit empty one")
+        samples = memoryview(array.array("f", [0.1, -0.2]).tobytes()).cast("f")
+        self.assertEqual(cohere.transcribe(samples, {"namesBias": 2.5})["text"], "heard 2 --whole=cohere names 2.5",
+                         "an empty list still sends and echoes the bias")
+        cohere.close()
+
+    def test_a_runner_that_predates_names_or_applies_another_list_fails_load(self):
+        for fake, message in (({"names_fields": False}, "predates names"), ({"applied": "1:"}, "different names list")):
+            with self.subTest(message=message):
+                backend = self.backend(self.runner(**fake), "hex/vocabulary", names=["Grok", "Qwen"])
+                with self.pinned("hex/vocabulary"), self.assertRaisesRegex(RuntimeError, message):
+                    backend.load()
+                self.assertIsNone(backend.process, "a failed load retires the worker")
+
+    def test_names_are_refused_where_the_worker_takes_none_and_validated_where_it_does(self):
+        runner = self.runner()
+        with self.assertRaisesRegex(ValueError, "optional setupId"):
+            self.backend(runner, "hex/unified", names=["Grok"])
+        for setup_id in ("apple/speech", "apple/dictation"):
+            with self.subTest(setup_id=setup_id), self.assertRaisesRegex(ValueError, "optional setupId"):
+                hexu.Backend({"setupId": setup_id, "runnerPath": str(runner), "names": []})
+        for bad in ("Grok", ["Grok", "Grok"], [" Grok"], ["Gr\x00ok"], ["a,b"], ["x" * 129], [str(n) for n in range(65)], [1]):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                self.backend(runner, "cohere/transcribe", names=bad)
 
     def test_apple_needs_no_model_file_and_streams_with_fast_results_on_request(self):
         runner = self.runner("speech-transcriber", "apple")

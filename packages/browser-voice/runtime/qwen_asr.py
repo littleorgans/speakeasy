@@ -1,7 +1,9 @@
 """Pinned Qwen3 speech.cpp bridge, derived from known-words/qwen/native.py.
 
 Backend options contain absolute libraryPath and modelPath, plus an optional
-setupId fixed to qwen/context. Construction does not load native code.
+setupId fixed to qwen/context and optional names, the road test Names list
+(names.py). Every request's prompt is the names joined with ", "; an empty
+list sets no prompt. Construction does not load native code.
 transcribe accepts a contiguous Float32 buffer;
 transport validates its declared PCM hash, and this adapter reports the hash
 of the exact bytes handed to the C API.
@@ -19,6 +21,7 @@ import platform
 import sys
 import time
 
+from names import names_digest, names_option
 
 SETUP_ID = "qwen/context"
 MODEL_ID = "sakasegawa/Qwen3-ASR-0.6B-GGUF"
@@ -33,7 +36,6 @@ DEVICE = b"gpu"
 THREADS = 2
 WARMUP = 0
 LANGUAGE = b"auto"
-PROMPT = "launch, claude, grok"
 SAMPLE_RATE = 16000
 PROCESSING_TIMING = (
     "perf_counter around request creation, options, audio copy and "
@@ -99,8 +101,8 @@ class Backend:
     def __init__(self, options):
         required = {"libraryPath", "modelPath"}
         if (not isinstance(options, dict) or not required <= set(options)
-                or set(options) - required - {"setupId"}):
-            raise ValueError("Qwen options require libraryPath, modelPath and optional setupId")
+                or set(options) - required - {"setupId", "names"}):
+            raise ValueError("Qwen options require libraryPath, modelPath and optional setupId and names")
         if options.get("setupId", SETUP_ID) != SETUP_ID:
             raise ValueError("Qwen backend requires qwen/context")
         for name in ("libraryPath", "modelPath"):
@@ -109,6 +111,8 @@ class Backend:
                 raise ValueError(f"Qwen {name} must be an absolute path")
         self.library_path = Path(options["libraryPath"])
         self.model_path = Path(options["modelPath"])
+        self.names = names_option(options.get("names", []))
+        self.prompt = ", ".join(self.names) or None
         self.lib = None
         self.model = POINTER()
         self.options = {}
@@ -184,7 +188,8 @@ class Backend:
                 "runtimeCommit": RUNTIME_COMMIT, "librarySha256": library_sha256,
                 "pythonVersion": PYTHON_VERSION, "deviceRequested": DEVICE.decode(),
                 "threads": THREADS, "warmup": False, "language": LANGUAGE.decode(),
-                "prompt": PROMPT, "modelInfo": model_info,
+                "prompt": self.prompt, "names": len(self.names), "namesDigest": names_digest(self.names),
+                "modelInfo": model_info,
                 "loadTiming": "speech_model_load only",
                 "processingTiming": PROCESSING_TIMING,
             }
@@ -202,8 +207,9 @@ class Backend:
                           self.lib.speech_request_free, self.model) as request:
             self._check(self.lib.speech_request_set_string(
                 request, self.options["language"], LANGUAGE))
-            self._check(self.lib.speech_request_set_string(
-                request, self.options["prompt"], PROMPT.encode()))
+            if self.prompt is not None:
+                self._check(self.lib.speech_request_set_string(
+                    request, self.options["prompt"], self.prompt.encode()))
             self._check(self.lib.speech_request_set_audio(
                 request, native, len(values), SAMPLE_RATE))
             decode_started = time.perf_counter()

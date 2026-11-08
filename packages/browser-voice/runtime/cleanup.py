@@ -7,12 +7,15 @@ from pathlib import Path
 import sys
 import time
 
+from names import names_digest, names_option
 
 ROOT = Path(__file__).resolve().parent
 SETUP_ID = "mlx-cleanup/qwen-targeted"
 MODEL = "mlx-community/Qwen2.5-1.5B-Instruct-4bit"
 REVISION = "8b403126fc14f14cfc99bb4cfa72ecbc129ea677"
-PROMPT_SHA256 = "6feb2afb47f1bfcb5ea926ba72588f8776a12eed77e06e4fc9fdf0bc555502fd"
+# The prompt template; load renders NAMES_SLOT with the Names list, or "none" when it is empty.
+PROMPT_SHA256 = "6e0b907eee9ea7b9f2eb464c1e1a2dc684b6ece0215bbcef1001c1855d172f57"
+NAMES_SLOT = "{names}"
 TEMPLATE_SHA256 = "71672240b1a3b068067b6a332bc38d3fc05aaade9d41b4b27d7510ff4335504b"
 REQUIREMENTS_SHA256 = "cec49f5b582ac04d8e5963d6bc2010237bb4ece084721eb61d562b1da6c4d3fa"
 PYTHON = (3, 13, 2)
@@ -107,7 +110,8 @@ class CleanupError(RuntimeError):
 
 
 class Backend:
-    """options.modelPath is an existing absolute snapshot directory at REVISION.
+    """options.modelPath is an existing absolute snapshot directory at REVISION;
+    optional options.names is the road test Names list (names.py).
 
     loadMs includes local identity checks, native imports, weight loading and GPU
     synchronization, excluding process startup. cleanup processingMs excludes
@@ -117,14 +121,15 @@ class Backend:
     """
 
     def __init__(self, options):
-        if (not isinstance(options, dict) or set(options) not in
-                ({"modelPath"}, {"modelPath", "setupId"})):
-            raise ValueError("Cleanup options require modelPath and optional setupId only")
+        if (not isinstance(options, dict) or "modelPath" not in options
+                or set(options) - {"modelPath", "setupId", "names"}):
+            raise ValueError("Cleanup options require modelPath and optional setupId and names only")
         if options.get("setupId", SETUP_ID) != SETUP_ID:
             raise ValueError("Unsupported cleanup setupId")
         if not isinstance(options["modelPath"], str) or not Path(options["modelPath"]).is_absolute():
             raise ValueError("Cleanup modelPath must be absolute")
         self.options = dict(options)
+        self.names = names_option(options.get("names", []))
         self.ready = None
 
     def load(self):
@@ -136,6 +141,7 @@ class Backend:
         prompt = (ROOT / "cleanup-prompt.txt").read_bytes()
         if hashlib.sha256(prompt).hexdigest() != PROMPT_SHA256:
             raise ValueError("Cleanup prompt hash mismatch")
+        system = prompt.decode("utf-8").replace(NAMES_SLOT, ", ".join(self.names) or "none")
         versions = runtime_versions()
         config = json.loads((path / "config.json").read_bytes())
         template = json.loads((path / "tokenizer_config.json").read_bytes())["chat_template"]
@@ -148,12 +154,14 @@ class Backend:
         self.mx, self.stream = mx, stream
         self.model, self.tokenizer = model, tokenizer
         self.sampler, self.generate = sampler, generate
-        self.system = prompt.decode("utf-8")
+        self.system = system
         self.ready = {
             "setupId": SETUP_ID, "model": MODEL, "revision": REVISION,
             "quantization": config.get("quantization"),
             "modelType": config.get("model_type"),
             "promptSha256": PROMPT_SHA256, "chatTemplateSha256": TEMPLATE_SHA256,
+            "namesDigest": names_digest(self.names),
+            "systemSha256": hashlib.sha256(system.encode("utf-8")).hexdigest(),
             "fileSha256": hashes, "requirementsSha256": REQUIREMENTS_SHA256,
             "python": ".".join(map(str, PYTHON)), "packages": versions,
             "settings": SETTINGS, "defaultDevice": str(mx.default_device()),

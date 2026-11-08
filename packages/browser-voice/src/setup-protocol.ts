@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { NamesSnapshot } from "./names.ts";
 
 export const SETUP_IDS = Object.freeze([
   "mlx-parakeet/v3-greedy", "mlx-parakeet/ultra-greedy", "qwen/context",
@@ -26,15 +27,17 @@ export type CanonicalPcm = PcmIdentity & Readonly<{ samples: Float32Array; bytes
 
 export type SetupExecution =
   | Readonly<{ operation: "transcribe"; requestId: string; setupId: Exclude<SetupId, typeof CLEANUP_SETUP_ID>;
-      pcm: CanonicalPcm; settings?: LiveSettings }>
+      pcm: CanonicalPcm; settings?: LiveSettings; names?: NamesSnapshot }>
   | Readonly<{ operation: "cleanup"; requestId: string; setupId: typeof CLEANUP_SETUP_ID;
-      base: PcmIdentity; baseTextSha256: string; A: string; B: null }>;
+      base: PcmIdentity; baseTextSha256: string; A: string; B: null; names?: NamesSnapshot }>;
 export type SetupLoadResult = { startupMs: number | null; loadMs: number | null; firstUse: boolean };
 export type SetupExecutionResult = {
   text: string; processingMs: number | null; workerWallMs: number | null;
   rawText?: string; decodeMs?: number | null; diagnostics?: Record<string, unknown>;
 };
 export type SetupExecutionContext = Readonly<{ signal: AbortSignal }>;
+/** A setup that takes names loads with the take's snapshot; a different digest reloads it. */
+export type SetupLoadContext = SetupExecutionContext & Readonly<{ names?: NamesSnapshot }>;
 /** Live words while the owner speaks: settled text, then text the model may still change. */
 export type LivePartial = { stable: string; tentative: string; processingMs: number };
 /**
@@ -51,7 +54,7 @@ export type LiveSettings = Readonly<Record<string, number>>;
  * No method may warm up, retry, or restart a cancelled request.
  */
 export interface SetupExecutor {
-  load(setupId: SetupId, context: SetupExecutionContext): Promise<SetupLoadResult>;
+  load(setupId: SetupId, context: SetupLoadContext): Promise<SetupLoadResult>;
   execute(request: SetupExecution, context: SetupExecutionContext): Promise<SetupExecutionResult>;
   release(setupId: SetupId): Promise<void>;
   close(): Promise<void>;
@@ -72,10 +75,11 @@ export type SetupRowStatus = "queued" | "loading" | "processing" | "complete" | 
 export type SetupRow = {
   setupId: SetupId; status: SetupRowStatus; text: string | null; rawText?: string; decodeMs?: number | null;
   pcm: PcmIdentity; timings: SetupTimings; error?: SetupFailure; dependency?: typeof ULTRA_SETUP_ID;
-  activeSetupId?: SetupId; settings?: LiveSettings;
+  activeSetupId?: SetupId; settings?: LiveSettings; namesDigest?: string;
 };
 export type ComparisonEvent =
-  | { type: "accepted"; comparisonId: string; queued: boolean; setupIds: readonly SetupId[]; pcm: PcmIdentity }
+  | { type: "accepted"; comparisonId: string; queued: boolean; setupIds: readonly SetupId[]; pcm: PcmIdentity;
+      names: NamesSnapshot }
   | { type: "started"; comparisonId: string; queueMs: number }
   | { type: "row"; comparisonId: string; row: SetupRow }
   | { type: "done"; comparisonId: string; status: "complete" | "cancelled"; wallMs: number };

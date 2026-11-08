@@ -11,6 +11,8 @@ import struct
 import sys
 from array import array
 
+from names import names_option
+
 VERSION = 1
 MAX_HEADER_BYTES = 65_536
 MAX_PCM_BYTES = 7_680_000
@@ -58,7 +60,6 @@ TEXT_CLEANUPS = {"superwhisper/s1-mini", "apple/foundation-models"}
 TEXT_CLEANUP_FIELDS = {"version", "generation", "id", "setupId", "operation", "pcmBytes",
                        "text", "instruction", "names", "earlier"}
 MAX_INSTRUCTION = 2_000
-MAX_NAMES = 400
 MAX_EARLIER, MAX_EARLIER_BYTES = 3, 4_096
 
 
@@ -189,10 +190,10 @@ def text_cleanup_request(header, backend):
     instruction = context.get("instruction", "")
     if not isinstance(instruction, str) or len(instruction) > MAX_INSTRUCTION:
         raise ProtocolError("invalid cleanup instruction")
-    names = context.get("names", [])
-    if (not isinstance(names, list) or any(not isinstance(name, str) or not name.strip() for name in names)
-            or len(", ".join(names)) > MAX_NAMES):
-        raise ProtocolError("invalid cleanup names")
+    try:
+        names_option(context.get("names", []))
+    except ValueError as error:
+        raise ProtocolError(f"invalid cleanup names: {error}") from None
     earlier = context.get("earlier", [])
     if (not isinstance(earlier, list) or len(earlier) > MAX_EARLIER or any(not isinstance(take, str) for take in earlier)
             or sum(len(take.encode("utf-8")) for take in earlier) > MAX_EARLIER_BYTES):

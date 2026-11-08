@@ -46,12 +46,12 @@ export async function readBody(request: IncomingMessage, limit: number): Promise
   return Buffer.concat(chunks);
 }
 
-export async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
+export async function readJson(request: IncomingMessage, limit = MAX_JSON_BYTES): Promise<Record<string, unknown>> {
   requireLoopback(request, true);
   if (request.headers["content-type"] !== "application/json") {
     throw new HttpError(415, "body must be application/json");
   }
-  const body = await readBody(request, MAX_JSON_BYTES);
+  const body = await readBody(request, limit);
   if (body === null) throw new HttpError(413, "JSON body exceeds limit");
   try {
     const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));

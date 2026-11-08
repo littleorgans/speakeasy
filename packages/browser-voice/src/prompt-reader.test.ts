@@ -10,6 +10,7 @@ import { startBrowserVoiceServer, type BrowserVoiceServer } from "./host.ts";
 import { PROMPT_MAX_TAKE_BYTES, type PromptListing } from "./prompt-reader.ts";
 import { ChildTranscriber, TRANSCRIBE_MODEL_ID, type Transcriber } from "./transcriber.ts";
 import { readBrowserVoiceOptions } from "./server-options.ts";
+import { DEFAULT_NAMES, NamesStore } from "./names.ts";
 
 const PROMPTS = {
   set: "T",
@@ -21,15 +22,16 @@ const PROMPTS = {
 
 async function withReader(
   run: (host: BrowserVoiceServer, outputDir: string, root: string) => Promise<void>,
-  options: { transcriber?: (root: string) => Promise<Transcriber>; hotwordsPath?: string } = {},
+  options: { transcriber?: (root: string) => Promise<Transcriber>; names?: (root: string) => Promise<NamesStore> } = {},
 ): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), "speakeasy-reader-"));
   const promptsPath = join(root, "prompts.json");
   const outputDir = join(root, "takes");
   await writeFile(promptsPath, JSON.stringify(PROMPTS));
   const transcriber = await options.transcriber?.(root);
+  const names = await options.names?.(root);
   const host = await startBrowserVoiceServer({ port: 0, promptReader: { promptsPath, outputDir },
-    transcriber, hotwordsPath: options.hotwordsPath });
+    transcriber, ...(names ? { names } : {}) });
   try {
     await run(host, outputDir, root);
   } finally {
@@ -373,11 +375,12 @@ test("worker list status and validation reasons reach the page API while audio s
       transcription: { model: string; hotwordsPath: string };
     };
     assert.equal(listing.transcription.model, "en-parakeet-ultra-int8");
-    assert.equal(listing.transcription.hotwordsPath, join(process.cwd(), "hotwords.txt"));
+    assert.equal(listing.transcription.hotwordsPath, "in memory");
     const rejected = await post(host, "/prompt-reader/transcriptions", { body: takeBytes(320, 1) });
     assert.equal(rejected.status, 503);
     assert.equal(rejected.body.model, TRANSCRIBE_MODEL_ID);
-    assert.deepEqual(rejected.body.hotwords, hotwords);
+    // The host labels where the names came from: here its in memory store.
+    assert.deepEqual(rejected.body.hotwords, { ...hotwords, path: "names" });
     assert.match(String(rejected.body.error), /hotword "☃": unencodable UTF8 coverage/);
     const saved = await post(host, "/prompt-reader/recordings?promptId=p001", { body: takeBytes(320, 1) });
     assert.equal(saved.status, 201);
@@ -389,7 +392,7 @@ test("worker list status and validation reasons reach the page API while audio s
     const next = await post(host, "/prompt-reader/transcriptions", { body: takeBytes(640) });
     assert.equal(next.status, 200);
     assert.equal(next.body.model, TRANSCRIBE_MODEL_ID);
-    assert.deepEqual(next.body.hotwords, hotwords);
+    assert.deepEqual(next.body.hotwords, { ...hotwords, path: "names" });
   }, { transcriber: async (root) => {
     const workerPath = join(root, "list-worker.mjs");
     await writeFile(workerPath, `
@@ -405,22 +408,26 @@ test("worker list status and validation reasons reach the page API while audio s
   } });
 });
 
-test("configured hotword path is absolute in the page API and child configuration", async () => {
-  const { hotwordsPath } = readBrowserVoiceOptions(["--hotwords", "../speech/words.txt"], {});
-  await withReader(async (host) => {
+test("the names file labels the page API, and each legacy take sends the store's current names", async () => {
+  assert.equal(readBrowserVoiceOptions(["--names", "../speech/names.json"], {}).namesFile, resolve("../speech/names.json"));
+  let store!: NamesStore;
+  await withReader(async (host, _outputDir, root) => {
     const listing = await (await fetch(`${host.url}/prompt-reader/prompts`)).json() as {
       transcription: { hotwordsPath: string };
     };
-    assert.equal(listing.transcription.hotwordsPath, resolve("../speech/words.txt"));
-    const answer = await post(host, "/prompt-reader/transcriptions", { body: takeBytes(320) });
-    assert.equal(answer.status, 200);
-    assert.equal(answer.body.text, resolve("../speech/words.txt"));
-  }, { hotwordsPath, transcriber: async (root) => {
-    const workerPath = join(root, "path-worker.mjs");
+    assert.equal(listing.transcription.hotwordsPath, join(root, "names.json"));
+    const first = await post(host, "/prompt-reader/transcriptions", { body: takeBytes(320) });
+    assert.equal(first.status, 200);
+    assert.equal(first.body.text, DEFAULT_NAMES.join("|"));
+    await store.replace(["Qwen", "TM"]);
+    const next = await post(host, "/prompt-reader/transcriptions", { body: takeBytes(320) });
+    assert.equal(next.body.text, "Qwen|TM", "an edit reaches the next take");
+  }, { names: async (root) => store = await NamesStore.open(join(root, "names.json")), transcriber: async (root) => {
+    const workerPath = join(root, "names-worker.mjs");
     await writeFile(workerPath, `
-      process.on("message", ({ id }) => process.send({ id, text: process.argv[2], decodeMs: 0 }));
+      process.on("message", ({ id, names }) => process.send({ id, text: names.join("|"), decodeMs: 0 }));
       process.on("disconnect", () => process.exit(0));
     `);
-    return new ChildTranscriber({ workerPath, hotwordsPath });
+    return new ChildTranscriber({ workerPath });
   } });
 });

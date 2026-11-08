@@ -1,9 +1,9 @@
-/* Voice settings and the voice copy panel under Speech out, and the cleanup settings under Speech in, on the road test page's grid and type. */
+/* Voice settings and the voice copy panel under Speech out, and the Names and cleanup settings under Speech in, on the road test page's grid and type. */
 .voice-settings, .voice-copy { display: grid; gap: 16px; }
 
 .voice-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
 
-.voice-settings input, .voice-copy textarea, .cleanup-settings input, .cleanup-settings textarea {
+.voice-settings input, .voice-copy textarea, .names input, .cleanup-settings input, .cleanup-settings textarea {
   font: inherit;
   color: var(--ink);
   background: var(--tile);

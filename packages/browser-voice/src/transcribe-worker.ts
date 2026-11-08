@@ -6,8 +6,8 @@ import {
   TakeTranscription, instrumentCpuBinding, preflightCpuModel, validateCpuRuntime, type CpuMeasurements,
 } from "./take-transcription.ts";
 import {
-  CPU_PRESETS, isCpuSetupId, TRANSCRIBE_MODEL_ID, TranscriptionError, validateCpuSamples,
-  type CpuReady, type TranscribeReply, type TranscribeRequest,
+  CPU_PRESETS, cpuNames, isCpuSetupId, TRANSCRIBE_MODEL_ID, TranscriptionError, validateCpuSamples,
+  type CpuReady, type PrepareRequest, type TranscribeReply, type TranscribeRequest,
 } from "./transcriber.ts";
 
 const presetId = process.argv[2]?.startsWith("--cpu-preset=") ? process.argv[2].slice("--cpu-preset=".length) : undefined;
@@ -16,44 +16,34 @@ const preset = presetId === undefined ? undefined : CPU_PRESETS[presetId];
 const fixed = preset !== undefined;
 const modelRoot = fixed ? process.argv[3] ?? SHERPA_ROOT : SHERPA_ROOT;
 let measurements: CpuMeasurements = { modelConstructionMs: null, processingMs: null };
-let assets: Record<string, string> = {};
+// Once per child: a names change rebuilds the recognizer without hashing the model again.
+let assets: Promise<Record<string, string>> | undefined;
 const transcriber = new TakeTranscription({
   mode: preset?.mode ?? "legacy",
-  hotwordsPath: fixed ? undefined : process.argv[2],
   createEngine: loadEngine,
   measurements: () => measurements,
 });
 
 // The parent going away ends the worker too, including during model startup.
 process.on("disconnect", () => process.exit(0));
-void start();
-
-async function start(): Promise<void> {
-  if (fixed) {
-    try {
-      const load = await transcriber.prepare();
-      send({ type: "ready", version: 1, preset: preset!, load, assets } satisfies CpuReady);
-    } catch (error) {
-      send({ type: "startup-error", error: message(error) });
-      process.disconnect?.();
-      return;
-    }
-  }
-  process.on("message", (request: unknown) => { void answer(request); });
-}
+process.on("message", (request: unknown) => { void answer(request); });
 
 async function answer(request: unknown): Promise<void> {
-  if (typeof request !== "object" || request === null ||
-      !Number.isSafeInteger((request as TranscribeRequest).id) || (request as TranscribeRequest).id <= 0 ||
-      !((request as TranscribeRequest).samples instanceof Float32Array)) {
+  const parsed = parseRequest(request);
+  if (!parsed) {
     process.disconnect?.();
     return;
   }
-  const { id, samples } = request as TranscribeRequest;
+  const { id, names, samples } = parsed;
   let reply: TranscribeReply;
   try {
-    if (fixed) validateCpuSamples(samples);
-    reply = { id, ...(await transcriber.transcribe(samples)) };
+    if (!samples) {
+      const load = await transcriber.prepare(names);
+      reply = { id, type: "ready", version: 1, preset: preset!, load, assets: await assets! } satisfies CpuReady & { id: number };
+    } else {
+      if (fixed) validateCpuSamples(samples);
+      reply = { id, ...(await transcriber.transcribe(samples, names)) };
+    }
   } catch (error) {
     reply = { id, error: message(error),
       ...(error instanceof TranscriptionError && error.hotwords ? { hotwords: error.hotwords } : {}) };
@@ -61,9 +51,21 @@ async function answer(request: unknown): Promise<void> {
   send(reply);
 }
 
+/** A prepare (fixed mode only) or a take, each with its names; anything else is a parent bug. */
+function parseRequest(value: unknown): { id: number; names: readonly string[]; samples?: Float32Array } | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const { id, type, names, samples } = value as Partial<TranscribeRequest & PrepareRequest>;
+  if (!Number.isSafeInteger(id) || id! <= 0) return undefined;
+  if (type === "prepare" ? !fixed : !(samples instanceof Float32Array)) return undefined;
+  try {
+    return { id: id!, names: cpuNames(names), ...(type === "prepare" ? {} : { samples }) };
+  } catch { return undefined; }
+}
+
 async function loadEngine(hotwords: Hotwords | undefined) {
   if (preset) {
-    assets = await preflightCpuModel(modelRoot, preset);
+    assets ??= preflightCpuModel(modelRoot);
+    await assets;
     const native = loadSherpaBinding();
     validateCpuRuntime(native);
     const instrumented = instrumentCpuBinding(native);
