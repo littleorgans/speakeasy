@@ -1,3 +1,4 @@
+import type { NamesSnapshot } from "./names.ts";
 import {
   assertLivePartial, assertSetupLoadResult, type LivePartial, type LiveSettings, type SetupExecutor, type SetupId,
 } from "./setup-protocol.ts";
@@ -13,6 +14,8 @@ export type LiveTakeOptions = {
   setupId: SetupId;
   /** Applied when the stream starts; absent means the engine's defaults. */
   settings?: LiveSettings;
+  /** The take's Names list, for a setup that takes names; its worker loads with it. */
+  names?: NamesSnapshot;
   executor: SetupExecutor;
   maxSamples: number;
   onEvent(event: LiveTakeEvent): void;
@@ -74,7 +77,7 @@ export class LiveTake {
   }
 
   async #run(): Promise<void> {
-    const { executor, setupId, onEvent } = this.#options;
+    const { executor, setupId, names, onEvent } = this.#options;
     const signal = this.#controller.signal;
     let loaded = false;
     let start = true;
@@ -87,7 +90,7 @@ export class LiveTake {
         }
         if (!loaded) {
           onEvent({ type: "loading" });
-          const load = await executor.load(setupId, { signal });
+          const load = await executor.load(setupId, { signal, ...(names ? { names } : {}) });
           assertSetupLoadResult(load);
           loaded = true;
           this.#options.touch();

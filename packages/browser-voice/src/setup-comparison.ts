@@ -125,7 +125,8 @@ export class SetupComparison {
     for (const take of earlier) void take.stop();
     let release: (() => void) | undefined;
     const take: LiveTake = new LiveTake({ setupId, executor: this.#executor, maxSamples: getSetup(setupId).maxSamples,
-      ...(options.settings ? { settings: options.settings } : {}), onEvent: options.onEvent,
+      ...(options.settings ? { settings: options.settings } : {}),
+      ...(takesNames(setupId) ? { names: this.#names() } : {}), onEvent: options.onEvent,
       admit: () => !this.#active && !this.#closed && earlier.every((other) => !this.#takes.has(other))
         && (release ??= options.acquire()) !== undefined,
       touch: () => { this.#resident.set(setupId, this.#now()); },
