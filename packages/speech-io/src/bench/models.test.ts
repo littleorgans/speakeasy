@@ -19,7 +19,8 @@ test("the bench view lists every sherpa and onnxruntime id once", () => {
 
 test("createEngine builds every registry id on its own runtime, without loading it", async () => {
   for (const id of BENCH_MODEL_IDS) {
-    const engine = await createEngine("sherpa", id);
+    // Gate off: a model's silence gate loads the shared Silero detector, a download.
+    const engine = await createEngine("sherpa", id, "off");
     const runtime = Object.hasOwn(ORT_MODELS, id) ? "onnxruntime-node-" : "sherpa-onnx-node-";
     assert.ok(engine.label?.startsWith(runtime), `${id}: ${engine.label}`);
   }
