@@ -1,4 +1,5 @@
 import { fork, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serialize } from "node:v8";
@@ -14,13 +15,14 @@ export const CPU_DECODING = {
   decodingMethod: "modified_beam_search", maxActivePaths: 4, hotwordsScore: 2,
   lengthReward: 0, maxSamples: 960_000, gate: "off", rewrite: "off", padding: false,
 } as const;
-/** One sherpa CPU setup per fixed word list; each runs in its own child. */
+/**
+ * One sherpa CPU setup per road test row; each runs in its own child and biases
+ * toward the Names list each take supplies, so the two differ only in id. Every
+ * list, the empty one included, decodes with the pinned modified beam search.
+ */
 export const CPU_PRESETS = Object.freeze({
-  "sweep/score-2": Object.freeze({ ...CPU_DECODING, mode: "sweep/score-2", words: "launch\nclaude\ngrok\n",
-    hotwordsSha256: "0f5d821e73171e540a688d50c481007f58662609e1e7892b20829ba7092ea79b" }),
-  // Transport Matters' shipped default list (transport-matters PR #1364), cased as the model emits.
-  "tm/today": Object.freeze({ ...CPU_DECODING, mode: "tm/today", words: "Grok\nClaude\nCodex\n",
-    hotwordsSha256: "0f6cb23db8c767504f966d2cab903db4e0e7ef984c91a3e6c9061ad131323ee9" }),
+  "sweep/score-2": Object.freeze({ ...CPU_DECODING, mode: "sweep/score-2" }),
+  "tm/today": Object.freeze({ ...CPU_DECODING, mode: "tm/today" }),
 });
 export type CpuSetupId = keyof typeof CPU_PRESETS;
 export type CpuPreset = typeof CPU_PRESETS[CpuSetupId];
@@ -34,6 +36,8 @@ export type TakeHotwords = { path: string; count: number; revision: string };
 export type CpuLoadMetadata = { loadMs: number; modelConstructionMs: number | null };
 export type CpuComparisonTiming = CpuLoadMetadata & {
   processingMs: number | null; workerWallMs: number; firstUse: boolean; processStartupMs?: number;
+  /** The decoding the native recognizer was constructed with; a CPU child always reports it. */
+  decodingMethod?: string;
 };
 export type Transcript = {
   text: string; decodeMs: number; model: string; hotwords?: TakeHotwords; comparison?: CpuComparisonTiming;
@@ -54,45 +58,52 @@ export class TranscriptionError extends Error {
 }
 
 export type Transcriber = {
-  transcribe(samples: Float32Array): Promise<Transcript>;
+  transcribe(samples: Float32Array, names: readonly string[]): Promise<Transcript>;
   close(): void;
 };
-export type TranscribeRequest = { id: number; samples: Float32Array };
+/** Every request carries its names; prepare builds the recognizer for them before a take. */
+export type TranscribeRequest = { id: number; samples: Float32Array; names: readonly string[] };
+export type PrepareRequest = { id: number; type: "prepare"; names: readonly string[] };
 export type TranscribeReply =
   | { id: number; text: string; decodeMs: number; hotwords?: TakeHotwords; comparison?: CpuComparisonTiming }
-  | { id: number; error: string; hotwords?: TakeHotwords };
+  | { id: number; error: string; hotwords?: TakeHotwords }
+  | CpuReady & { id: number };
 
 const WORKER_PATH = fileURLToPath(new URL("./transcribe-worker.ts", import.meta.url));
 const TRANSCRIBE_TIMEOUT_MS = 30_000;
-type Pending = {
-  resolve(transcript: Transcript): void; reject(error: Error): void; timer: NodeJS.Timeout;
-};
-type ReadyWait = {
-  promise: Promise<CpuReady>; resolve(ready: CpuReady): void; reject(error: Error): void;
-  timer: NodeJS.Timeout; started: number;
-};
+/** A prepare waits for ready; a take waits for a transcript that matches the names it sent. */
+type Wait = { reject(error: Error): void } & (
+  | { kind: "prepare"; resolve(ready: CpuReady): void }
+  | { kind: "transcribe"; resolve(transcript: Transcript): void; names: Pick<TakeHotwords, "count" | "revision"> });
+type Pending = Wait & { timer: NodeJS.Timeout };
 
-/** Each instance owns its isolated generation. Fixed mode requires ready before audio. */
+/**
+ * Each instance owns its isolated generation. Fixed mode requires ready for a
+ * take's names before its audio; ready for the same names is the same object.
+ */
 export class ChildTranscriber implements Transcriber {
   readonly #workerPath: string;
   readonly #label: string;
   readonly #timeoutMs: number;
   readonly #startupTimeoutMs: number;
-  readonly #hotwordsPath: string | undefined;
+  readonly #namesSource: string;
   readonly #modelRoot: string | undefined;
   readonly #preset: CpuPreset | undefined;
   readonly #pending = new Map<number, Pending>();
   #child: ChildProcess | undefined;
   #nextId = 0;
-  #ready: ReadyWait | undefined;
-  #readyValue: CpuReady | undefined;
-  #startupMs = 0;
+  /** The names this child last prepared, or is preparing, and their ready. */
+  #prepared: { content: string; ready: Promise<CpuReady> } | undefined;
+  #spawnedAt = 0;
+  #startupMs: number | undefined;
   #retiring: Promise<void> = Promise.resolve();
   #exit: Promise<void> = Promise.resolve();
   #lifecycle = 0;
 
   constructor(options: {
-    workerPath?: string; label?: string; timeoutMs?: number; hotwordsPath?: string;
+    workerPath?: string; label?: string; timeoutMs?: number;
+    /** Labels TakeHotwords.path: where the names came from. */
+    namesSource?: string;
     mode?: TranscriptionMode; modelRoot?: string; startupTimeoutMs?: number;
   } = {}) {
     this.#workerPath = options.workerPath ?? WORKER_PATH;
@@ -102,45 +113,47 @@ export class ChildTranscriber implements Transcriber {
     const mode = options.mode ?? "legacy";
     if (mode !== "legacy" && !isCpuSetupId(mode)) throw new Error("Unknown CPU transcription mode");
     this.#preset = mode === "legacy" ? undefined : CPU_PRESETS[mode];
-    if (this.#preset && options.hotwordsPath !== undefined) {
-      throw new Error("Fixed CPU mode cannot use an editable hotword file");
-    }
-    this.#hotwordsPath = options.hotwordsPath === undefined ? undefined : resolve(options.hotwordsPath);
+    this.#namesSource = options.namesSource ?? NAMES_SOURCE;
     this.#modelRoot = options.modelRoot === undefined ? undefined : resolve(options.modelRoot);
     for (const duration of [this.#timeoutMs, this.#startupTimeoutMs]) {
       if (!Number.isFinite(duration) || duration <= 0) throw new Error("CPU timeouts must be positive finite durations");
     }
   }
 
-  async prepare(): Promise<CpuReady> {
+  /** Builds the recognizer for these names; a names change rebuilds it in the same child. */
+  async prepare(names: readonly string[]): Promise<CpuReady> {
     if (!this.#preset) throw new Error("Explicit prepare requires fixed CPU mode");
+    const list = cpuNames(names);
     const lifecycle = this.#lifecycle;
     await this.#retiring;
     if (lifecycle !== this.#lifecycle) throw new TranscriptionError("transcriber closed", this.#label);
-    this.#spawn();
-    return this.#ready!.promise;
+    const child = this.#spawn();
+    const content = namesContent(list);
+    if (this.#prepared?.content !== content) {
+      const ready = new Promise<CpuReady>((resolve, reject) => {
+        this.#send(child, { type: "prepare", names: list }, this.#startupTimeoutMs, "CPU worker ready timed out",
+          { kind: "prepare", resolve, reject });
+      });
+      this.#prepared = { content, ready };
+    }
+    return this.#prepared.ready;
   }
 
-  async transcribe(samples: Float32Array): Promise<Transcript> {
+  async transcribe(samples: Float32Array, names: readonly string[]): Promise<Transcript> {
     const lifecycle = this.#lifecycle;
+    const list = cpuNames(names);
     if (this.#preset) {
       validateCpuSamples(samples);
       // Own this exact view before cold preparation or retirement can yield.
       samples = samples.slice();
-      await this.prepare();
+      await this.prepare(list);
     } else await this.#retiring;
     if (lifecycle !== this.#lifecycle) throw new TranscriptionError("transcriber closed", this.#label);
     const child = this.#spawn();
-    const id = ++this.#nextId;
+    const expected = { count: list.length, revision: namesRevision(list) };
     return new Promise<Transcript>((resolve, reject) => {
-      const timer = setTimeout(() => this.#retire(child,
-        new Error(`transcription timed out after ${this.#timeoutMs} ms`)), this.#timeoutMs);
-      this.#pending.set(id, { resolve, reject, timer });
-      try {
-        child.send({ id, samples } satisfies TranscribeRequest, (error) => {
-          if (error) this.#retire(child, error);
-        });
-      } catch (error) { this.#retire(child, error instanceof Error ? error : new Error(String(error))); }
+      this.#send(child, { samples, names: list }, this.#timeoutMs, `transcription timed out after ${this.#timeoutMs} ms`,
+        { kind: "transcribe", resolve, reject, names: expected });
     });
   }
 
@@ -154,28 +167,31 @@ export class ChildTranscriber implements Transcriber {
     await this.#retiring;
   }
 
+  #send(child: ChildProcess, request: Omit<TranscribeRequest, "id"> | Omit<PrepareRequest, "id">, timeoutMs: number,
+    timeout: string, wait: Wait): void {
+    const id = ++this.#nextId;
+    const timer = setTimeout(() => this.#retire(child, new Error(timeout)), timeoutMs);
+    this.#pending.set(id, { ...wait, timer });
+    try {
+      child.send({ id, ...request }, (error) => {
+        if (error) this.#retire(child, error);
+      });
+    } catch (error) { this.#retire(child, error instanceof Error ? error : new Error(String(error))); }
+  }
+
   #spawn(): ChildProcess {
     if (this.#child) return this.#child;
-    const started = performance.now();
-    const args = this.#preset
-      ? [`--cpu-preset=${this.#preset.mode}`, ...(this.#modelRoot ? [this.#modelRoot] : [])]
-      : this.#hotwordsPath === undefined ? [] : [this.#hotwordsPath];
+    this.#spawnedAt = performance.now();
+    this.#startupMs = undefined;
+    const args = this.#preset ? [`--cpu-preset=${this.#preset.mode}`, ...(this.#modelRoot ? [this.#modelRoot] : [])] : [];
     const child = fork(this.#workerPath, args, {
       serialization: "advanced", stdio: ["ignore", "inherit", "inherit", "ipc"],
     });
     this.#child = child;
-    this.#readyValue = undefined;
     this.#exit = new Promise<void>((resolve) => {
       child.once("exit", () => resolve());
       child.once("close", () => resolve());
     });
-    if (this.#preset) {
-      let accept!: (ready: CpuReady) => void;
-      let reject!: (error: Error) => void;
-      const promise = new Promise<CpuReady>((resolve, fail) => { accept = resolve; reject = fail; });
-      this.#ready = { promise, resolve: accept, reject, started,
-        timer: setTimeout(() => this.#retire(child, new Error("CPU worker ready timed out")), this.#startupTimeoutMs) };
-    }
     child.on("message", (reply: unknown) => this.#message(child, reply));
     child.on("error", (error) => this.#retire(child, error));
     child.on("exit", (code, signal) => this.#retire(child, new Error(`transcriber exited (${signal ?? code})`)));
@@ -186,33 +202,32 @@ export class ChildTranscriber implements Transcriber {
     if (this.#child !== child) return;
     try {
       if (serialize(value).byteLength > 65_536 || !record(value)) throw new Error("Invalid CPU worker reply");
-      if (this.#preset && !this.#readyValue) {
-        if (value.type === "startup-error" && typeof value.error === "string") throw new Error(value.error);
-        validateCpuReady(value, this.#preset);
-        this.#readyValue = value;
-        this.#startupMs = performance.now() - this.#ready!.started;
-        clearTimeout(this.#ready!.timer);
-        this.#ready!.resolve(value);
-        return;
-      }
-      if (!Number.isSafeInteger(value.id) || !this.#pending.has(value.id as number)) {
-        throw new Error("CPU worker reply has an unknown request id");
-      }
-      if (value.hotwords !== undefined && !validHotwords(value.hotwords)) throw new Error("Invalid CPU hotword metadata");
-      if ("error" in value) {
-        if (typeof value.error !== "string") throw new Error("Invalid CPU worker error");
-        this.#settle(value.id as number, new TranscriptionError(value.error, this.#label, value.hotwords as TakeHotwords | undefined));
+      const { id, ...reply } = value;
+      const pending = Number.isSafeInteger(id) ? this.#pending.get(id as number) : undefined;
+      if (!pending) throw new Error("CPU worker reply has an unknown request id");
+      if (reply.hotwords !== undefined && !validHotwords(reply.hotwords)) throw new Error("Invalid CPU hotword metadata");
+      // The child labels nothing: the names' source is the parent's to name.
+      const hotwords = reply.hotwords === undefined ? undefined : { ...reply.hotwords, path: this.#namesSource };
+      if ("error" in reply) {
+        if (typeof reply.error !== "string") throw new Error("Invalid CPU worker error");
+        // A recognizer that cannot build for these names fails its child.
+        if (pending.kind === "prepare") throw new Error(reply.error);
+        this.#settle(id as number, new TranscriptionError(reply.error, this.#label, hotwords));
+      } else if (pending.kind === "prepare") {
+        validateCpuReady(reply, this.#preset!);
+        this.#startupMs ??= performance.now() - this.#spawnedAt;
+        this.#settle(id as number, reply);
       } else {
-        if (typeof value.text !== "string" || !duration(value.decodeMs)) throw new Error("Invalid CPU transcript");
-        if (this.#preset && (!validTiming(value.comparison) || !validHotwords(value.hotwords) ||
-            value.hotwords.revision !== this.#preset.hotwordsSha256 ||
-            value.hotwords.count !== cpuWords(this.#preset).length)) {
+        if (typeof reply.text !== "string" || !duration(reply.decodeMs)) throw new Error("Invalid CPU transcript");
+        if (this.#preset && (!validTiming(reply.comparison) || !hotwords ||
+            reply.comparison.decodingMethod !== this.#preset.decodingMethod ||
+            hotwords.revision !== pending.names.revision || hotwords.count !== pending.names.count)) {
           throw new Error("Invalid fixed CPU result metadata");
         }
-        this.#settle(value.id as number, { text: value.text, decodeMs: value.decodeMs,
-          ...(value.hotwords ? { hotwords: value.hotwords as TakeHotwords } : {}),
+        this.#settle(id as number, { text: reply.text, decodeMs: reply.decodeMs,
+          ...(hotwords ? { hotwords } : {}),
           ...(this.#preset ? {
-            comparison: { ...value.comparison as CpuComparisonTiming, processStartupMs: this.#startupMs },
+            comparison: { ...reply.comparison as CpuComparisonTiming, processStartupMs: this.#startupMs },
           } : {}) });
       }
     } catch (error) { this.#retire(child, error instanceof Error ? error : new Error(String(error))); }
@@ -223,23 +238,20 @@ export class ChildTranscriber implements Transcriber {
     this.#child = undefined;
     this.#lifecycle += 1;
     this.#retiring = this.#exit;
-    if (this.#ready) {
-      clearTimeout(this.#ready.timer);
-      this.#ready.reject(error);
-      this.#ready = undefined;
-    }
+    this.#prepared = undefined;
     for (const id of [...this.#pending.keys()]) this.#settle(id, error);
     child.kill("SIGKILL");
   }
 
-  #settle(id: number, outcome: Error | Omit<Transcript, "model">): void {
+  #settle(id: number, outcome: Error | CpuReady | Omit<Transcript, "model">): void {
     const pending = this.#pending.get(id);
     if (!pending) return;
     this.#pending.delete(id);
     clearTimeout(pending.timer);
     if (outcome instanceof Error) pending.reject(outcome instanceof TranscriptionError
       ? outcome : new TranscriptionError(outcome.message, this.#label));
-    else pending.resolve({ ...outcome, model: this.#label });
+    else if (pending.kind === "prepare") pending.resolve(outcome as CpuReady);
+    else pending.resolve({ ...outcome as Omit<Transcript, "model">, model: this.#label });
   }
 }
 
@@ -264,15 +276,34 @@ function validLoad(value: unknown): value is CpuLoadMetadata & Record<string, un
 }
 function validTiming(value: unknown): value is CpuComparisonTiming {
   return validLoad(value) && record(value) && duration(value.workerWallMs) && typeof value.firstUse === "boolean" &&
-    (value.processingMs === null || duration(value.processingMs));
+    (value.processingMs === null || duration(value.processingMs)) && typeof value.decodingMethod === "string";
 }
 function validHotwords(value: unknown): value is TakeHotwords {
   return record(value) && typeof value.path === "string" && Number.isSafeInteger(value.count) &&
     (value.count as number) >= 0 && typeof value.revision === "string";
 }
 
-/** A preset's fixed phrases, one per line of its list. */
-export function cpuWords(preset: CpuPreset): string[] { return preset.words.trimEnd().split("\n"); }
+/** TakeHotwords.path when the host names no source. */
+export const NAMES_SOURCE = "names";
+
+/**
+ * The names a CPU child biases toward, one hotword line each, as both sides of
+ * its IPC check them. The host has already canonicalized them (src/names.ts);
+ * the tokenizer validates each when its recognizer is built.
+ */
+export function cpuNames(value: unknown): readonly string[] {
+  if (!Array.isArray(value) || !value.every((name) => typeof name === "string" && name.length > 0 &&
+      name === name.trim() && !/[\u0000-\u001f\u007f-\u009f]/.test(name))) {
+    throw new TranscriptionError("CPU names must be trimmed, non blank strings without control characters",
+      TRANSCRIBE_MODEL_ID);
+  }
+  return Object.freeze([...value]);
+}
+/** The hotword lines for these names; their sha256 is TakeHotwords.revision. */
+export function namesContent(names: readonly string[]): string { return names.map((name) => `${name}\n`).join(""); }
+export function namesRevision(names: readonly string[]): string {
+  return createHash("sha256").update(namesContent(names)).digest("hex");
+}
 
 export function validateCpuReady(value: unknown, preset: CpuPreset): asserts value is CpuReady {
   if (!record(value) || value.type !== "ready" || value.version !== 1 || !record(value.preset) ||

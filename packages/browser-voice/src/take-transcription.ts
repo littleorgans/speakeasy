@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { loadHotwords, type HotwordFileSnapshot } from "@speakeasy/speech-io";
+import type { HotwordFileSnapshot } from "@speakeasy/speech-io";
 import {
   isAssetComplete, resolveModelPaths, sha256File, SHERPA_MODELS,
   type AnySherpaEngine, type FinalEvent, type Hotwords, type SherpaBinding,
@@ -10,27 +10,28 @@ import { prepareOfflineHotwords } from "../../speech-io/src/engines/offline-hotw
 import type { OfflineRecognizerConfig, OfflineStream } from "../../speech-io/src/engines/sherpa-api.ts";
 import { PROMPT_SAMPLE_RATE } from "./prompt-reader.ts";
 import {
-  CPU_DECODING, CPU_PRESETS, cpuWords, TRANSCRIBE_MODEL_ID, TranscriptionError, validateCpuSamples,
-  type CpuLoadMetadata, type CpuPreset, type TranscriptionMode, type Transcript,
+  CPU_DECODING, cpuNames, NAMES_SOURCE, namesContent, TRANSCRIBE_MODEL_ID, TranscriptionError, validateCpuSamples,
+  type CpuLoadMetadata, type TranscriptionMode, type Transcript,
 } from "./transcriber.ts";
 
-/** A preset's list is independent of every editable reader file. */
-export function fixedCpuSnapshot(preset: CpuPreset): HotwordFileSnapshot {
-  const phrases = cpuWords(preset);
+/** One hotword per name; an empty list has no hotwords. */
+export function namesSnapshot(names: readonly string[]): HotwordFileSnapshot {
+  const phrases = [...cpuNames(names)];
   Object.freeze(phrases);
-  return Object.freeze({ source: preset.mode, content: preset.words,
-    hotwords: Object.freeze({ phrases, score: preset.hotwordsScore, file: preset.mode }) });
+  return Object.freeze({ source: NAMES_SOURCE, content: namesContent(phrases), hotwords: phrases.length
+    ? Object.freeze({ phrases, score: CPU_DECODING.hotwordsScore, file: NAMES_SOURCE }) : undefined });
 }
 
 export type CpuMeasurements = {
   modelConstructionMs: number | null;
   processingMs: number | null;
   rawText?: string;
+  /** What the native recognizer was constructed with. */
+  decodingMethod?: string;
 };
 
-/** One file snapshot per request; one active recognizer and decode at a time. */
+/** One names snapshot per request; one active recognizer and decode at a time. */
 export class TakeTranscription {
-  readonly #read: () => Promise<HotwordFileSnapshot>;
   readonly #createEngine: (hotwords: Hotwords | undefined) => Promise<AnySherpaEngine>;
   readonly #fixed: boolean;
   readonly #measurements: (() => CpuMeasurements) | undefined;
@@ -41,52 +42,46 @@ export class TakeTranscription {
   #used = false;
 
   constructor(options: {
-    hotwordsPath?: string;
     mode?: TranscriptionMode;
-    readSnapshot?(): Promise<HotwordFileSnapshot>;
     measurements?(): CpuMeasurements;
     createEngine(hotwords: Hotwords | undefined): Promise<AnySherpaEngine>;
   }) {
-    const mode = options.mode ?? "legacy";
-    this.#fixed = mode !== "legacy";
-    const fixed = mode === "legacy" ? undefined : fixedCpuSnapshot(CPU_PRESETS[mode]);
-    this.#read = fixed ? async () => fixed
-      : options.readSnapshot ?? (() => loadHotwords({ snapshot: true, source: options.hotwordsPath }));
+    this.#fixed = (options.mode ?? "legacy") !== "legacy";
     this.#createEngine = options.createEngine;
     this.#measurements = options.measurements;
   }
 
-  /** Fixed ready means construction completed, with no warmup inference. */
-  prepare(): Promise<CpuLoadMetadata> {
+  /**
+   * Fixed ready means construction completed for these names, with no warmup
+   * inference; other names than the last rebuild the recognizer here.
+   */
+  prepare(names: readonly string[]): Promise<CpuLoadMetadata> {
+    let snapshot: HotwordFileSnapshot;
+    try { snapshot = namesSnapshot(names); } catch (error) { return Promise.reject(error); }
     const result = this.#queue.then(async () => {
-      await this.#ensure(await this.#read());
+      await this.#ensure(snapshot);
       return { ...this.#load };
     });
     this.#queue = result.catch(() => {});
     return result;
   }
 
-  transcribe(samples: Float32Array): Promise<Transcript> {
-    if (this.#fixed) {
-      try { validateCpuSamples(samples); } catch (error) { return Promise.reject(error); }
-    }
-    // Read immediately, before an earlier decode can delay this take. Handle
-    // read rejection now as well, so queued failures are never unhandled.
-    const snapshot = this.#read().then(
-      (value) => ({ value }),
-      (error: unknown) => ({ error }),
-    );
+  transcribe(samples: Float32Array, names: readonly string[]): Promise<Transcript> {
+    let snapshot: HotwordFileSnapshot;
+    try {
+      if (this.#fixed) validateCpuSamples(samples);
+      // Taken now, so a take waiting behind an earlier decode keeps its own names.
+      snapshot = namesSnapshot(names);
+    } catch (error) { return Promise.reject(error); }
     const result = this.#queue.then(async () => {
-      const captured = await snapshot;
-      if ("error" in captured) throw new TranscriptionError(String(captured.error), TRANSCRIBE_MODEL_ID);
-      const { source, content, hotwords } = captured.value;
+      const { source, content, hotwords } = snapshot;
       const status = {
         path: source, count: hotwords?.phrases.length ?? 0,
         revision: createHash("sha256").update(content).digest("hex"),
       };
       try {
         const started = performance.now();
-        const engine = await this.#ensure(captured.value);
+        const engine = await this.#ensure(snapshot);
         const firstUse = !this.#used;
         this.#used = true;
         const result = await decode(engine, samples);
@@ -95,7 +90,8 @@ export class TakeTranscription {
           ...(this.#fixed ? {
             text: measured?.rawText ?? result.text,
             comparison: { ...this.#load, processingMs: measured?.processingMs ?? null,
-              firstUse, workerWallMs: performance.now() - started },
+              firstUse, workerWallMs: performance.now() - started,
+              ...(measured?.decodingMethod === undefined ? {} : { decodingMethod: measured.decodingMethod }) },
           } : {}) };
       } catch (error) {
         throw new TranscriptionError(error instanceof Error ? error.message : String(error), TRANSCRIBE_MODEL_ID, status);
@@ -127,8 +123,11 @@ export class TakeTranscription {
   }
 }
 
-/** Hash checks precede engine preparation, which must never install a model. */
-export async function preflightCpuModel(modelRoot: string, preset: CpuPreset): Promise<Record<string, string>> {
+/**
+ * Hash checks precede engine preparation, which must never install a model.
+ * They cover the assets alone; each recognizer build validates its names.
+ */
+export async function preflightCpuModel(modelRoot: string): Promise<Record<string, string>> {
   const model = SHERPA_MODELS[TRANSCRIBE_MODEL_ID];
   const paths = resolveModelPaths(model, modelRoot);
   if (!(await isAssetComplete(paths))) throw new Error("CPU model is not installed with its pinned completion marker");
@@ -142,8 +141,9 @@ export async function preflightCpuModel(modelRoot: string, preset: CpuPreset): P
     hashes[file.name] = file.sha256;
   }
   const table = new TextDecoder("utf-8", { fatal: true }).decode(await readFile(join(paths.dir, model.tokens)));
-  const prepared = prepareOfflineHotwords(model, table, fixedCpuSnapshot(preset).hotwords!);
-  if (createHash("sha256").update(prepared.vocabulary).digest("hex") !== preset.vocabularySha256) {
+  // The vocabulary derives from the token table alone, so no names are needed to check it.
+  const prepared = prepareOfflineHotwords(model, table, { phrases: [], score: CPU_DECODING.hotwordsScore });
+  if (createHash("sha256").update(prepared.vocabulary).digest("hex") !== CPU_DECODING.vocabularySha256) {
     throw new Error("CPU vocabulary does not match the measured preset");
   }
   return hashes;
@@ -157,16 +157,22 @@ export function validateCpuRuntime(binding: SherpaBinding & { gitSha1?: string; 
   }
 }
 
-/** Instrument the shared engine's real native boundary without another decoder. */
+/**
+ * Instrument the shared engine's real native boundary without another decoder.
+ * The shared engine decodes greedily when a list is empty; the CPU presets pin
+ * one decoding for every list, so each recognizer is constructed with it.
+ */
 export function instrumentCpuBinding(binding: SherpaBinding): { binding: SherpaBinding; measurements: CpuMeasurements } {
   const measurements: CpuMeasurements = { modelConstructionMs: null, processingMs: null };
   return { measurements, binding: { ...binding, OfflineRecognizer: class {
     readonly #native: InstanceType<SherpaBinding["OfflineRecognizer"]>;
     #started = 0;
     constructor(config: OfflineRecognizerConfig) {
+      const pinned = { ...config, decodingMethod: CPU_DECODING.decodingMethod, maxActivePaths: CPU_DECODING.maxActivePaths };
       const started = performance.now();
-      this.#native = new binding.OfflineRecognizer(config);
+      this.#native = new binding.OfflineRecognizer(pinned);
       measurements.modelConstructionMs = performance.now() - started;
+      measurements.decodingMethod = pinned.decodingMethod;
     }
     createStream(): OfflineStream {
       measurements.processingMs = null;
