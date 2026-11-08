@@ -77,7 +77,8 @@ Unknown setups or fields are refused at startup.
    `runtime/hex/whole.rs`). Its build script builds into a directory of its own under
    `~/Library/Caches/speakeasy/`; after a change to `runtime/hex/worker.rs`,
    rebuild to a new directory and point `runnerPath` at it, so a running
-   server keeps the binary it started with.
+   server keeps the binary it started with. Apple setups share one worker the
+   same way, through `--module=` (`runtime/apple_speech/worker.swift`).
 5. Teach `src/server-options.ts` its files: a native path beyond the model goes
    in `EXTRA_LOCATIONS`, and `inspectSetupReadiness` checks the files exist.
    A model the system manages (no file to pin or size) goes in

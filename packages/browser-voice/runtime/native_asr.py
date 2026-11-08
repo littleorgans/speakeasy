@@ -29,7 +29,9 @@ HEX_MODEL = {"file": "parakeet-unified-en-0.6b-Q8_0.gguf", "backend": "metal",
 # values, each as the two i32 its worker's start request carries.
 # Hex: transcribe.cpp's Unified (chunk, right) menu in ms; Hex ships 2080.
 HEX_LIVE = {"setting": "lookaheadMs", "default": 2080, "values": {2080: (1040, 1040), 1120: (560, 560), 480: (160, 320)}}
-APPLE_LIVE = {"setting": "fastResults", "default": 0, "values": {0: (0, 0), 1: (1, 0)}}
+# Apple: one Off/On reporting option, sent as 1 then 0; speech's fast results, dictation's frequent finalization.
+APPLE_LIVE = {setting: {"setting": setting, "default": 0, "values": {0: (0, 0), 1: (1, 0)}}
+              for setting in ("fastResults", "frequentFinalization")}
 # Cohere's one final setting (src/final-settings.ts): the logit bias toward its
 # six names, sent as the worker's `B` take; Off sends today's `T` take.
 COHERE_FINAL = {"setting": "namesBias", "default": 0, "values": (0, 1.25, 2.5)}
@@ -48,8 +50,13 @@ SETUPS = {
                           "pipeline": "whole take session.run per window of at most 560000 samples, padded to 24000"},
     # SpeechAnalyzer and SpeechTranscriber, en-US; the system manages its weights.
     "apple/speech": {"file": None, "sha256": None, "variant": "speech-transcriber", "backend": "apple", "mode": [],
-                     "live": APPLE_LIVE, "pipeline": "SpeechAnalyzer, SpeechTranscriber volatile results, "
-                                                     "2560 sample buffers, finalize through end of input"},
+                     "live": APPLE_LIVE["fastResults"], "pipeline": "SpeechAnalyzer, SpeechTranscriber volatile results, "
+                                                                     "2560 sample buffers, finalize through end of input"},
+    # The same worker with DictationTranscriber, told the worker's names as contextual strings.
+    "apple/dictation": {"file": None, "sha256": None, "variant": "dictation-transcriber", "backend": "apple",
+                        "mode": ["--module=dictation"], "live": APPLE_LIVE["frequentFinalization"],
+                        "pipeline": "SpeechAnalyzer, DictationTranscriber punctuation, volatile results, "
+                                    "general contextual strings, 2560 sample buffers, finalize through end of input"},
 }
 RUNTIME_COMMIT = "7045d1c0fe7cee37747b2792977421d435e75fca"
 HEX_COMMIT = "826bdbc44c8806630a45c08ed8cef35a36817a17"

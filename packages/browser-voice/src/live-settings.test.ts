@@ -16,6 +16,8 @@ test("the live streams are exactly the setups whose engine streams, each default
     "800 ms chunks, as before");
   assert.deepEqual(resolveLiveSettings(liveStream("hex/unified")!), { lookaheadMs: 2_080 }, "Hex's own 2.08 s lookahead");
   assert.equal(liveStream("hex/unified")!.settings[0]!.options[0]!.phrase, "2.08 s lookahead, written words never change");
+  assert.deepEqual(resolveLiveSettings(liveStream("apple/dictation")!), { frequentFinalization: 0 }, "Off isolates the module");
+  assert.equal(liveStream("apple/dictation")!.settings[0]!.options[1]!.phrase, "frequent finalization, words settle sooner");
 });
 
 test("each setup's default live model is today's pairing", () => {

@@ -453,6 +453,49 @@
       "maxSamples": 1920000
     },
     {
+      "id": "apple/dictation",
+      "label": "Apple on device dictation",
+      "card": {
+        "runtime": "SpeechAnalyzer and DictationTranscriber, macOS 27",
+        "transcript": "partials",
+        "size": "system managed",
+        "terms": "Apple macOS licence; system managed weights"
+      },
+      "model": "DictationTranscriber en-US",
+      "revision": "system managed",
+      "runtime": {
+        "framework": "Speech, macOS 27",
+        "worker": "runtime/apple_speech/worker.swift --module=dictation built by runtime/apple_speech/build.py",
+        "target": "arm64-apple-macos27.0",
+        "weights": "system managed, reserved with AssetInventory"
+      },
+      "quantization": "system managed",
+      "controls": {
+        "locale": "en-US",
+        "contentHints": [],
+        "transcriptionOptions": [
+          "punctuation"
+        ],
+        "reportingOptions": [
+          "volatileResults"
+        ],
+        "attributeOptions": [
+          "audioTimeRange"
+        ],
+        "contextualStrings": "general: the worker's names",
+        "feedSamples": 2560,
+        "converter": "AnalyzerInputConverter",
+        "priority": "userInitiated",
+        "modelRetention": "processLifetime",
+        "ignoresResourceLimits": false,
+        "finalize": "finalizeAndFinishThroughEndOfInput",
+        "gate": "off",
+        "rewrite": "off"
+      },
+      "operation": "transcribe",
+      "maxSamples": 1920000
+    },
+    {
       "id": "mlx-cleanup/qwen-targeted",
       "label": "Ultra plus Qwen cleanup",
       "card": {

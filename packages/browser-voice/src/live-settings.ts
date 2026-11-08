@@ -48,11 +48,19 @@ const APPLE: readonly LiveSetting[] = [
     options: [{ value: 0, label: "Off", phrase: "volatile results, the newest words may change" },
       { value: 1, label: "On", phrase: "fast volatile results, the newest words may change" }] },
 ];
+// DictationTranscriber's one extra reporting option; Off isolates the module against speech's Off.
+const APPLE_DICTATION: readonly LiveSetting[] = [
+  { id: "frequentFinalization", label: "Frequent finalization", default: 0,
+    note: "On settles words sooner, sometimes slightly less accurately.",
+    options: [{ value: 0, label: "Off", phrase: "volatile results, the newest words may change" },
+      { value: 1, label: "On", phrase: "frequent finalization, words settle sooner" }] },
+];
 
 export const LIVE_STREAMS: readonly LiveStream[] = Object.freeze([
   { setupId: "hex/unified", settings: HEX },
   { setupId: "nemotron/streaming", settings: NEMOTRON },
   { setupId: "apple/speech", settings: APPLE },
+  { setupId: "apple/dictation", settings: APPLE_DICTATION },
   { setupId: "mlx-parakeet/v3-greedy", settings: PARAKEET },
   { setupId: "mlx-parakeet/ultra-greedy", settings: PARAKEET },
 ]);

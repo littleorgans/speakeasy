@@ -21,6 +21,10 @@
       "pythonPath": "/absolute/path/to/any/python3",
       "runnerPath": "/absolute/path/to/apple-speech-worker"
     },
+    "apple/dictation": {
+      "pythonPath": "/absolute/path/to/any/python3",
+      "runnerPath": "/absolute/path/to/apple-speech-worker"
+    },
     "hex/unified": {
       "pythonPath": "/absolute/path/to/any/python3",
       "modelPath": "/absolute/path/to/parakeet-unified-en-0.6b-Q8_0.gguf",

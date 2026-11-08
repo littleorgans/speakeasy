@@ -128,6 +128,13 @@ test("a system managed setup takes no model path, and is ready with its runner b
     assert.equal(apple.ready, true);
     assert.equal(apple.sizeBytes, undefined, "the card says system managed instead");
     await runtime.executor.close();
+    await writeFile(runtimeFile, JSON.stringify({ python: { "apple/dictation": { pythonPath: process.execPath,
+      runnerPath: process.execPath } } }));
+    const dictationRuntime = await createSetupRuntime(runtimeFile);
+    const dictation = dictationRuntime.readiness().find((entry) => entry.setupId === "apple/dictation")!;
+    assert.equal(dictation.ready, true);
+    assert.equal(dictation.sizeBytes, undefined, "the same worker, system managed too");
+    await dictationRuntime.executor.close();
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
