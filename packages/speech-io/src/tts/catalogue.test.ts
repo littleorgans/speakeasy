@@ -28,6 +28,16 @@ test("approved catalogue binds exact browser choices and keeps legacy experiment
   for (const speed of [NaN, Infinity, 0, 0.49, 2.01]) assert.throws(() => resolveLocalOutput({ ...DEFAULT_LOCAL_OUTPUT, speed }));
 });
 
+test("only voices whose backend applies speed accept a speed other than 1", () => {
+  const paced = ["piper-kristin-medium", "kokoro-v1.0", "kokoro-mlx-bf16"];
+  for (const model of LOCAL_OUTPUT_MODELS) {
+    const config = { ...DEFAULT_LOCAL_OUTPUT, model: model.id, voice: model.defaultVoice };
+    assert.equal(resolveLocalOutput(config).speed, 1, model.id);
+    if (paced.includes(model.id)) assert.equal(resolveLocalOutput({ ...config, speed: 1.25 }).speed, 1.25, model.id);
+    else assert.throws(() => resolveLocalOutput({ ...config, speed: 1.25 }), { code: "CONFIG_UNSUPPORTED" }, model.id);
+  }
+});
+
 test("catalogue readiness reads without creating assets and publishes no source paths", async () => {
   const root = await mkdtemp(join(tmpdir(), "speak-easy-catalogue-"));
   try {
