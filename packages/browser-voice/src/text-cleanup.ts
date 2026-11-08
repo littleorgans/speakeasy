@@ -41,8 +41,8 @@ export const DEFAULT_INSTRUCTION = [
   "um paint the canoe sorry i mean the kayak -> Paint the kayak.",
   "by walrus i mean the big grey one -> By walrus, I mean the big grey one.",
 ].join("\n");
-/** Cleanup's names extend Cohere's list without changing its bias vocabulary. */
-const NAMES = [...(getSetup("cohere/transcribe").controls.namesBias as { names: readonly string[] }).names, "Hibiki"].join(", ");
+/** Cleanup's names default to Cohere's names bias list. */
+const NAMES = (getSetup("cohere/transcribe").controls.namesBias as { names: readonly string[] }).names.join(", ");
 export const MAX_EARLIER = 3;
 export const MAX_EARLIER_BYTES = 4096;
 
