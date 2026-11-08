@@ -1,7 +1,7 @@
 # Road test server
 <!-- lilo-page kind=operation schema=1 -->
 <!-- lilo-covers package.json packages/browser-voice/src/server.ts packages/browser-voice/src/server-options.ts packages/browser-voice/src/host.ts -->
-<!-- lilo-verified digest=4e57a13c4ca7fb15 commit=e4aa4d930c1f date=2026-11-03 -->
+<!-- lilo-verified digest=845abb99af9d1567 commit=f16eb2031525 date=2026-11-08 -->
 
 Up: [speak-easy system map](../index.md)
 
@@ -9,7 +9,7 @@ Up: [speak-easy system map](../index.md)
 
 ## Runtime file
 
-Worker voices and speech in models read `models/road-test-runtime.json`; `--setup-runtime <file>` or `SPEAKEASY_SETUP_RUNTIME` names another (`code:packages/browser-voice/src/server-options.ts#DEFAULT_SETUP_RUNTIME`). Without the file the server still starts and those models show "needs setup"; `packages/browser-voice/road-test-runtime.example.json` shows its shape.
+Speech in models, worker voices and text cleanup models read their locations from `models/road-test-runtime.json`; `--setup-runtime <file>` or `SPEAKEASY_SETUP_RUNTIME` names another (`code:packages/browser-voice/src/server-options.ts#DEFAULT_SETUP_RUNTIME`, `code:packages/browser-voice/src/server-options.ts#parseSetupRuntimeLocations`). Without the file the server still starts and those models show "needs setup"; `packages/browser-voice/road-test-runtime.example.json` shows its shape.
 
 ## Start
 
